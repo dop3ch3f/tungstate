@@ -1,0 +1,20 @@
+# Rust
+/target
+**/*.rs.bk
+*.pdb
+
+# Node (web client, slice 14)
+node_modules/
+crates/tungstate-web/dist/
+
+# Local state that must never be committed
+*.db
+*.db-wal
+*.db-shm
+.tungstate/
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
