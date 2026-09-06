@@ -45,7 +45,7 @@ members = ["crates/*"]
 version = "0.0.1"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/<you>/tungstate"
+repository = "https://github.com/dop3ch3f/tungstate"
 rust-version = "1.98"
 
 [workspace.dependencies]
