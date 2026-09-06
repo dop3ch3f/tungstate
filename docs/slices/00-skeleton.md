@@ -1,40 +1,45 @@
-# Slice 0: Workspace skeleton
+# Slice 0: Get a working Rust project
 
-**Runnable outcome:** `tungstate --version` prints a version. `cargo test`, `cargo clippy --all-targets -- -D warnings`, and `cargo fmt --check` are green locally and in CI on macOS, Linux, and Windows.
+**Goal:** a `tungstate` command that runs, a test suite that passes, and a linter that keeps you honest. No real features. This is the workbench you will build everything else on.
 
-**Why this slice exists:** every later slice adds a crate to this workspace and relies on the lints, test tooling, and CI being already in place. Getting them right now means no slice ever starts with "first fix the build."
+**Time:** an afternoon, most of it reading.
 
-## Concepts you will meet (new-to-Rust notes)
+## How this slice is different
 
-- **Crate vs module.** A crate is a compilation unit and a Cargo package (one `Cargo.toml`). A module is a namespace inside a crate (`mod foo;` or `foo.rs`). We split into crates for compile-time boundaries and for build parallelism, not for namespacing.
-- **Workspace.** One root `Cargo.toml` listing member crates. All members share one `Cargo.lock` and one `target/` directory, and can share dependency versions and lint settings, which is why we set those once at the root.
-- **`lib` vs `bin`.** `tungstate-api` is a library (`src/lib.rs`). `tungstate-cli` is a binary (`src/main.rs`) whose executable is named `tungstate`. Libraries hold logic and are testable; binaries are thin.
-- **Why `tungstate-api` exists on day one.** It holds the types every client and the daemon will share (versions, IDs, request and response shapes). Starting it now, even nearly empty, makes "change a type, every client fails to compile" the default behaviour from the first commit.
-- **`Result<T, E>` and `?`.** Rust has no exceptions. A function that can fail returns `Result`. The `?` operator returns early with the error if there is one. You will write `fn main() -> anyhow::Result<()>` in the CLI so `?` works at the top level.
-- **Lints as policy.** `-D warnings` turns every warning into a build failure. `unsafe_code = "forbid"` makes `unsafe` a compile error across the workspace. Both are cheap to enable now and painful to enable later.
-- **Edition 2024.** Editions are opt-in language revisions. Use the current one for a new project.
+From slice 1 onward I describe what to build and you write the code. Slice 0 is the exception. Almost all of it is project configuration, and nobody learns Rust by hand-typing a manifest file. So here I give you everything, and your job is to run it, see it work, and understand what each piece does. The "Understanding what you built" section at the end is the actual learning; do not skip it.
 
-## Layout to produce
+Every command below was run and verified. The outputs shown are real.
+
+---
+
+## Step 1: Open the project
 
 ```
-tungstate/
-  Cargo.toml                  workspace root
-  rust-toolchain.toml         pins the stable channel
-  rustfmt.toml                formatting choices (keep tiny)
-  .github/workflows/ci.yml
-  crates/
-    tungstate-api/
-      Cargo.toml
-      src/lib.rs
-    tungstate-cli/
-      Cargo.toml
-      src/main.rs
-      tests/cli.rs            end-to-end tests that run the built binary
+cd ~/Documents/Codes/Personal/tungstate
+zed .
 ```
 
-Only these two crates. Later slices add `tungstate-backend`, `tungstate-journal`, `tungstate-transfer`, and the rest as they are needed. Empty placeholder crates are noise.
+You will use Zed for editing and the terminal for running things. Zed has a built-in terminal at ctrl-` if you prefer one window.
 
-## Root `Cargo.toml` shape
+---
+
+## Step 2: Pin the Rust version
+
+Create `rust-toolchain.toml` in the project root:
+
+```toml
+[toolchain]
+channel = "stable"
+components = ["rustfmt", "clippy", "rust-analyzer", "rust-src"]
+```
+
+**What this does:** anyone who clones this repo, including CI and future you, gets the same compiler and the same tools automatically. Without it, a teammate on an older Rust hits errors you cannot reproduce.
+
+---
+
+## Step 3: Create the workspace root
+
+Create `Cargo.toml` in the project root:
 
 ```toml
 [workspace]
@@ -49,81 +54,437 @@ repository = "https://github.com/dop3ch3f/tungstate"
 rust-version = "1.98"
 
 [workspace.dependencies]
-# Runtime
-clap = { version = "4", features = ["derive"] }
-anyhow = "1"            # CLI-only error type; libraries use thiserror (slice 1)
-thiserror = "2"
+clap = { version = "4.6", features = ["derive"] }
+anyhow = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-serde = { version = "1", features = ["derive"] }
-# Test
-insta = { version = "1", features = ["yaml"] }
-proptest = "1"
-assert_cmd = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+insta = "1.48"
+proptest = "1.11"
+assert_cmd = "2.2"
+predicates = "3.1"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
-missing_debug_implementations = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
-module_name_repetitions = "allow"
-must_use_candidate = "allow"
 ```
 
-Each member crate opts in with `[lints] workspace = true` and pulls dependencies with `clap = { workspace = true }` so versions live in one place. Check crates.io for the current major versions before pinning; the numbers above are the ones expected to be current, verify them.
+**Note there is no `[package]` section.** This file is not a crate. It is a workspace: a container that holds several crates, shares one lockfile and one build directory between them, and declares dependency versions once so the crates cannot drift apart.
 
-## What `tungstate-api` contains in this slice
+---
+
+## Step 4: Create the two crates
+
+```
+cargo new --lib crates/tungstate-api
+cargo new --bin crates/tungstate-cli
+```
+
+You should see:
+
+```
+    Creating library `tungstate-api` package
+    Creating binary (application) `tungstate-cli` package
+```
+
+**What just happened, and it is smarter than you would expect.** Cargo noticed the workspace and wrote both manifests to inherit from it, so they already say `version.workspace = true` and `[lints] workspace = true`. You do not have to add the crates to the members list either, because `crates/*` is a glob that already matches them.
+
+Two crates, because:
+
+- `tungstate-api` is a **library**. It has `src/lib.rs` and produces no executable. It will hold the types the daemon and every client share.
+- `tungstate-cli` is a **binary**. It has `src/main.rs` and produces the program you run.
+
+Libraries hold logic and are easy to test. Binaries stay thin. That split is why the CLI, the TUI, and the web interface will later be able to share one definition of everything.
+
+---
+
+## Step 5: Fill in `tungstate-api`
+
+Replace `crates/tungstate-api/Cargo.toml` with:
+
+```toml
+[package]
+name = "tungstate-api"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+serde_json = { workspace = true }
+
+[lints]
+workspace = true
+```
+
+`[dependencies]` ship in the final program. `[dev-dependencies]` exist only when running tests, so your test tooling never bloats the binary you distribute.
+
+Replace `crates/tungstate-api/src/lib.rs` with:
 
 ```rust
-//! Types shared by the daemon and every client (CLI, TUI, web).
-//! Anything here is a wire contract: changing it must keep old clients working.
+//! Types shared by the tungstate daemon and every client (CLI, TUI, web).
+//!
+//! Everything here is a wire contract. Changing a type in this crate must keep
+//! older clients working, so additions are safe and removals are not.
 
-/// Version of the tungstate binary, from Cargo at build time.
+use serde::{Deserialize, Serialize};
+
+/// Version of the tungstate binary, filled in by Cargo at compile time.
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Strongly typed identifier for a governed folder.
-/// A newtype so a folder id can never be passed where a link id is expected.
-#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+/// Identifier for a governed folder.
+///
+/// A newtype rather than a bare `String` so a folder id can never be passed
+/// where a link id is expected. This costs nothing at runtime.
+#[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct FolderId(pub String);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use proptest::prelude::*;
+
+    proptest! {
+        #[test]
+        fn folder_id_round_trips_through_json(s in ".*") {
+            let original = FolderId(s);
+            let json = serde_json::to_string(&original).unwrap();
+            let parsed: FolderId = serde_json::from_str(&json).unwrap();
+            prop_assert_eq!(original, parsed);
+        }
+    }
+}
 ```
 
-That is all. The newtype pattern (`struct FolderId(String)`) is the idiom you will use for every id in the project; it costs nothing at runtime and catches argument-order bugs at compile time.
+---
 
-## What `tungstate-cli` contains in this slice
+## Step 6: Fill in `tungstate-cli`
 
-- A `clap` derive `Cli` struct with `#[command(version = tungstate_api::VERSION)]`.
-- Subcommands `folder` and `link`, each with an `add` that prints `not implemented yet` and exits non-zero. They exist so the command shape from `DESIGN.md` §8 is visible from the first build.
-- `tracing_subscriber` initialised from `RUST_LOG` so every later slice has logging without setup.
+Replace `crates/tungstate-cli/Cargo.toml` with:
 
-## Tests to write
+```toml
+[package]
+name = "tungstate-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
 
-1. `crates/tungstate-cli/tests/cli.rs`: run the binary with `--version` using `assert_cmd`, assert success and that stdout contains `tungstate_api::VERSION`.
-2. Same file: `--help` output captured and compared with an `insta` snapshot. This makes any accidental change to the command surface show up in review as a snapshot diff.
-3. `crates/tungstate-api/src/lib.rs`: a `proptest` that `FolderId` round-trips through `serde_json`. Trivial, but it proves proptest and serde are wired and shows you the shape of a property test.
+[[bin]]
+name = "tungstate"
+path = "src/main.rs"
 
-## CI (`.github/workflows/ci.yml`)
+[dependencies]
+tungstate-api = { path = "../tungstate-api" }
+clap = { workspace = true }
+anyhow = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
 
-Matrix over `ubuntu-latest`, `macos-latest`, `windows-latest`. Steps: checkout, `dtolnay/rust-toolchain@stable`, `Swatinem/rust-cache`, `cargo fmt --all --check`, `cargo clippy --all-targets --all-features -- -D warnings`, `cargo test --all-features`. Windows is in the matrix from day one because path handling bugs are cheaper to find early.
+[dev-dependencies]
+assert_cmd = { workspace = true }
+predicates = { workspace = true }
+insta = { workspace = true }
+
+[lints]
+workspace = true
+```
+
+The `[[bin]]` block is what makes the command `tungstate` rather than `tungstate-cli`. Without it the executable takes the package name.
+
+Replace `crates/tungstate-cli/src/main.rs` with:
+
+```rust
+//! The `tungstate` command line interface.
+
+use clap::{Parser, Subcommand};
+
+#[derive(Parser)]
+#[command(name = "tungstate", version = tungstate_api::VERSION, about = "Keep folders in the shape you declared.")]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
+}
+
+#[derive(Subcommand)]
+enum Command {
+    /// Manage governed folders.
+    Folder {
+        #[command(subcommand)]
+        action: FolderAction,
+    },
+    /// Manage transfer links between folders.
+    Link {
+        #[command(subcommand)]
+        action: LinkAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum FolderAction {
+    /// Start governing a folder.
+    Add {
+        /// Path to the folder to govern.
+        path: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum LinkAction {
+    /// Create a transfer link from a source to a destination.
+    Add {
+        /// Where files come from.
+        from: String,
+        /// Where files go.
+        to: String,
+    },
+}
+
+fn main() -> std::process::ExitCode {
+    tracing_subscriber::fmt()
+        .with_env_filter(
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+        )
+        .init();
+
+    let cli = Cli::parse();
+
+    // Every subcommand is a stub until its slice lands. Exit code 2 keeps
+    // "not built yet" distinguishable from a real runtime failure (1).
+    match cli.command {
+        Command::Folder { action } => match action {
+            FolderAction::Add { path } => {
+                tracing::debug!(%path, "folder add requested");
+            }
+        },
+        Command::Link { action } => match action {
+            LinkAction::Add { from, to } => {
+                tracing::debug!(%from, %to, "link add requested");
+            }
+        },
+    }
+
+    eprintln!("not implemented yet");
+    std::process::ExitCode::from(2)
+}
+```
+
+---
+
+## Step 7: Write the tests
+
+Create the folder and file `crates/tungstate-cli/tests/cli.rs`:
+
+```rust
+//! End-to-end tests that run the built `tungstate` binary.
+
+use assert_cmd::Command;
+
+fn tungstate() -> Command {
+    Command::cargo_bin("tungstate").expect("binary `tungstate` should be built by cargo test")
+}
+
+#[test]
+fn version_flag_prints_the_api_version() {
+    tungstate()
+        .arg("--version")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(tungstate_api::VERSION));
+}
+
+#[test]
+fn folder_add_is_a_stub_for_now() {
+    tungstate()
+        .args(["folder", "add", "/tmp/example"])
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("not implemented yet"));
+}
+
+#[test]
+fn help_output_is_stable() {
+    let output = tungstate().arg("--help").output().expect("help should run");
+    let help = String::from_utf8(output.stdout).expect("help output should be utf-8");
+    insta::assert_snapshot!(help);
+}
+```
+
+A file in `tests/` is an **integration test**. It compiles as a separate program that uses your crate the way a real user would. Unit tests, like the one in `lib.rs`, live inside the file they test and can see private items.
+
+---
+
+## Step 8: Build and run
+
+```
+cargo build
+```
+
+First build takes about half a minute because it compiles every dependency. Later builds are seconds.
+
+```
+cargo run --bin tungstate -- --version
+```
+
+Expect `tungstate 0.0.1`. The bare `--` separates arguments for cargo from arguments for your program.
+
+Try these too:
+
+```
+./target/debug/tungstate folder add /tmp/x     # prints "not implemented yet", exit 2
+./target/debug/tungstate --help                # the command surface
+RUST_LOG=debug ./target/debug/tungstate folder add /tmp/x   # now the tracing line appears
+```
+
+That last one is worth pausing on. The log line was always in the code, but hidden until you asked for it. That is `tracing` doing its job, and it is how you will debug every later slice.
+
+---
+
+## Step 9: The test suite, including one deliberate surprise
+
+```
+cargo test
+```
+
+**The first run fails, and that is correct.** You will see a red block about `help_output_is_stable` and a snapshot summary. Snapshot testing means "record what the output looks like now, then shout if it ever changes." On the very first run there is nothing recorded yet, so insta writes what it saw to a `.snap.new` file and fails, asking you to approve it.
+
+Read the diff. If the help text looks right, accept it:
+
+```
+INSTA_UPDATE=always cargo test
+```
+
+Then run `cargo test` again normally. You should now see:
+
+```
+test tests::folder_id_round_trips_through_json ... ok
+test version_flag_prints_the_api_version ... ok
+test folder_add_is_a_stub_for_now ... ok
+test help_output_is_stable ... ok
+```
+
+From now on, if you ever change a command name or a help string, that test fails and shows you exactly what changed. That is the point: your command line interface cannot drift without you noticing.
+
+Add this line to `.gitignore` so pending snapshots are never committed:
+
+```
+*.snap.new
+```
+
+---
+
+## Step 10: The linter
+
+```
+cargo clippy --all-targets -- -D warnings
+```
+
+Silence means success. Clippy is not a style checker, it is a Rust-idiom teacher. We turned on `pedantic`, which is stricter than most projects use, deliberately: when clippy tells you there is a better way to write something, that is free senior-engineer advice at the moment you need it. Read every suggestion rather than reflexively silencing it.
+
+```
+cargo fmt --all
+```
+
+This rewrites your files to the community standard layout. There is no formatting debate in Rust, which is a mercy. Run it before every commit.
+
+---
+
+## Step 11: Continuous integration
+
+Create `.github/workflows/ci.yml`:
+
+```yaml
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --all --check
+      - run: cargo clippy --all-targets -- -D warnings
+      - run: cargo test
+```
+
+Windows is in the matrix from day one on purpose. Tungstate is a file tool, path handling differs on Windows, and those bugs are far cheaper to find now than in slice 6.
+
+Commit and push, then watch the run on GitHub.
+
+---
+
+## Understanding what you built
+
+Come back to this after everything is green. These are the ideas you will use in every later slice.
+
+**Crates and modules.** A crate is one compilation unit with one `Cargo.toml`. A module is a namespace inside a crate. We split into crates for compile boundaries and build parallelism, not for tidiness.
+
+**`pub` means public.** Anything without it is private to its module. Rust defaults to private, so you expose deliberately.
+
+**The newtype pattern.** `struct FolderId(pub String)` wraps a string in a distinct type. At runtime it is just a string with zero overhead. At compile time it is a different type, so passing a folder id where a link id belongs will not compile. You will see this pattern constantly in good Rust, and we will add more of them as the project grows.
+
+**`derive` writes code for you.** `#[derive(Debug, Clone, Serialize)]` generates the implementations at compile time. `Debug` gives you `{:?}` printing, which is what `dbg!()` and log lines rely on. Getting `Debug` on your types early makes everything easier to inspect.
+
+**Enums carry data.** `Command::Folder { action }` is not just a tag, it holds a value. Rust enums are closer to a tagged union than to an enum in most languages, and `match` forces you to handle every case. This is the feature you will lean on hardest in slice 3, where the transfer state machine is one enum.
+
+**Exit codes are an interface.** Zero means success, one conventionally means failure, and we chose two for "not built yet." Scripts read these, so they are part of your contract just like the help text.
+
+**Property tests.** The proptest in `lib.rs` does not check one example. It generates many random strings and asserts the round trip holds for all of them. That style matters enormously for tungstate, because in slice 6 we will assert things like "applying a plan then re-planning produces no further changes" across randomly generated folder trees.
+
+---
 
 ## Acceptance criteria
 
-- [ ] `cargo build` succeeds on your Mac with zero warnings.
-- [ ] `tungstate --version` prints `tungstate 0.0.1`.
-- [ ] `tungstate folder add x` and `tungstate link add a b` print `not implemented yet` and exit with status 2.
-- [ ] `cargo test` passes, including one `insta` snapshot and one `proptest`.
-- [ ] `cargo clippy --all-targets -- -D warnings` is clean.
-- [ ] `cargo fmt --check` is clean.
-- [ ] CI is green on all three platforms.
-- [ ] No `unwrap()` outside tests. Use `?` or `expect("reason")` with a reason that says why it cannot fail.
+- [ ] `cargo build` succeeds with no warnings
+- [ ] `cargo run --bin tungstate -- --version` prints `tungstate 0.0.1`
+- [ ] `tungstate folder add x` prints `not implemented yet` and exits 2
+- [ ] `RUST_LOG=debug` reveals the tracing line
+- [ ] `cargo test` passes all four tests
+- [ ] `cargo clippy --all-targets -- -D warnings` is silent
+- [ ] `cargo fmt --all --check` is silent
+- [ ] CI is green on Linux, macOS, and Windows
+- [ ] `*.snap.new` is in `.gitignore`
+- [ ] No `unwrap()` in `src/`. Tests may use it freely.
 
-## How to hand it in
+---
 
-Push a branch and share the diff, or paste the files. I will review for idiom and structure and explain every correction. Expect comments on error handling, module layout, and clap usage; those are the habits worth forming now.
+## Deliberately break things
 
-## Questions worth asking me while you build
+You learn more from errors than from success. Try each of these, read the message, then undo it.
 
-- "Why does `?` not work in this function?" (return type)
-- "What is the difference between `String` and `&str` and why does clap want one or the other?"
-- "Why does clippy pedantic complain about X and should I fix it or allow it?"
+1. Delete `#[derive(Debug)]` from `FolderId` and run `cargo test`. Read what the compiler says about `Debug`.
+2. Change `path: String` to `path: u32` in `FolderAction::Add`, then run `tungstate folder add /tmp/x`.
+3. Change the `about` text and run `cargo test`. Watch the snapshot test catch you.
+4. Add `let x = 5;` to `main` without using it. See what clippy and the compiler say.
+
+Rust error messages are unusually good. Reading them properly is a skill, and it is most of the learning curve.
+
+---
+
+## When you are done
+
+Commit, push, and tell me. I will review and explain anything I would have done differently.
+
+Ask me anything while you work. Good questions for this slice: why `&str` and not `String`, what `#[cfg(test)]` actually does, why `main` returns `ExitCode`, and what the `?` operator will do once we start using it in slice 1.
