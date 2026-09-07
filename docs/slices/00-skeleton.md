@@ -437,6 +437,8 @@ jobs:
 
 Windows is in the matrix from day one on purpose. Tungstate is a file tool, path handling differs on Windows, and those bugs are far cheaper to find now than in slice 6.
 
+It earned its place immediately. The first CI run passed on Linux and macOS and failed on Windows, because clap builds its usage line from `argv[0]` and the binary there is `tungstate.exe`. The snapshot recorded on macOS said `Usage: tungstate` and Windows produced `Usage: tungstate.exe`. The fix is `bin_name = "tungstate"` in the `#[command(...)]` attribute, which pins the name the program calls itself regardless of what the file on disk is called. That is the right fix rather than a test workaround, because a Windows user types `tungstate` too.
+
 Commit and push, then watch the run on GitHub. Commit `Cargo.lock` too. For an application, as opposed to a library, the lockfile is part of the source: it is what makes a build today identical to a build in a year.
 
 Do not create a `src/` directory at the repo root. The root is a workspace, not a crate, so cargo would ignore anything you put there.

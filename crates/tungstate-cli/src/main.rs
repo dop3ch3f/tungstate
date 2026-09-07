@@ -3,7 +3,14 @@
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "tungstate", version = tungstate_api::VERSION, about = "Keep folders in the shape you declared.")]
+// bin_name is pinned so the usage line reads "tungstate" everywhere. Without
+// it clap takes argv[0], which is "tungstate.exe" on Windows.
+#[command(
+    name = "tungstate",
+    bin_name = "tungstate",
+    version = tungstate_api::VERSION,
+    about = "Keep folders in the shape you declared."
+)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
