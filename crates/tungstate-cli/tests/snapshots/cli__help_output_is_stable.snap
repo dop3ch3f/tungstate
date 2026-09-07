@@ -1,0 +1,16 @@
+---
+source: crates/tungstate-cli/tests/cli.rs
+expression: help
+---
+Keep folders in the shape you declared.
+
+Usage: tungstate <COMMAND>
+
+Commands:
+  folder  Manage governed folders
+  link    Manage transfer links between folders
+  help    Print this message or the help of the given subcommand(s)
+
+Options:
+  -h, --help     Print help
+  -V, --version  Print version

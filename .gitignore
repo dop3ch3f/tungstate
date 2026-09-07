@@ -11,7 +11,7 @@ crates/tungstate-web/dist/
 *.db
 *.db-wal
 *.db-shm
-.tungstate/
+/.tungstate/
 
 # Editors and OS
 .DS_Store

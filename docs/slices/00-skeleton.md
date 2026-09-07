@@ -30,10 +30,16 @@ Create `rust-toolchain.toml` in the project root:
 ```toml
 [toolchain]
 channel = "stable"
-components = ["rustfmt", "clippy", "rust-analyzer", "rust-src"]
+components = ["rustfmt", "clippy"]
 ```
 
 **What this does:** anyone who clones this repo, including CI and future you, gets the same compiler and the same tools automatically. Without it, a teammate on an older Rust hits errors you cannot reproduce.
+
+Only the two tools CI needs are listed. Editor tooling goes in your own rustup setup, not in a file CI obeys, otherwise every CI run downloads about 60 MB it never uses. Run this once on your machine:
+
+```
+rustup component add rust-analyzer rust-src
+```
 
 ---
 
@@ -55,7 +61,7 @@ rust-version = "1.98"
 
 [workspace.dependencies]
 clap = { version = "4.6", features = ["derive"] }
-anyhow = "1.0"
+anyhow = "1.0"        # unused until slice 1; declared here so versions live in one place
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0", features = ["derive"] }
@@ -187,7 +193,6 @@ path = "src/main.rs"
 [dependencies]
 tungstate-api = { path = "../tungstate-api" }
 clap = { workspace = true }
-anyhow = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
@@ -420,18 +425,21 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+      # Components come from rust-toolchain.toml, so none are listed here.
       - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+      # --locked fails the build on a stale lockfile instead of silently
+      # resolving new dependency versions nobody reviewed.
       - run: cargo fmt --all --check
-      - run: cargo clippy --all-targets -- -D warnings
-      - run: cargo test
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
 ```
 
 Windows is in the matrix from day one on purpose. Tungstate is a file tool, path handling differs on Windows, and those bugs are far cheaper to find now than in slice 6.
 
-Commit and push, then watch the run on GitHub.
+Commit and push, then watch the run on GitHub. Commit `Cargo.lock` too. For an application, as opposed to a library, the lockfile is part of the source: it is what makes a build today identical to a build in a year.
+
+Do not create a `src/` directory at the repo root. The root is a workspace, not a crate, so cargo would ignore anything you put there.
 
 ---
 
