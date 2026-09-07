@@ -17,8 +17,8 @@ The "Teaches" column below is adjusted for a Rust newcomer: ownership and borrow
 
 | # | Slice | Runnable outcome | Teaches |
 |---|---|---|---|
-| 0 | Workspace skeleton, `tungstate-api` types, CI, `cargo clippy -D warnings`, `insta` + `proptest` wired | `tungstate --version` | workspace layout, feature flags, error types (`thiserror`), `tracing` |
-| 1 | `Backend` trait + `local` impl + network-mount detection | list/stat/read/write on a temp dir with tests | ownership and borrowing, `Result` and `thiserror`, traits and `Box<dyn Trait>`, platform `cfg` |
+| 0 | [Workspace skeleton](slices/00-skeleton.md), `tungstate-api` types, CI, `cargo clippy -D warnings`, `insta` + `proptest` wired | `tungstate --version` | workspace layout, feature flags, error types (`thiserror`), `tracing` |
+| 1 | [`Backend` trait + `local` impl](slices/01-backend-trait.md) | list/stat/read/write on a temp dir with tests | ownership and borrowing, `Result` and `thiserror`, traits and `Box<dyn Trait>`, capability probing |
 | 2 | Journal crate (SQLite, WAL, write-ahead op records) + `log`/`whereis` | `tungstate log <file>` on a hand-inserted row | `rusqlite`, migrations, indexes, newtype IDs, `From` conversions |
 | 3 | Transfer engine: per-file state machine, temp name, streaming BLAKE3, three verify levels, commit, remove source | **`tungstate link add ~/Videos /Volumes/nas/inbox --drain --remove-source` works, resumable** | enums as state machines, `Read`/`Write` streaming, `std::thread`, `crossbeam-channel`, crash-recovery tests with fault injection |
 | 4 | Reachability pause/resume, ordering strategies, concurrency, bandwidth cap, progress events | close the lid, walk away, come back, it continues | `Arc`, atomics, backoff, worker pools, `Mutex` vs message passing |
@@ -41,3 +41,8 @@ Slices 0–4b are "v0.1: the drain works and I trust it, over a mount and over F
 
 **Licence and hosting (DECIDED):** `MIT OR Apache-2.0`, public GitHub repository, Rust ecosystem convention.
 
+
+
+## Scope changes made during the build
+
+- **Network-mount detection moved out of slice 1 into slice 4.** Reading `MNT_LOCAL` on macOS or `GetDriveType` on Windows means either `unsafe` FFI, which the workspace lints forbid, or a heavy dependency. It is also a poor second lesson in Rust. Nothing needs it until slice 4 picks a default verification level per link. Slice 1 instead discovers hard-link and case-sensitivity support by probing the filesystem, which is safe, portable, and more accurate than asking the operating system.
