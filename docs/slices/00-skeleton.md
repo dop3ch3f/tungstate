@@ -495,6 +495,6 @@ Rust error messages are unusually good. Reading them properly is a skill, and it
 
 ## When you are done
 
-Commit, push, and tell me. I will review and explain anything I would have done differently.
+Done and shipped. From slice 1 onward Claude implements and writes a tour of the code; see `docs/SYLLABUS.md` for the current loop.
 
 Ask me anything while you work. Good questions for this slice: why `&str` and not `String`, what `#[cfg(test)]` actually does, why `main` returns `ExitCode`, and what the `?` operator will do once we start using it in slice 1.

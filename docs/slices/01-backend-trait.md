@@ -4,7 +4,7 @@
 
 **Runnable outcome:** `cargo test` proves you can create a directory, write a file, stat it, list it, read it back, and rename it, all through a `Box<dyn Backend>`, and that a malicious path cannot escape the root.
 
-**This is your first real code.** I describe the shapes and the reasoning. You write it. Where I show code below it is to pin down an interface we both have to agree on, not to save you typing.
+**This brief is the spec.** It states what gets built and why, and the acceptance criteria it has to meet. Claude implements it; the walkthrough of the shipped code is in [01-tour.md](01-tour.md).
 
 ---
 
@@ -238,8 +238,8 @@ Do not silence this lint. Writing these sections forces you to enumerate how eac
 
 ---
 
-## What I want to see in review
+## What to check in review
 
-Push a branch and I will look at: whether `resolve` is airtight, whether your `# Errors` docs describe real failure modes rather than restating the type, whether the io errors carry enough context to debug a 4000-file drain, and whether any test would behave differently on Linux.
+Read [01-tour.md](01-tour.md) alongside the diff. The things worth your scrutiny: whether `resolve` is airtight, whether the `# Errors` docs describe real failure modes rather than restating the type, whether the io errors carry enough context to debug a 4000-file drain, and whether any test would behave differently on Linux than on your Mac.
 
 Ask questions freely. Good ones for this slice: when to use `&Path` versus `PathBuf`, why `Box<dyn Trait>` needs the `dyn`, what `Send` and `Sync` actually promise, and how `?` interacts with `map_err`.

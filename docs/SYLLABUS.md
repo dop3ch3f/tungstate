@@ -2,23 +2,27 @@
 
 Extracted from `DESIGN.md` §11. Each slice gets its own brief under `docs/slices/`.
 
-## 11. Build order (a syllabus, since the user is building it)
+## 11. Build order
 
 Each slice is small enough to finish in days, ends in something runnable, and teaches one or two Rust concepts. **DECIDED: drain first.** The user is new to Rust, so slices 0–9 are entirely synchronous; `tokio` first appears in slice 10.
 
-### How a slice runs (the teaching loop)
-1. Claude writes a **slice brief**: goal, the runnable outcome, the Rust concepts involved with a short explanation of each, the crates to pull in and why those, the module and type shape suggested, acceptance criteria, and the tests that must pass.
-2. The user builds it and shares the diff or pushes a branch.
-3. Claude reviews for correctness, idiom, and design, explaining every correction (what a senior Rust engineer would do, and why). Corrections are suggestions unless they are bugs.
-4. Repeat until acceptance criteria pass, then the next brief.
-Claude takes over a slice only when the user names it explicitly.
+### How a slice runs (changed 2026-09-09)
+
+Originally the user wrote the code and Claude reviewed. Writing Rust as a newcomer proved to be the slow step, and the user is shipping a product, so that step moved to Claude. Everything the user is fast at stayed with them.
+
+1. Claude writes a **slice brief**: goal, runnable outcome, the design decisions and their alternatives, acceptance criteria, and the tests that must pass. The brief is the spec.
+2. Claude implements it, and does not stop until `build`, `test`, `clippy -D warnings`, `fmt --check` and CI on all three platforms are green.
+3. Claude writes a **tour** at `docs/slices/NN-tour.md` walking the shipped code and explaining each Rust concept where it appears. Source comments stay short and load-bearing; the teaching lives in the tour.
+4. The user reads the tour and the diff, then says go. Claude stops after every slice.
+
+Claude still asks before choosing on anything non-obvious. No silent design calls.
 
 The "Teaches" column below is adjusted for a Rust newcomer: ownership and borrowing in slice 1, `Result` and error design in slice 1–2, traits and trait objects in slice 1, enums as state machines in slice 3, threads and channels in slice 3–4, lifetimes when the parser needs them in slice 5.
 
 | # | Slice | Runnable outcome | Teaches |
 |---|---|---|---|
 | 0 | [Workspace skeleton](slices/00-skeleton.md), `tungstate-api` types, CI, `cargo clippy -D warnings`, `insta` + `proptest` wired | `tungstate --version` | workspace layout, feature flags, error types (`thiserror`), `tracing` |
-| 1 | [`Backend` trait + `local` impl](slices/01-backend-trait.md) | list/stat/read/write on a temp dir with tests | ownership and borrowing, `Result` and `thiserror`, traits and `Box<dyn Trait>`, capability probing |
+| 1 | [`Backend` trait + `local` impl](slices/01-backend-trait.md) — [tour](slices/01-tour.md) | list/stat/read/write on a temp dir with tests | ownership and borrowing, `Result` and `thiserror`, traits and `Box<dyn Trait>`, capability probing |
 | 2 | Journal crate (SQLite, WAL, write-ahead op records) + `log`/`whereis` | `tungstate log <file>` on a hand-inserted row | `rusqlite`, migrations, indexes, newtype IDs, `From` conversions |
 | 3 | Transfer engine: per-file state machine, temp name, streaming BLAKE3, three verify levels, commit, remove source | **`tungstate link add ~/Videos /Volumes/nas/inbox --drain --remove-source` works, resumable** | enums as state machines, `Read`/`Write` streaming, `std::thread`, `crossbeam-channel`, crash-recovery tests with fault injection |
 | 4 | Reachability pause/resume, ordering strategies, concurrency, bandwidth cap, progress events | close the lid, walk away, come back, it continues | `Arc`, atomics, backoff, worker pools, `Mutex` vs message passing |
