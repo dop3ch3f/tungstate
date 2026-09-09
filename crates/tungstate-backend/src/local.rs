@@ -29,15 +29,18 @@ fn probe_name(kind: &str) -> String {
 /// Uses component inspection rather than `canonicalize`, which requires the file
 /// to already exist and so cannot validate the path of a file about to be created.
 fn resolve(root: &Path, path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        return Err(BackendError::PathNotRelative(path.to_path_buf()));
-    }
+    // Deliberately no `is_absolute()` check: on Windows `/etc/passwd` reports
+    // false, having no drive prefix, yet `join` still discards the root and
+    // yields `C:\etc\passwd`. Inspecting components catches both platforms with
+    // one rule. Matching exhaustively also means a future Component variant
+    // becomes a compile error rather than a silent hole.
     for component in path.components() {
         match component {
             Component::Normal(_) | Component::CurDir => {}
-            // Matching exhaustively rather than testing for `..` means a future
-            // Component variant becomes a compile error, not a silent hole.
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(BackendError::PathNotRelative(path.to_path_buf()));
+            }
+            Component::ParentDir => {
                 return Err(BackendError::PathEscapesRoot(path.to_path_buf()));
             }
         }
@@ -216,10 +219,42 @@ mod tests {
             );
         }
 
-        assert!(matches!(
-            resolve(root, Path::new("/etc/passwd")),
-            Err(BackendError::PathNotRelative(_))
-        ));
+        for rooted in ["/etc/passwd", "/"] {
+            assert!(
+                matches!(
+                    resolve(root, Path::new(rooted)),
+                    Err(BackendError::PathNotRelative(_))
+                ),
+                "`{rooted}` should have been rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn no_accepted_path_can_land_outside_the_root() {
+        // The property that actually matters, asserted directly rather than via
+        // an error variant. Windows CI caught the earlier version of this: a
+        // leading `/` is not `is_absolute()` there, but join still escaped.
+        let root = Path::new("/tmp/example-root");
+
+        for candidate in [
+            "a/b.txt",
+            "./a",
+            "",
+            "..",
+            "/",
+            "/etc/passwd",
+            "a/../../b",
+            "C:/windows",
+        ] {
+            if let Ok(resolved) = resolve(root, Path::new(candidate)) {
+                assert!(
+                    resolved.starts_with(root),
+                    "`{candidate}` resolved to `{}`, outside the root",
+                    resolved.display()
+                );
+            }
+        }
     }
 
     #[test]

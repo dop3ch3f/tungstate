@@ -125,6 +125,20 @@ Every `Backend` method funnels through it, so a path that escapes the root canno
 
 **Why `match` instead of checking for `..`.** A `match` over an enum must handle every variant or the code does not compile. If a future Rust release adds a `Component` variant, this becomes a build error rather than a silently open door. Writing `if component == ParentDir` would have compiled fine and quietly let the new variant through. Reach for exhaustive `match` whenever missing a case is dangerous.
 
+**That paid off within the hour, and it is the best thing in this slice.** The first version also had an `is_absolute()` check at the top. Windows CI failed on `/etc/passwd`. The reason is genuinely surprising:
+
+On Windows, a path is only absolute if it has a drive prefix like `C:\`. A bare leading `/` is *root-relative*, so `Path::new("/etc/passwd").is_absolute()` returns **false** there. But `Path::join` does not care about `is_absolute()`. Its documented behaviour is that a path with a root but no prefix replaces everything except the prefix. So on Windows:
+
+```
+Path::new("C:\\governed-folder").join("/etc/passwd")  ==  "C:\\etc\\passwd"
+```
+
+The root is silently discarded. Had the code trusted `is_absolute()` alone, a caller passing `/etc/passwd` would have escaped the governed folder entirely on Windows, and passed every test on macOS and Linux. That is a real vulnerability, in the exact function whose job is to prevent it.
+
+The exhaustive `match` caught it, because `RootDir` was already a component the code had to handle. The only thing actually wrong was which error it returned. The fix removed the `is_absolute()` check entirely, since inspecting components covers every platform with one rule, and split the variants so a rooted path reports `PathNotRelative` and a climbing path reports `PathEscapesRoot`.
+
+Two lessons worth carrying: cross-platform assumptions about paths are usually wrong, and a test that asserts the *property* rather than the error message would have been clearer from the start. There is now a test doing exactly that, checking that no accepted path resolves outside the root, whatever the error type says.
+
 **Why not `canonicalize`.** The obvious approach is to resolve the real path and check it starts with the root. It fails for our purposes, because `canonicalize` requires the file to already exist, and half our calls are for files about to be created. Component inspection works on paths that do not exist yet.
 
 **Related, in `stat`:** the code calls `symlink_metadata`, not `metadata`. The difference is that `metadata` follows symlinks. A link inside the folder pointing at `/etc` would otherwise let a caller read straight through the boundary that `resolve` just enforced. Describing links rather than following them keeps that shut.
