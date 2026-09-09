@@ -13,6 +13,9 @@ rust-version = "1.98"
 clap = { version = "4.6", features = ["derive"] }
 anyhow = "1.0"
 thiserror = "2.0"
+# bundled compiles SQLite from source: no system library, identical on all three platforms
+rusqlite = { version = "0.40", features = ["bundled"] }
+directories = "6"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 serde = { version = "1.0", features = ["derive"] }

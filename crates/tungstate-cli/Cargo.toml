@@ -12,6 +12,7 @@ path = "src/main.rs"
 
 [dependencies]
 tungstate-api = { path = "../tungstate-api" }
+tungstate-journal = { path = "../tungstate-journal" }
 clap = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
