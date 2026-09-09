@@ -1,28 +1,21 @@
 [package]
-name = "tungstate-cli"
+name = "tungstate-transfer"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
-[[bin]]
-name = "tungstate"
-path = "src/main.rs"
-
 [dependencies]
-tungstate-api = { path = "../tungstate-api" }
 tungstate-backend = { path = "../tungstate-backend" }
 tungstate-journal = { path = "../tungstate-journal" }
-tungstate-transfer = { path = "../tungstate-transfer" }
-clap = { workspace = true }
+blake3 = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
-tracing-subscriber = { workspace = true }
+trash = { workspace = true }
 
 [dev-dependencies]
-assert_cmd = { workspace = true }
-predicates = { workspace = true }
-insta = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

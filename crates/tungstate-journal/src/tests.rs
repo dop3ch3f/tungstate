@@ -9,6 +9,7 @@ fn drain_op() -> NewOp {
         destination: Some(Location::new("/Volumes/nas/inbox", "holiday.mp4")),
         size: Some(4_200_000_000),
         link: Some("laptop-to-nas".to_string()),
+        link_id: None,
     }
 }
 
@@ -232,4 +233,106 @@ fn concurrent_writers_all_land() {
         200
     );
     assert!(journal.incomplete().unwrap().is_empty());
+}
+
+fn a_link() -> NewLink {
+    NewLink {
+        name: "laptop-to-nas".to_string(),
+        source_root: "/Users/x/Videos".into(),
+        destination_root: "/Volumes/nas/inbox".into(),
+        source_policy: SourcePolicy::Delete,
+        verify: VerifyLevel::Hash,
+        order: Order::LargestFirst,
+        on_conflict: ConflictAction::Quarantine,
+        cooldown: std::time::Duration::from_secs(30),
+    }
+}
+
+#[test]
+fn a_link_round_trips_and_is_found_by_name() {
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_link(&a_link()).unwrap();
+
+    let link = journal.link_by_name("laptop-to-nas").unwrap();
+    assert_eq!(link.id, id);
+    assert_eq!(link.source_policy, SourcePolicy::Delete);
+    assert_eq!(link.verify, VerifyLevel::Hash);
+    assert_eq!(link.order, Order::LargestFirst);
+    assert_eq!(link.on_conflict, ConflictAction::Quarantine);
+    assert_eq!(link.cooldown.as_secs(), 30);
+    assert_eq!(link.destination_root, Path::new("/Volumes/nas/inbox"));
+}
+
+#[test]
+fn link_names_are_unique() {
+    let journal = Journal::open_in_memory().unwrap();
+    journal.create_link(&a_link()).unwrap();
+
+    let again = journal.create_link(&a_link());
+    assert!(matches!(again, Err(JournalError::DuplicateLink(name)) if name == "laptop-to-nas"));
+}
+
+#[test]
+fn an_unknown_link_name_is_an_error() {
+    let journal = Journal::open_in_memory().unwrap();
+    assert!(matches!(
+        journal.link_by_name("nope"),
+        Err(JournalError::UnknownLink(_))
+    ));
+}
+
+#[test]
+fn interrupted_work_is_scoped_to_its_own_link() {
+    // A resumed drain must not pick up another link's interrupted operations.
+    let journal = Journal::open_in_memory().unwrap();
+    let mine = journal.create_link(&a_link()).unwrap();
+    let theirs = journal
+        .create_link(&NewLink {
+            name: "other".to_string(),
+            ..a_link()
+        })
+        .unwrap();
+
+    let ours = journal
+        .begin(&NewOp {
+            link_id: Some(mine),
+            ..drain_op()
+        })
+        .unwrap();
+    journal
+        .begin(&NewOp {
+            link_id: Some(theirs),
+            ..drain_op()
+        })
+        .unwrap();
+
+    let pending = journal.incomplete_for_link(mine).unwrap();
+    assert_eq!(pending.len(), 1);
+    assert_eq!(pending[0].id, ours);
+}
+
+#[test]
+fn temp_names_are_derived_from_the_operation_id() {
+    // A crashed run's leftovers must be identifiable from the journal alone.
+    let name = temp_name(Path::new("/Volumes/nas/inbox/holiday.mp4"), OpId(42));
+    assert_eq!(
+        name,
+        Path::new("/Volumes/nas/inbox/holiday.mp4.tungstate-42.part")
+    );
+}
+
+#[test]
+fn migrating_an_existing_v1_journal_preserves_its_rows() {
+    // The upgrade path a user with an existing journal will actually take.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.db");
+
+    let id = {
+        let journal = Journal::open(&path).unwrap();
+        journal.begin(&drain_op()).unwrap()
+    };
+
+    let upgraded = Journal::open(&path).unwrap();
+    assert_eq!(upgraded.incomplete().unwrap()[0].id, id);
+    assert!(upgraded.links().unwrap().is_empty());
 }

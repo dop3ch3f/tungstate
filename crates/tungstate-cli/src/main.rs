@@ -3,7 +3,16 @@
 use std::path::{Path, PathBuf};
 
 use clap::{Parser, Subcommand};
-use tungstate_journal::{Journal, Locator, Op, OpStatus};
+use std::time::Duration;
+
+use tungstate_backend::local::LocalBackend;
+use tungstate_journal::{
+    ConflictAction, Journal, Locator, Op, OpStatus, Order, SourcePolicy, VerifyLevel,
+};
+use tungstate_transfer::{
+    ConflictResolver, FileOutcome, FixedResolver, InteractiveResolver, Progress, SkipReason,
+    Transfer,
+};
 
 #[derive(Parser)]
 // bin_name is pinned so the usage line reads "tungstate" everywhere. Without
@@ -57,9 +66,46 @@ enum LinkAction {
     /// Create a transfer link from a source to a destination.
     Add {
         /// Where files come from.
-        from: String,
+        from: PathBuf,
         /// Where files go.
-        to: String,
+        to: PathBuf,
+        /// What this link is called on the command line.
+        #[arg(long)]
+        name: String,
+        /// Delete each original once its copy is verified. Reclaims space.
+        #[arg(long, conflicts_with = "copy")]
+        r#move: bool,
+        /// With --move, send originals to the trash instead of deleting them.
+        #[arg(long, requires = "move")]
+        trash: bool,
+        /// Leave every original in place; the link becomes a verified mirror.
+        #[arg(long)]
+        copy: bool,
+        /// How thoroughly to check each copy.
+        #[arg(long, default_value = "hash")]
+        verify: String,
+        /// The order files are taken in.
+        #[arg(long, default_value = "largest-first")]
+        order: String,
+        /// What an unattended run does with a conflicting file.
+        #[arg(long, default_value = "quarantine")]
+        on_conflict: String,
+        /// Seconds a file must have been untouched before it is moved.
+        #[arg(long, default_value_t = 30)]
+        cooldown: u64,
+    },
+    /// List configured links.
+    List,
+    /// Run a link, resuming anything a previous run left unfinished.
+    Run {
+        /// The link name.
+        name: String,
+        /// Do not prompt on conflicts; use the link's configured action.
+        #[arg(long)]
+        yes: bool,
+        /// Override the conflict action for this run.
+        #[arg(long)]
+        on_conflict: Option<String>,
     },
 }
 
@@ -79,11 +125,7 @@ fn main() -> std::process::ExitCode {
                 tracing::debug!(%path, "folder add requested");
             }
         },
-        Command::Link { action } => match action {
-            LinkAction::Add { from, to } => {
-                tracing::debug!(%from, %to, "link add requested");
-            }
-        },
+        Command::Link { action } => return link(action),
 
         Command::Log { path } => return report(|journal| journal.history(&path)),
         Command::Whereis { target } => {
@@ -168,4 +210,241 @@ fn render(op: &Op) -> String {
         .map(|n| format!(" ({n})"))
         .unwrap_or_default();
     format!("{:>4} {status:<11} {movement}{note}", op.id.0)
+}
+
+/// Handle the `link` subcommands.
+fn link(action: LinkAction) -> std::process::ExitCode {
+    let journal = match Journal::open_default() {
+        Ok(journal) => journal,
+        Err(error) => return fail(&error),
+    };
+
+    match action {
+        LinkAction::Add {
+            from,
+            to,
+            name,
+            r#move,
+            trash,
+            copy,
+            verify,
+            order,
+            on_conflict,
+            cooldown,
+        } => {
+            // No default. Guessing either fails to reclaim space or deletes
+            // something the user wanted kept, so make them say which.
+            let policy = match (r#move, trash, copy) {
+                (true, false, false) => SourcePolicy::Delete,
+                (true, true, false) => SourcePolicy::Trash,
+                (false, false, true) => SourcePolicy::Keep,
+                _ => {
+                    eprintln!(
+                        "error: choose exactly one of --move, --move --trash, or --copy\n  \
+                         --move        delete each original once verified (reclaims space)\n  \
+                         --move --trash send originals to the trash instead\n  \
+                         --copy        leave originals alone"
+                    );
+                    return std::process::ExitCode::from(2);
+                }
+            };
+
+            let Some(verify) = VerifyLevel::parse(&verify) else {
+                eprintln!("error: --verify must be size, hash, or readback");
+                return std::process::ExitCode::from(2);
+            };
+            let Some(order) = Order::parse(&order) else {
+                eprintln!(
+                    "error: --order must be largest-first, smallest-first, oldest-first, or discovered"
+                );
+                return std::process::ExitCode::from(2);
+            };
+            let Some(on_conflict) = ConflictAction::parse(&on_conflict) else {
+                eprintln!("error: --on-conflict must be rename, skip, replace, or quarantine");
+                return std::process::ExitCode::from(2);
+            };
+
+            let created = journal.create_link(&tungstate_journal::NewLink {
+                name: name.clone(),
+                source_root: from,
+                destination_root: to,
+                source_policy: policy,
+                verify,
+                order,
+                on_conflict,
+                cooldown: Duration::from_secs(cooldown),
+            });
+
+            match created {
+                Ok(_) => {
+                    println!("created link `{name}`");
+                    if verify != VerifyLevel::Readback && policy == SourcePolicy::Delete {
+                        println!(
+                            "note: verification is `{}`. Use --verify readback for the strongest \
+                             check, at the cost of reading every file back.",
+                            verify.as_str()
+                        );
+                    }
+                    println!("run it with: tungstate link run {name}");
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(error) => fail(&error),
+            }
+        }
+
+        LinkAction::List => match journal.links() {
+            Ok(links) if links.is_empty() => {
+                println!("no links configured");
+                std::process::ExitCode::SUCCESS
+            }
+            Ok(links) => {
+                for link in &links {
+                    println!(
+                        "{}  {} -> {}  [{}, verify={}, {}]",
+                        link.name,
+                        link.source_root.display(),
+                        link.destination_root.display(),
+                        link.source_policy.as_str(),
+                        link.verify.as_str(),
+                        link.order.as_str(),
+                    );
+                }
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(&error),
+        },
+
+        LinkAction::Run {
+            name,
+            yes,
+            on_conflict,
+        } => run_link(&journal, &name, yes, on_conflict.as_deref()),
+    }
+}
+
+fn run_link(
+    journal: &Journal,
+    name: &str,
+    yes: bool,
+    on_conflict: Option<&str>,
+) -> std::process::ExitCode {
+    let link = match journal.link_by_name(name) {
+        Ok(link) => link,
+        Err(error) => return fail(&error),
+    };
+
+    let unattended = match on_conflict.map(ConflictAction::parse) {
+        // No override given: use whatever the link was configured with.
+        None => link.on_conflict,
+        Some(Some(action)) => action,
+        Some(None) => {
+            eprintln!("error: --on-conflict must be rename, skip, replace, or quarantine");
+            return std::process::ExitCode::from(2);
+        }
+    };
+
+    let source = LocalBackend::new(link.source_root.clone());
+    let destination = LocalBackend::new(link.destination_root.clone());
+
+    // Prompt only when there is actually someone there. A backgrounded or piped
+    // run falls back to the link's configured action so the drain never stalls
+    // waiting for an answer nobody is going to give.
+    let interactive =
+        !yes && on_conflict.is_none() && std::io::IsTerminal::is_terminal(&std::io::stdin());
+    let mut prompting;
+    let mut fixed;
+    let resolver: &mut dyn ConflictResolver = if interactive {
+        prompting = InteractiveResolver::new(
+            std::io::BufReader::new(std::io::stdin()),
+            std::io::stderr(),
+            unattended,
+        );
+        &mut prompting
+    } else {
+        fixed = FixedResolver(unattended);
+        &mut fixed
+    };
+
+    let mut progress = CliProgress;
+    let outcome = Transfer::new(
+        &link,
+        &source,
+        &destination,
+        journal,
+        resolver,
+        &mut progress,
+    )
+    .run();
+
+    match outcome {
+        Ok(summary) => {
+            report_summary(&summary, &link);
+            std::process::ExitCode::SUCCESS
+        }
+        Err(error) => fail(&error),
+    }
+}
+
+fn report_summary(summary: &tungstate_transfer::Summary, link: &tungstate_journal::Link) {
+    println!(
+        "\n{} transferred ({}), {} already there, {} skipped, {} quarantined",
+        summary.transferred,
+        human_bytes(summary.bytes),
+        summary.already_present,
+        summary.skipped,
+        summary.quarantined,
+    );
+    if summary.recovered > 0 {
+        println!(
+            "{} interrupted transfer(s) were re-queued",
+            summary.recovered
+        );
+    }
+    if summary.quarantined > 0 {
+        println!(
+            "review quarantined files at {}",
+            link.destination_root
+                .join(".tungstate-quarantine")
+                .display()
+        );
+    }
+}
+
+fn human_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
+    #[allow(clippy::cast_precision_loss)]
+    let mut value = bytes as f64;
+    let mut unit = 0;
+    while value >= 1024.0 && unit < UNITS.len() - 1 {
+        value /= 1024.0;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{bytes} B")
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
+    }
+}
+
+struct CliProgress;
+
+impl Progress for CliProgress {
+    fn starting(&mut self, path: &Path, size: u64) {
+        print!("  {} ({})... ", path.display(), human_bytes(size));
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+
+    fn finished(&mut self, _path: &Path, outcome: FileOutcome) {
+        println!(
+            "{}",
+            match outcome {
+                FileOutcome::Transferred => "done",
+                FileOutcome::AlreadyPresent => "already there",
+                FileOutcome::Skipped(SkipReason::RecentlyModified) =>
+                    "skipped (written too recently; will move next run)",
+                FileOutcome::Skipped(SkipReason::Conflict) => "skipped (name taken)",
+                FileOutcome::Quarantined => "quarantined",
+            }
+        );
+    }
 }

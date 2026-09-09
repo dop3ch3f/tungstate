@@ -10,7 +10,12 @@
 //! make [`Journal::whereis`] open every database on the machine to answer one
 //! question.
 
+pub mod links;
 mod schema;
+
+pub use links::{
+    ConflictAction, Link, LinkId, NewLink, Order, SourcePolicy, VerifyLevel, temp_name,
+};
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -54,6 +59,14 @@ pub enum JournalError {
     /// The platform has no standard state directory.
     #[error("could not determine a state directory for this platform")]
     NoStateDir,
+
+    /// A link name is already taken.
+    #[error("a link named `{0}` already exists")]
+    DuplicateLink(String),
+
+    /// A caller referred to a link that does not exist.
+    #[error("no link named `{0}`")]
+    UnknownLink(String),
 
     /// A caller referred to an operation that is not in the journal.
     #[error("no operation with id {0}")]
@@ -183,6 +196,8 @@ pub struct NewOp {
     pub size: Option<u64>,
     /// Which transfer link asked for this, feeding the `{Source}` policy variable.
     pub link: Option<String>,
+    /// The link this belongs to, so a resumed drain can find its own work.
+    pub link_id: Option<links::LinkId>,
 }
 
 /// How an operation turned out.
@@ -312,8 +327,8 @@ impl Journal {
         conn.execute(
             "INSERT INTO ops (
                  kind, status, src_root, src_path, dst_root, dst_path,
-                 size, link, started_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 size, link, link_id, started_at
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 op.kind.as_str(),
                 OpStatus::Intended.as_str(),
@@ -323,6 +338,7 @@ impl Journal {
                 op.destination.as_ref().map(|l| path_str(&l.path)),
                 op.size.map(size_to_sql),
                 op.link,
+                op.link_id.map(|id| id.0),
                 now_millis(),
             ],
         )
@@ -436,7 +452,7 @@ impl Journal {
     /// A poisoned mutex means another thread panicked mid-write. The connection
     /// itself is still sound, and refusing every later write would turn one bug
     /// into a dead journal, so recover the guard rather than propagating.
-    fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
+    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
         self.conn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -453,7 +469,7 @@ pub fn default_path() -> Result<PathBuf> {
     Ok(dirs.data_dir().join("journal.db"))
 }
 
-fn query(context: &'static str) -> impl Fn(rusqlite::Error) -> JournalError {
+pub(crate) fn query(context: &'static str) -> impl Fn(rusqlite::Error) -> JournalError {
     move |source| JournalError::Query { context, source }
 }
 
@@ -463,7 +479,7 @@ fn query(context: &'static str) -> impl Fn(rusqlite::Error) -> JournalError {
 /// targets, usually a sign of corruption. Storing a lossy form keeps the schema
 /// simple and queryable; the alternative is a BLOB column that no human can read
 /// in a database dump. Revisit if a real filename ever trips it.
-fn path_str(path: &Path) -> String {
+pub(crate) fn path_str(path: &Path) -> String {
     path.to_string_lossy().into_owned()
 }
 
@@ -474,7 +490,7 @@ fn size_to_sql(size: u64) -> i64 {
     i64::try_from(size).unwrap_or(i64::MAX)
 }
 
-fn now_millis() -> i64 {
+pub(crate) fn now_millis() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))

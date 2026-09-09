@@ -34,6 +34,25 @@ const MIGRATIONS: &[&str] = &[
      CREATE INDEX ops_hash     ON ops (hash) WHERE hash IS NOT NULL;
      CREATE INDEX ops_status   ON ops (status) WHERE status = 'intended';
      CREATE INDEX ops_started  ON ops (started_at);",
+    // v2: transfer links. A link is user intent that has to survive a restart,
+    // so a drain interrupted by a closing lid can be resumed by name.
+    "CREATE TABLE links (
+         id             INTEGER PRIMARY KEY,
+         name           TEXT    NOT NULL UNIQUE,
+         source_root    TEXT    NOT NULL,
+         dest_root      TEXT    NOT NULL,
+         source_policy  TEXT    NOT NULL,
+         verify         TEXT    NOT NULL,
+         ordering       TEXT    NOT NULL,
+         on_conflict    TEXT    NOT NULL,
+         cooldown_secs  INTEGER NOT NULL,
+         created_at     INTEGER NOT NULL
+     );
+
+     -- Ops gain a link reference so a resumed run can find just its own
+     -- interrupted work rather than every interrupted op on the machine.
+     ALTER TABLE ops ADD COLUMN link_id INTEGER REFERENCES links (id);
+     CREATE INDEX ops_link ON ops (link_id, status);",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.
