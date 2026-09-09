@@ -48,6 +48,17 @@ fn resolve(root: &Path, path: &Path) -> Result<PathBuf> {
     Ok(root.join(path))
 }
 
+/// Whether the final path component is itself allowed to be a symlink.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Tail {
+    /// Operating on the link itself is safe: `rename`, `remove_*` and
+    /// `symlink_metadata` all act on the link rather than its target.
+    MayBeLink,
+    /// Operating on the link would read or write its target, which may be
+    /// anywhere: `open_read`, `create_write`, `read_dir`.
+    MustNotBeLink,
+}
+
 /// Build a [`BackendError::Io`] closure that tags the failure with `path`.
 fn io_at(path: &Path) -> impl FnOnce(std::io::Error) -> BackendError {
     let path = path.to_path_buf();
@@ -80,6 +91,44 @@ impl LocalBackend {
     #[must_use]
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Resolve `path`, then refuse if a symlink lies on it.
+    ///
+    /// `resolve` only inspects path text, which is not enough: a link whose
+    /// *name* is innocent can point anywhere on the disk. Every operation that
+    /// would follow such a link goes through here instead.
+    ///
+    /// One `lstat` per component, which against a transfer that then streams
+    /// gigabytes is not measurable. Checking stops at the first component that
+    /// does not exist, since nothing below it can exist either, which is what
+    /// lets `create_write` work on a new file.
+    ///
+    /// Not proof against an attacker who can swap a directory for a symlink in
+    /// the window between this check and the open. Closing that needs
+    /// `openat`-style per-component opens, which need `unsafe`, which the
+    /// workspace lints forbid. Recorded in DESIGN.md as future hardening.
+    fn guarded(&self, path: &Path, tail: Tail) -> Result<PathBuf> {
+        let full = resolve(&self.root, path)?;
+
+        let components: Vec<_> = path.components().collect();
+        let checked = match tail {
+            Tail::MustNotBeLink => components.len(),
+            Tail::MayBeLink => components.len().saturating_sub(1),
+        };
+
+        let mut cursor = self.root.clone();
+        for component in &components[..checked] {
+            cursor.push(component);
+            match std::fs::symlink_metadata(&cursor) {
+                Ok(md) if md.file_type().is_symlink() => {
+                    return Err(BackendError::SymlinkNotFollowed(cursor));
+                }
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        Ok(full)
     }
 }
 
@@ -133,7 +182,9 @@ impl Backend for LocalBackend {
     }
 
     fn stat(&self, path: &Path) -> Result<Meta> {
-        let full = resolve(&self.root, path)?;
+        // MayBeLink: symlink_metadata describes the link itself, and reporting
+        // `is_symlink: true` is the whole point of the call.
+        let full = self.guarded(path, Tail::MayBeLink)?;
         // symlink_metadata rather than metadata: a link is described, not followed,
         // so a link pointing outside the root cannot be used to read past it.
         let md = std::fs::symlink_metadata(&full).map_err(io_at(&full))?;
@@ -146,7 +197,7 @@ impl Backend for LocalBackend {
     }
 
     fn read_dir(&self, path: &Path) -> Result<Vec<Entry>> {
-        let full = resolve(&self.root, path)?;
+        let full = self.guarded(path, Tail::MustNotBeLink)?;
         let mut entries = Vec::new();
         for entry in std::fs::read_dir(&full).map_err(io_at(&full))? {
             let entry = entry.map_err(io_at(&full))?;
@@ -160,35 +211,37 @@ impl Backend for LocalBackend {
     }
 
     fn open_read(&self, path: &Path) -> Result<Box<dyn std::io::Read + Send>> {
-        let full = resolve(&self.root, path)?;
+        let full = self.guarded(path, Tail::MustNotBeLink)?;
         let file = std::fs::File::open(&full).map_err(io_at(&full))?;
         Ok(Box::new(file))
     }
 
     fn create_write(&self, path: &Path) -> Result<Box<dyn std::io::Write + Send>> {
-        let full = resolve(&self.root, path)?;
+        let full = self.guarded(path, Tail::MustNotBeLink)?;
         let file = std::fs::File::create(&full).map_err(io_at(&full))?;
         Ok(Box::new(file))
     }
 
     fn rename(&self, from: &Path, to: &Path) -> Result<()> {
-        let from_full = resolve(&self.root, from)?;
-        let to_full = resolve(&self.root, to)?;
+        // MayBeLink: rename() acts on the link, never its target.
+        let from_full = self.guarded(from, Tail::MayBeLink)?;
+        let to_full = self.guarded(to, Tail::MayBeLink)?;
         std::fs::rename(&from_full, &to_full).map_err(io_at(&from_full))
     }
 
     fn remove_file(&self, path: &Path) -> Result<()> {
-        let full = resolve(&self.root, path)?;
+        // MayBeLink: deleting a link deletes the link, so cleaning them up works.
+        let full = self.guarded(path, Tail::MayBeLink)?;
         std::fs::remove_file(&full).map_err(io_at(&full))
     }
 
     fn remove_dir(&self, path: &Path) -> Result<()> {
-        let full = resolve(&self.root, path)?;
+        let full = self.guarded(path, Tail::MayBeLink)?;
         std::fs::remove_dir(&full).map_err(io_at(&full))
     }
 
     fn create_dir_all(&self, path: &Path) -> Result<()> {
-        let full = resolve(&self.root, path)?;
+        let full = self.guarded(path, Tail::MustNotBeLink)?;
         std::fs::create_dir_all(&full).map_err(io_at(&full))
     }
 }
@@ -369,5 +422,93 @@ mod tests {
         let capabilities = backend.capabilities();
         assert!(!capabilities.hard_links);
         assert!(!capabilities.case_sensitive);
+    }
+
+    proptest::proptest! {
+        /// The invariant, over paths no hand-written list would think to try.
+        #[test]
+        fn no_generated_path_ever_resolves_outside_the_root(
+            segments in proptest::collection::vec(
+                proptest::prop_oneof![
+                    "[a-zA-Z0-9._-]{0,8}",
+                    proptest::strategy::Just("..".to_string()),
+                    proptest::strategy::Just(".".to_string()),
+                    proptest::strategy::Just(String::new()),
+                ],
+                0..8,
+            )
+        ) {
+            let root = Path::new("/tmp/example-root");
+            let candidate = segments.join("/");
+            if let Ok(resolved) = resolve(root, Path::new(&candidate)) {
+                proptest::prop_assert!(
+                    resolved.starts_with(root),
+                    "`{candidate}` resolved to `{}`", resolved.display()
+                );
+            }
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_directory_cannot_be_written_through() {
+        // The dangerous direction: writing through a link plants files outside
+        // the governed folder, or overwrites something that was already there.
+        let outside = tempfile::tempdir().expect("temp dir");
+        let (dir, backend) = backend();
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("escape")).unwrap();
+
+        assert!(matches!(
+            backend.create_write(Path::new("escape/planted.txt")),
+            Err(BackendError::SymlinkNotFollowed(_))
+        ));
+        assert!(matches!(
+            backend.read_dir(Path::new("escape")),
+            Err(BackendError::SymlinkNotFollowed(_))
+        ));
+        assert!(
+            !outside.path().join("planted.txt").exists(),
+            "a file was planted outside the root"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn links_can_still_be_inspected_and_removed() {
+        // Refusing to *follow* a link must not make links unmanageable; the
+        // drain has to be able to see one and clean it up.
+        let (dir, backend) = backend();
+        std::os::unix::fs::symlink("/etc/hosts", dir.path().join("link")).unwrap();
+
+        assert!(backend.stat(Path::new("link")).unwrap().is_symlink);
+        backend.remove_file(Path::new("link")).unwrap();
+        assert!(backend.stat(Path::new("link")).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlink_cannot_be_used_to_read_outside_the_root() {
+        // resolve() only inspects the literal path, so a link is the other way
+        // out of the root: the path stays inside while the bytes come from
+        // anywhere the link points.
+        let outside = tempfile::tempdir().expect("temp dir");
+        std::fs::write(outside.path().join("secret"), b"password").unwrap();
+
+        let (dir, backend) = backend();
+        std::os::unix::fs::symlink(outside.path().join("secret"), dir.path().join("link")).unwrap();
+
+        assert!(
+            backend.stat(Path::new("link")).unwrap().is_symlink,
+            "stat must describe the link, not what it points at"
+        );
+
+        let mut leaked = String::new();
+        let read = backend
+            .open_read(Path::new("link"))
+            .map(|mut r| r.read_to_string(&mut leaked));
+        assert!(
+            read.is_err() || leaked != "password",
+            "open_read followed a symlink out of the root and leaked `{leaked}`"
+        );
     }
 }

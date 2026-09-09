@@ -104,13 +104,13 @@ So the box is the price of runtime choice, and runtime choice is the product. On
 
 ```rust
 fn resolve(root: &Path, path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        return Err(BackendError::PathNotRelative(path.to_path_buf()));
-    }
     for component in path.components() {
         match component {
             Component::Normal(_) | Component::CurDir => {}
-            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+            Component::RootDir | Component::Prefix(_) => {
+                return Err(BackendError::PathNotRelative(path.to_path_buf()));
+            }
+            Component::ParentDir => {
                 return Err(BackendError::PathEscapesRoot(path.to_path_buf()));
             }
         }
@@ -119,9 +119,9 @@ fn resolve(root: &Path, path: &Path) -> Result<PathBuf> {
 }
 ```
 
-Everything else in this crate is plumbing. This is the security boundary of the whole product.
+Everything else in this crate is plumbing. This is half the security boundary of the whole product; the other half is `guarded()` below.
 
-Every `Backend` method funnels through it, so a path that escapes the root cannot reach `std::fs`. That is what turns "tungstate can never touch anything outside the folder it governs" from a promise in a comment into a property of the code. A tool that deletes source files after copying them has to be airtight here.
+Every `Backend` method funnels through here, so a path that escapes the root cannot reach `std::fs`. That is what turns "tungstate can never touch anything outside the folder it governs" from a promise in a comment into a property of the code. A tool that deletes source files after copying them has to be airtight here.
 
 **Why `match` instead of checking for `..`.** A `match` over an enum must handle every variant or the code does not compile. If a future Rust release adds a `Component` variant, this becomes a build error rather than a silently open door. Writing `if component == ParentDir` would have compiled fine and quietly let the new variant through. Reach for exhaustive `match` whenever missing a case is dangerous.
 
@@ -141,7 +141,31 @@ Two lessons worth carrying: cross-platform assumptions about paths are usually w
 
 **Why not `canonicalize`.** The obvious approach is to resolve the real path and check it starts with the root. It fails for our purposes, because `canonicalize` requires the file to already exist, and half our calls are for files about to be created. Component inspection works on paths that do not exist yet.
 
-**Related, in `stat`:** the code calls `symlink_metadata`, not `metadata`. The difference is that `metadata` follows symlinks. A link inside the folder pointing at `/etc` would otherwise let a caller read straight through the boundary that `resolve` just enforced. Describing links rather than following them keeps that shut.
+### The second way out, which `resolve` cannot see
+
+An earlier version of this tour claimed that calling `symlink_metadata` in `stat` closed the symlink escape. That was wrong, and writing a test for the claim is what proved it.
+
+`resolve` inspects path *text*. A symlink's name tells you nothing about where it points. So `downloads/holiday.mp4` is a perfectly innocent-looking path that `resolve` happily accepts, and if `holiday.mp4` is a link to `/etc/shadow`, then `open_read` hands you the contents of `/etc/shadow`. The path never left the root; the bytes did.
+
+`create_write` was worse. A link named `escape` pointing at another directory meant `create_write("escape/planted.txt")` would write a file outside the governed folder, or overwrite one already there.
+
+The fix is `guarded()`, which every method now calls instead of `resolve` directly. It walks the path one component at a time, `lstat`-ing each, and refuses if any of them is a symlink:
+
+```rust
+fn guarded(&self, path: &Path, tail: Tail) -> Result<PathBuf> {
+    let full = resolve(&self.root, path)?;
+    ...
+}
+```
+
+**The `Tail` enum encodes a real distinction**, not fussiness. Some syscalls follow a link and some operate on the link itself:
+
+- `open_read`, `create_write` and `read_dir` follow it, so the final component must not be a link. `Tail::MustNotBeLink`.
+- `rename`, `remove_file`, `remove_dir` and `symlink_metadata` act on the link itself. Forbidding a link there would make links impossible to inspect or clean up, and the drain needs both. `Tail::MayBeLink`. Their parent directories are still checked.
+
+Using an enum rather than a `bool` parameter is deliberate. `self.guarded(path, true)` at a call site tells the reader nothing; `Tail::MustNotBeLink` says exactly what is being asked for. Reach for a two-variant enum whenever a boolean parameter would be unreadable at the call site.
+
+**Two honest limitations, both in the code's doc comment.** This costs one `lstat` per path component, which against a transfer that then streams gigabytes is not measurable. And it is not proof against an attacker who swaps a directory for a symlink in the window between the check and the open. Closing that needs `openat`-style per-component opens, which need `unsafe`, which the workspace lints forbid. It is a real limitation and it is written down rather than glossed over.
 
 ---
 
@@ -224,6 +248,10 @@ The braces are load-bearing. They end the writer's scope, which drops it, which 
 **`probes_the_filesystem_without_leaving_anything_behind`** checks that the directory is empty afterwards. It deliberately does *not* assert what the capabilities are, because the honest answer differs between your Mac and Linux CI. A test that encodes a local assumption as a universal truth is how slice 0's Windows failure happened.
 
 **Every test calls `tempfile::tempdir()`.** Each gets its own directory, so the suite is safe to run in parallel and no test can see another's files. Never a fixed path under `/tmp`.
+
+**One test is not a test but 256 of them.** `no_generated_path_ever_resolves_outside_the_root` is a *property test*: `proptest` generates random path segments, deliberately seeded with `..`, `.` and empty strings, assembles them into paths, and asserts the invariant holds for every one. When it finds a failure it shrinks the input to the smallest case that still breaks, which usually hands you the bug directly.
+
+This matters more here than anywhere else in the codebase. A hand-written list of adversarial paths only contains the attacks you already thought of, and the Windows `is_absolute` bug is proof that the ones you did not think of are the ones that bite. Slice 6 leans on this style much harder, to assert that applying a plan and then re-planning produces no further changes, over randomly generated folder trees.
 
 ---
 

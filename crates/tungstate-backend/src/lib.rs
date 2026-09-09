@@ -26,6 +26,10 @@ pub enum BackendError {
     #[error("path `{0}` must be relative to the backend root")]
     PathNotRelative(PathBuf),
 
+    /// A symlink lay on the path, and following it could leave the root.
+    #[error("refusing to follow symlink `{0}`")]
+    SymlinkNotFollowed(PathBuf),
+
     /// An underlying I/O failure, tagged with the path that caused it.
     // The path matters: "permission denied" partway through a 4000-file drain is
     // unactionable without knowing which file refused.

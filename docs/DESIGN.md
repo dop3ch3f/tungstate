@@ -478,6 +478,8 @@ Web GUI: same screens, reachable from another machine on the LAN later (watch th
 - Files being written by another process at plan time: cooldown + pre-op re-stat.
 - Hard links already present in the tree: the index records file id; two paths with one id are one file, not a duplicate.
 - Symlinks inside the folder: policy `symlinks = "ignore" | "treat-as-file" | "follow-within-folder"`. Default `ignore`.
+  - **Implemented in slice 1 as refusal.** `LocalBackend::guarded` walks each path component and rejects if any is a symlink, because `resolve` sees only path text and a link's name reveals nothing about its target. Operations that act on the link itself (`rename`, `remove_*`, `stat`) still permit a link as the final component.
+  - **Known gap:** the check is not atomic with the open that follows, so an attacker able to swap a directory for a symlink in that window could still escape. Closing it needs `openat`-style per-component opens and therefore `unsafe`, which the workspace lints forbid. Revisit if tungstate is ever pointed at a directory writable by an untrusted party.
 - Sparse and very large files: partial hash first; full hash only when partial matches; stream, never read into memory.
 - Path length limits on Windows and on remotes (FTP servers with 255-byte limits): capability flag, planner validates generated paths and quarantines with a reason instead of failing the op.
 - Permission denied on a subtree: log, mark subtree `unreadable` in index, continue. Never abort the whole cycle for one bad directory.
