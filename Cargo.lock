@@ -4311,6 +4311,7 @@ dependencies = [
 name = "tungstate-gui"
 version = "0.0.1"
 dependencies = [
+ "directories",
  "serde",
  "serde_json",
  "tauri",

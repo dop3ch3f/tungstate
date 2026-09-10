@@ -245,6 +245,7 @@ fn a_link() -> NewLink {
         order: Order::LargestFirst,
         on_conflict: ConflictAction::Quarantine,
         cooldown: std::time::Duration::from_secs(30),
+        saved: true,
     }
 }
 

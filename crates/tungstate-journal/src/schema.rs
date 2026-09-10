@@ -53,6 +53,10 @@ const MIGRATIONS: &[&str] = &[
      -- interrupted work rather than every interrupted op on the machine.
      ALTER TABLE ops ADD COLUMN link_id INTEGER REFERENCES links (id);
      CREATE INDEX ops_link ON ops (link_id, status);",
+    // v3: a one-off transfer from the browser still needs a link row, so it
+    // gets journaling and resume for free, but it must not clutter the list of
+    // pairs the user deliberately saved.
+    "ALTER TABLE links ADD COLUMN saved INTEGER NOT NULL DEFAULT 1;",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

@@ -29,8 +29,13 @@ pub(crate) struct File {
 /// a drain that followed links would copy content from outside the folder it was
 /// pointed at.
 pub(crate) fn files(backend: &dyn Backend) -> Result<Vec<File>> {
+    files_under(backend, Path::new(""))
+}
+
+/// Every regular file beneath `root`, which is itself relative to the backend root.
+pub(crate) fn files_under(backend: &dyn Backend, root: &Path) -> Result<Vec<File>> {
     let mut found = Vec::new();
-    let mut pending = vec![PathBuf::new()];
+    let mut pending = vec![root.to_path_buf()];
 
     while let Some(directory) = pending.pop() {
         for entry in backend.read_dir(&directory)? {

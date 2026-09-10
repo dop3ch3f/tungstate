@@ -22,6 +22,7 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
+use tungstate_backend::Backend as _;
 use tungstate_backend::local::LocalBackend;
 use tungstate_journal::{
     ConflictAction, Journal, Link, Locator, NewLink, Op, OpStatus, Order, SourcePolicy, VerifyLevel,
@@ -212,9 +213,271 @@ fn create_link(form: NewLinkForm, state: State<'_, App>) -> Result<(), String> {
             order,
             on_conflict,
             cooldown: Duration::from_secs(form.cooldown_secs),
+            saved: true,
         })
         .map(|_| ())
         .map_err(describe)
+}
+
+/// One row in a browser pane.
+#[derive(Debug, Serialize)]
+struct EntryView {
+    name: String,
+    path: String,
+    is_dir: bool,
+    size: u64,
+    modified: Option<i64>,
+}
+
+/// A directory listing, with everything a pane needs to draw itself.
+#[derive(Debug, Serialize)]
+struct Listing {
+    path: String,
+    parent: Option<String>,
+    entries: Vec<EntryView>,
+}
+
+/// A shortcut offered in the location bar.
+#[derive(Debug, Serialize)]
+struct Place {
+    label: String,
+    path: String,
+}
+
+/// Where the two panes were last pointed.
+///
+/// Reopening the app in the folders you left is table stakes for a file
+/// browser, and it means a long drain can be resumed without re-navigating.
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct PaneState {
+    left: Option<String>,
+    right: Option<String>,
+}
+
+fn pane_state_path() -> Option<PathBuf> {
+    directories::ProjectDirs::from("", "", "tungstate").map(|d| d.data_dir().join("panes.json"))
+}
+
+#[tauri::command]
+fn last_panes() -> PaneState {
+    pane_state_path()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn remember_panes(panes: PaneState) {
+    // Losing this is a cosmetic annoyance, never a correctness problem, so a
+    // failure here is not worth interrupting the user for.
+    if let Some(path) = pane_state_path() {
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        if let Ok(raw) = serde_json::to_string(&panes) {
+            let _ = std::fs::write(path, raw);
+        }
+    }
+}
+
+#[tauri::command]
+fn places() -> Vec<Place> {
+    let mut places = Vec::new();
+    if let Some(home) = directories_home() {
+        for (label, sub) in [
+            ("Home", ""),
+            ("Desktop", "Desktop"),
+            ("Documents", "Documents"),
+            ("Downloads", "Downloads"),
+            ("Movies", "Movies"),
+        ] {
+            let path = if sub.is_empty() {
+                home.clone()
+            } else {
+                home.join(sub)
+            };
+            if path.is_dir() {
+                places.push(Place {
+                    label: label.to_string(),
+                    path: path.display().to_string(),
+                });
+            }
+        }
+    }
+    // Mounted volumes are where a NAS appears once Finder has connected to it.
+    #[cfg(target_os = "macos")]
+    if let Ok(volumes) = std::fs::read_dir("/Volumes") {
+        let mut mounted: Vec<_> = volumes
+            .flatten()
+            .filter(|e| e.path().is_dir())
+            // The boot volume is already reachable as /; listing it as a
+            // "volume" only invites someone to drain their own system disk.
+            .filter(|e| !std::path::Path::new("/").join(e.file_name()).exists())
+            .map(|e| Place {
+                label: e.file_name().to_string_lossy().into_owned(),
+                path: e.path().display().to_string(),
+            })
+            .collect();
+        mounted.sort_by(|a, b| a.label.cmp(&b.label));
+        places.append(&mut mounted);
+    }
+    places
+}
+
+fn directories_home() -> Option<PathBuf> {
+    directories::UserDirs::new().map(|d| d.home_dir().to_path_buf())
+}
+
+/// List a directory for one side of the browser.
+#[tauri::command]
+fn browse(path: String) -> Result<Listing, String> {
+    let root = PathBuf::from(&path);
+    // A backend rooted at the directory being shown, so the same path rules that
+    // protect a transfer also apply to browsing. Constructing one does no I/O.
+    let backend = LocalBackend::new(root.clone());
+
+    let mut entries: Vec<EntryView> = backend
+        .read_dir(std::path::Path::new(""))
+        .map_err(describe)?
+        .into_iter()
+        .filter(|entry| !entry.meta.is_symlink)
+        .map(|entry| {
+            let name = entry.path.display().to_string();
+            EntryView {
+                path: root.join(&entry.path).display().to_string(),
+                is_dir: entry.meta.is_dir,
+                size: entry.meta.len,
+                modified: entry.meta.modified.and_then(|t| {
+                    t.duration_since(std::time::UNIX_EPOCH)
+                        .ok()
+                        .and_then(|d| i64::try_from(d.as_millis()).ok())
+                }),
+                name,
+            }
+        })
+        .filter(|entry| !entry.name.starts_with('.'))
+        .collect();
+
+    // Folders first, then by name, which is what every file browser does and
+    // what the eye expects.
+    entries.sort_by(|a, b| {
+        b.is_dir
+            .cmp(&a.is_dir)
+            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
+    });
+
+    Ok(Listing {
+        parent: root.parent().map(|p| p.display().to_string()),
+        path: root.display().to_string(),
+        entries,
+    })
+}
+
+/// What the browser sends to move or copy a selection.
+#[derive(Debug, Deserialize)]
+struct TransferRequest {
+    source: String,
+    destination: String,
+    /// Names relative to `source`.
+    names: Vec<String>,
+    source_policy: String,
+    verify: String,
+    on_conflict: String,
+    /// When set, the pair is remembered and can be run again later.
+    save_as: Option<String>,
+}
+
+/// The settings a validated transfer request resolves to.
+struct Plan {
+    source: PathBuf,
+    destination: PathBuf,
+    source_policy: SourcePolicy,
+    verify: VerifyLevel,
+    on_conflict: ConflictAction,
+}
+
+/// Check a request from the window before anything touches the disk.
+///
+/// Kept separate from the command so it can be tested. The nesting check is the
+/// one that matters: draining a folder into its own subfolder would feed the
+/// walk its own output.
+fn plan_transfer(request: &TransferRequest) -> std::result::Result<Plan, String> {
+    let source_policy = SourcePolicy::parse(&request.source_policy)
+        .ok_or("choose what happens to the originals")?;
+    let verify = VerifyLevel::parse(&request.verify).ok_or("unknown verification level")?;
+    let on_conflict =
+        ConflictAction::parse(&request.on_conflict).ok_or("unknown conflict action")?;
+
+    let source = PathBuf::from(&request.source);
+    let destination = PathBuf::from(&request.destination);
+
+    if request.names.is_empty() {
+        return Err("nothing is selected".to_string());
+    }
+    if source == destination {
+        return Err("those are the same folder".to_string());
+    }
+    if destination.starts_with(&source) {
+        return Err(
+            "the destination is inside the source, which would copy into itself".to_string(),
+        );
+    }
+    if source.starts_with(&destination) {
+        return Err(
+            "the source is inside the destination, which would copy into itself".to_string(),
+        );
+    }
+
+    Ok(Plan {
+        source,
+        destination,
+        source_policy,
+        verify,
+        on_conflict,
+    })
+}
+
+#[tauri::command]
+fn start_transfer(request: TransferRequest, app: AppHandle) -> Result<String, String> {
+    let Plan {
+        source,
+        destination,
+        source_policy,
+        verify,
+        on_conflict,
+    } = plan_transfer(&request)?;
+
+    let saved = request.save_as.is_some();
+    let name = request.save_as.clone().unwrap_or_else(|| {
+        format!(
+            "browser-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_millis())
+        )
+    });
+
+    let state = app.state::<App>();
+    state
+        .journal
+        .create_link(&NewLink {
+            name: name.clone(),
+            source_root: source,
+            destination_root: destination,
+            source_policy,
+            verify,
+            order: Order::LargestFirst,
+            on_conflict,
+            // The user is looking at these files and chose them, so there is no
+            // reason to hold back something written moments ago.
+            cooldown: Duration::ZERO,
+            saved,
+        })
+        .map_err(describe)?;
+
+    let names = request.names.iter().map(PathBuf::from).collect::<Vec<_>>();
+    spawn_run(&app, &name, Some(names))?;
+    Ok(name)
 }
 
 #[tauri::command]
@@ -303,6 +566,11 @@ fn resolve_conflict(
 
 #[tauri::command]
 fn run_link(name: String, app: AppHandle) -> Result<(), String> {
+    spawn_run(&app, &name, None)
+}
+
+/// Start a run on its own thread, optionally limited to a chosen set of names.
+fn spawn_run(app: &AppHandle, name: &str, only: Option<Vec<PathBuf>>) -> Result<(), String> {
     let state = app.state::<App>();
 
     // compare_exchange rather than load-then-store: two rapid clicks on Run
@@ -316,7 +584,7 @@ fn run_link(name: String, app: AppHandle) -> Result<(), String> {
         return Err("a transfer is already running".to_string());
     }
 
-    let link = match state.journal.link_by_name(&name) {
+    let link = match state.journal.link_by_name(name) {
         Ok(link) => link,
         Err(error) => {
             state.running.store(false, Ordering::SeqCst);
@@ -338,7 +606,7 @@ fn run_link(name: String, app: AppHandle) -> Result<(), String> {
         let mut resolver = WindowResolver::new(worker.clone(), replies, link.on_conflict);
         let mut progress = EventProgress::new(worker.clone());
 
-        let outcome = Transfer::new(
+        let mut transfer = Transfer::new(
             &link,
             &source,
             &destination,
@@ -346,8 +614,12 @@ fn run_link(name: String, app: AppHandle) -> Result<(), String> {
             &mut resolver,
             &mut progress,
         )
-        .cancellable(cancel)
-        .run();
+        .cancellable(cancel);
+
+        let outcome = match &only {
+            Some(names) => transfer.run_selection(names),
+            None => transfer.run(),
+        };
 
         state.conflicts.close();
         state.running.store(false, Ordering::SeqCst);
@@ -407,6 +679,11 @@ fn main() {
             list_links,
             create_link,
             run_link,
+            browse,
+            places,
+            last_panes,
+            remember_panes,
+            start_transfer,
             cancel_run,
             resolve_conflict,
             history,
@@ -416,4 +693,66 @@ fn main() {
         ])
         .run(tauri::generate_context!())
         .expect("the window could not start");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn request(source: &str, destination: &str) -> TransferRequest {
+        TransferRequest {
+            source: source.to_string(),
+            destination: destination.to_string(),
+            names: vec!["a.mp4".to_string()],
+            source_policy: "delete".to_string(),
+            verify: "hash".to_string(),
+            on_conflict: "quarantine".to_string(),
+            save_as: None,
+        }
+    }
+
+    #[test]
+    fn an_ordinary_transfer_is_accepted() {
+        assert!(plan_transfer(&request("/tmp/from", "/tmp/to")).is_ok());
+    }
+
+    #[test]
+    fn a_folder_cannot_drain_into_itself() {
+        // Either nesting direction feeds the walk its own output.
+        for (from, to) in [
+            ("/tmp/videos", "/tmp/videos"),
+            ("/tmp/videos", "/tmp/videos/archive"),
+            ("/tmp/videos/archive", "/tmp/videos"),
+        ] {
+            assert!(
+                plan_transfer(&request(from, to)).is_err(),
+                "`{from}` -> `{to}` should have been refused"
+            );
+        }
+    }
+
+    #[test]
+    fn a_sibling_with_a_shared_prefix_is_still_fine() {
+        // starts_with on paths compares components, so `videos-old` is not
+        // inside `videos`. A naive string prefix check would refuse this.
+        assert!(plan_transfer(&request("/tmp/videos", "/tmp/videos-old")).is_ok());
+    }
+
+    #[test]
+    fn an_empty_selection_is_refused() {
+        let mut r = request("/tmp/from", "/tmp/to");
+        r.names.clear();
+        assert!(plan_transfer(&r).is_err());
+    }
+
+    #[test]
+    fn unknown_settings_are_refused_rather_than_guessed() {
+        let mut r = request("/tmp/from", "/tmp/to");
+        r.source_policy = "obliterate".to_string();
+        assert!(plan_transfer(&r).is_err());
+
+        let mut r = request("/tmp/from", "/tmp/to");
+        r.verify = "vibes".to_string();
+        assert!(plan_transfer(&r).is_err());
+    }
 }

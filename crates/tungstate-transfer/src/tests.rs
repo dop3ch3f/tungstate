@@ -43,6 +43,7 @@ impl Rig {
                 on_conflict: ConflictAction::Quarantine,
                 // Zero, or every freshly written test file would be held back.
                 cooldown: Duration::ZERO,
+                saved: true,
             })
             .unwrap();
         let link = journal.link_by_name("test-link").unwrap();
@@ -658,4 +659,57 @@ impl Progress for StopAfterFirst {
     fn finished(&mut self, _path: &Path, _outcome: FileOutcome) {
         self.flag.store(true, std::sync::atomic::Ordering::Relaxed);
     }
+}
+
+#[test]
+fn a_selection_moves_only_what_was_chosen() {
+    // What the browser's Move does: the user picked these, not the folder.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("wanted.mp4", b"chosen");
+    rig.write_source("ignored.mp4", b"not chosen");
+    rig.write_source("folder/inside.mp4", b"under a chosen folder");
+
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run_selection(&[PathBuf::from("wanted.mp4"), PathBuf::from("folder")])
+    .unwrap();
+
+    assert_eq!(summary.transferred, 2, "the file and the folder's contents");
+    assert!(rig.dest("wanted.mp4").exists());
+    assert!(rig.dest("folder/inside.mp4").exists());
+    assert!(
+        rig.src("ignored.mp4").exists(),
+        "a file that was not chosen must be untouched"
+    );
+    assert!(!rig.dest("ignored.mp4").exists());
+}
+
+#[test]
+fn an_empty_selection_does_nothing() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("a.mp4", b"x");
+
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run_selection(&[])
+    .unwrap();
+
+    assert_eq!(summary.transferred, 0);
+    assert!(rig.src("a.mp4").exists());
 }

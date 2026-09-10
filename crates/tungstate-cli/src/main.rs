@@ -273,6 +273,7 @@ fn link(action: LinkAction) -> std::process::ExitCode {
                 order,
                 on_conflict,
                 cooldown: Duration::from_secs(cooldown),
+                saved: true,
             });
 
             match created {

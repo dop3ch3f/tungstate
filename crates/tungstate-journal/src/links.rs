@@ -91,6 +91,8 @@ pub struct Link {
     pub on_conflict: ConflictAction,
     /// How recently a file may have been written and still be skipped.
     pub cooldown: Duration,
+    /// False for a one-off transfer started from the browser.
+    pub saved: bool,
 }
 
 /// The fields needed to create a link.
@@ -112,6 +114,8 @@ pub struct NewLink {
     pub on_conflict: ConflictAction,
     /// How recently a file may have been written and still be skipped.
     pub cooldown: Duration,
+    /// False for a one-off transfer started from the browser.
+    pub saved: bool,
 }
 
 macro_rules! string_enum {
@@ -160,8 +164,8 @@ impl Journal {
         conn.execute(
             "INSERT INTO links (
                  name, source_root, dest_root, source_policy, verify,
-                 ordering, on_conflict, cooldown_secs, created_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                 ordering, on_conflict, cooldown_secs, created_at, saved
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 link.name,
                 path_str(&link.source_root),
@@ -172,6 +176,7 @@ impl Journal {
                 link.on_conflict.as_str(),
                 i64::try_from(link.cooldown.as_secs()).unwrap_or(i64::MAX),
                 now_millis(),
+                i64::from(link.saved),
             ],
         )
         .map_err(|error| match error {
@@ -209,14 +214,17 @@ impl Journal {
         })
     }
 
-    /// Every configured link, in creation order.
+    /// The pairs the user deliberately saved, in creation order.
+    ///
+    /// One-off browser transfers are excluded; they exist only so an ad-hoc
+    /// move is journaled and resumable like any other.
     ///
     /// # Errors
     /// [`JournalError::Query`] if the rows cannot be read.
     pub fn links(&self) -> Result<Vec<Link>> {
         let conn = self.lock();
         let mut stmt = conn
-            .prepare("SELECT * FROM links ORDER BY id")
+            .prepare("SELECT * FROM links WHERE saved = 1 ORDER BY id")
             .map_err(query("listing links"))?;
         let links = stmt
             .query_map([], row_to_link)
@@ -258,6 +266,7 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
         cooldown: Duration::from_secs(
             u64::try_from(row.get::<_, i64>("cooldown_secs")?).unwrap_or(30),
         ),
+        saved: row.get::<_, i64>("saved")? != 0,
     })
 }
 

@@ -17,6 +17,7 @@ tauri-build = { workspace = true }
 tungstate-backend = { path = "../tungstate-backend" }
 tungstate-journal = { path = "../tungstate-journal" }
 tungstate-transfer = { path = "../tungstate-transfer" }
+directories = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tauri = { workspace = true }

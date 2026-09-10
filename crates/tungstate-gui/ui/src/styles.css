@@ -1,16 +1,21 @@
 /* Tungstate.
    Scheelite (calcium tungstate) is a dense grey mineral that fluoresces
    blue-white under UV. The interface is mineral and heavy; only what is
-   currently happening glows. */
+   live or chosen glows. Dark is the design, not a placeholder: this is a
+   tool that sits open while large transfers run. */
 
 :root {
-  --ore: #1c1f23;
-  --ore-lift: #262a2f;
-  --ore-sink: #16191c;
-  --seam: #3a4048;
-  --dust: #9aa3ad;
-  --light: #e8ecef;
+  --ore: #1b1e22;
+  --ore-lift: #23272c;
+  --ore-sink: #15181b;
+  --ore-deep: #101315;
+  --seam: #343a41;
+  --seam-soft: #2a2f35;
+  --dust: #98a2ac;
+  --dust-dim: #6d767f;
+  --light: #e9edf1;
   --fluoresce: #7fd4ff;
+  --fluoresce-dim: rgba(127, 212, 255, 0.13);
 
   --verified: #6fcf97;
   --held: #e0b44c;
@@ -19,234 +24,294 @@
   --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
-  --gap: 12px;
-  --pad: 20px;
+  --r: 6px;
+  --row: 27px;
 }
 
 * { box-sizing: border-box; }
-
 html, body, #app { height: 100%; margin: 0; }
 
 body {
   background: var(--ore);
   color: var(--light);
   font-family: var(--sans);
-  font-size: 14px;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.45;
   -webkit-font-smoothing: antialiased;
+  overflow: hidden;
 }
 
-/* Nothing here is selectable chrome; paths and hashes are. */
-button, nav { user-select: none; }
+button, .chrome { user-select: none; }
+:focus-visible { outline: 2px solid var(--fluoresce); outline-offset: 1px; }
 
-.shell { display: grid; grid-template-columns: 208px 1fr; height: 100%; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: var(--seam); border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
+::-webkit-scrollbar-thumb:hover { background: var(--dust-dim); background-clip: content-box; }
 
-.rail {
-  background: var(--ore-sink);
-  border-right: 1px solid var(--seam);
-  padding: var(--pad) 0;
+/* Frame ---------------------------------------------------------------- */
+
+.frame { display: flex; flex-direction: column; height: 100%; }
+
+.topbar {
   display: flex;
-  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 0 14px;
+  height: 44px;
+  flex: none;
+  background: var(--ore-sink);
+  border-bottom: 1px solid var(--seam);
 }
-
-.wordmark {
-  font-size: 15px;
-  font-weight: 600;
-  letter-spacing: 0.01em;
-  padding: 0 var(--pad) 22px;
-}
-/* The single flourish: the mark carries the mineral's glow. */
+.wordmark { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
 .wordmark span { color: var(--fluoresce); }
 
-.rail nav { display: flex; flex-direction: column; }
-
-.rail button {
-  appearance: none;
-  background: none;
-  border: 0;
-  border-left: 2px solid transparent;
-  color: var(--dust);
-  font: inherit;
-  text-align: left;
-  padding: 8px var(--pad);
-  cursor: pointer;
+.tabs { display: flex; gap: 2px; }
+.tabs button {
+  appearance: none; background: none; border: 0; font: inherit;
+  color: var(--dust); padding: 5px 11px; border-radius: var(--r); cursor: pointer;
 }
-.rail button:hover { color: var(--light); }
-.rail button[aria-current="true"] {
-  color: var(--light);
-  border-left-color: var(--fluoresce);
-  background: rgba(127, 212, 255, 0.06);
+.tabs button:hover { color: var(--light); background: var(--ore-lift); }
+.tabs button[aria-current="true"] { color: var(--light); background: var(--ore-lift); }
+.tabs .badge {
+  margin-left: 6px; font-size: 11px; font-family: var(--mono);
+  color: var(--fluoresce); font-variant-numeric: tabular-nums;
 }
 
-.rail .foot { margin-top: auto; padding: 0 var(--pad); color: var(--dust); font-size: 12px; }
+.topbar .spacer { margin-left: auto; }
 
-.pane { overflow-y: auto; padding: var(--pad) 28px 40px; }
+/* Buttons -------------------------------------------------------------- */
 
-.pane header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: var(--gap);
-  padding-bottom: 14px;
+.btn {
+  appearance: none; font: inherit; cursor: pointer;
+  border-radius: var(--r); padding: 5px 12px;
+  border: 1px solid var(--seam); background: var(--ore-lift); color: var(--light);
+  white-space: nowrap;
+}
+.btn:hover:not(:disabled) { border-color: var(--dust-dim); background: #2a2f35; }
+.btn:disabled { opacity: 0.38; cursor: default; }
+.btn.primary { background: var(--fluoresce); border-color: var(--fluoresce); color: #07202b; font-weight: 600; }
+.btn.primary:hover:not(:disabled) { filter: brightness(1.08); }
+.btn.quiet { background: none; border-color: transparent; color: var(--dust); }
+.btn.quiet:hover:not(:disabled) { color: var(--light); background: var(--ore-lift); }
+.btn.danger { color: var(--failed); border-color: rgba(226, 112, 95, 0.35); }
+.btn.small { padding: 3px 8px; font-size: 12px; }
+
+/* Dual pane ------------------------------------------------------------ */
+
+.browser { flex: 1; display: flex; min-height: 0; }
+
+.pane { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.pane + .pane { border-left: 1px solid var(--seam); }
+.pane.active .locbar { background: var(--ore-lift); }
+/* The active pane is the one an action reads from. Making that visible
+   prevents the classic dual-pane mistake of copying the wrong direction. */
+.pane.active .locbar::after {
+  content: ""; position: absolute; left: 0; right: 0; bottom: -1px;
+  height: 1px; background: var(--fluoresce);
+}
+
+.locbar {
+  position: relative;
+  display: flex; align-items: center; gap: 6px;
+  padding: 7px 9px; flex: none;
+  background: var(--ore-sink);
   border-bottom: 1px solid var(--seam);
-  margin-bottom: 18px;
 }
-
-h1 { font-size: 19px; font-weight: 600; margin: 0; }
-h2 { font-size: 14px; font-weight: 600; margin: 26px 0 10px; }
-
-p.lede { color: var(--dust); margin: 0 0 18px; max-width: 62ch; }
-
-/* Actions -------------------------------------------------------------- */
-
-.act {
-  appearance: none;
-  font: inherit;
-  border-radius: 5px;
-  padding: 6px 13px;
-  cursor: pointer;
-  border: 1px solid var(--seam);
-  background: var(--ore-lift);
-  color: var(--light);
+.locbar select {
+  font: inherit; font-size: 12px;
+  background: var(--ore-lift); color: var(--light);
+  border: 1px solid var(--seam); border-radius: var(--r);
+  padding: 3px 6px; max-width: 130px;
 }
-.act:hover { border-color: var(--dust); }
-.act:disabled { opacity: 0.45; cursor: not-allowed; }
-.act.primary {
-  background: var(--fluoresce);
-  border-color: var(--fluoresce);
-  color: #08202b;
-  font-weight: 600;
+.locbar .path {
+  flex: 1; min-width: 0;
+  font-family: var(--mono); font-size: 12px; color: var(--dust);
+  background: none; border: 1px solid transparent; border-radius: var(--r);
+  padding: 3px 6px;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
-.act.primary:hover { filter: brightness(1.08); }
-.act.danger { color: var(--failed); border-color: rgba(226, 112, 95, 0.4); }
+.locbar .path:hover { border-color: var(--seam); }
+.locbar .path:focus { border-color: var(--fluoresce); color: var(--light); outline: none; }
 
-:focus-visible { outline: 2px solid var(--fluoresce); outline-offset: 2px; }
+.listing { flex: 1; overflow-y: auto; min-height: 0; }
 
-/* Links ---------------------------------------------------------------- */
-
-.link-row {
-  border: 1px solid var(--seam);
-  border-radius: 6px;
-  padding: 14px 16px;
-  margin-bottom: 10px;
+.head, .row {
   display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 4px var(--gap);
+  grid-template-columns: 1fr 84px 108px;
+  gap: 10px;
+  padding: 0 12px;
   align-items: center;
 }
-.link-row .name { font-weight: 600; }
-.link-row .route { grid-column: 1; font-family: var(--mono); font-size: 12.5px; color: var(--dust); }
-.link-row .rules { grid-column: 1; font-size: 12.5px; color: var(--dust); }
-.link-row .go { grid-row: 1 / span 3; grid-column: 2; }
+.head {
+  position: sticky; top: 0; z-index: 1;
+  height: 26px;
+  background: var(--ore);
+  border-bottom: 1px solid var(--seam-soft);
+  color: var(--dust-dim); font-size: 11px;
+}
+.head .num, .row .num { text-align: right; }
+
+.row {
+  height: var(--row);
+  cursor: default;
+  border-bottom: 1px solid transparent;
+}
+.row:hover { background: var(--ore-lift); }
+.row.chosen { background: var(--fluoresce-dim); }
+.row.chosen .name { color: var(--fluoresce); }
+.row .name { display: flex; align-items: center; gap: 8px; overflow: hidden; }
+.row .label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .num { font-family: var(--mono); font-size: 12px; color: var(--dust); font-variant-numeric: tabular-nums; }
+
+/* A folder gets weight, a file gets a quiet type mark. No icon fonts. */
+.mark { flex: none; width: 15px; text-align: center; font-size: 11px; color: var(--dust-dim); }
+.row.dir .label { font-weight: 500; }
+.row.dir .mark { color: var(--dust); }
+
+.pane .empty {
+  padding: 26px 16px; color: var(--dust-dim); font-size: 12.5px;
+}
+
+/* Action bar ----------------------------------------------------------- */
+
+.actionbar {
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding: 8px 14px;
+  background: var(--ore-sink);
+  border-top: 1px solid var(--seam);
+}
+.actionbar .tally { color: var(--dust); font-size: 12px; margin-right: auto; }
+.actionbar .tally b { color: var(--light); font-weight: 600; font-variant-numeric: tabular-nums; }
 
 /* Transfer ledger ------------------------------------------------------ */
 
-.readout {
-  display: flex;
-  align-items: baseline;
-  gap: 28px;
-  padding: 4px 0 18px;
-}
+.sheet { flex: 1; overflow-y: auto; padding: 18px 22px 34px; }
+.sheet h1 { font-size: 17px; font-weight: 600; margin: 0 0 3px; }
+.sheet .sub { color: var(--dust); margin: 0 0 18px; max-width: 64ch; }
+
+.readout { display: flex; align-items: baseline; gap: 30px; margin-bottom: 16px; }
 .readout .mass {
-  font-family: var(--mono);
-  font-size: 34px;
-  font-weight: 500;
-  letter-spacing: -0.02em;
-  font-variant-numeric: tabular-nums;
+  font-family: var(--mono); font-size: 32px; font-weight: 500;
+  letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
 }
-.readout .unit { color: var(--dust); font-size: 13px; }
+.readout .unit { color: var(--dust); font-size: 12px; }
 .readout .count { color: var(--dust); font-family: var(--mono); font-variant-numeric: tabular-nums; }
 
-.ledger { width: 100%; border-collapse: collapse; font-size: 13px; }
-.ledger th {
-  text-align: left;
-  font-weight: 500;
-  color: var(--dust);
-  font-size: 12px;
-  padding: 0 10px 6px 0;
-  border-bottom: 1px solid var(--seam);
-}
-.ledger td {
-  padding: 6px 10px 6px 0;
-  border-bottom: 1px solid rgba(58, 64, 72, 0.45);
-  vertical-align: baseline;
-}
-.ledger .path { font-family: var(--mono); word-break: break-all; }
-.ledger .size { font-family: var(--mono); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--dust); }
-.ledger .state { white-space: nowrap; }
-.ledger .detail { color: var(--dust); font-size: 12px; }
+.bar { height: 3px; background: var(--seam-soft); border-radius: 2px; overflow: hidden; margin-bottom: 20px; }
+.bar div { height: 100%; background: var(--fluoresce); transition: width 0.25s ease; }
 
+.ledger { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+.ledger th {
+  text-align: left; font-weight: 500; color: var(--dust-dim); font-size: 11px;
+  padding: 0 10px 6px 0; border-bottom: 1px solid var(--seam); position: sticky; top: 0; background: var(--ore);
+}
+.ledger td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--seam-soft); vertical-align: baseline; }
+.ledger .path { font-family: var(--mono); word-break: break-all; }
+.ledger .num { font-family: var(--mono); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--dust); }
+.ledger .detail { color: var(--dust-dim); font-size: 11.5px; }
+
+.state { white-space: nowrap; }
 .state.live { color: var(--fluoresce); }
 .state.transferred, .state.ok { color: var(--verified); }
 .state.skipped, .state.quarantined { color: var(--held); }
-.state.already-present { color: var(--dust); }
-.state.failed { color: var(--failed); }
+.state.already-present { color: var(--dust-dim); }
+.state.failed, .state.interrupted { color: var(--failed); }
 
-/* The one piece of ambient motion: what is happening right now fluoresces. */
+/* The only ambient motion: what is being verified right now. */
 .state.live::before {
-  content: "";
-  display: inline-block;
-  width: 6px; height: 6px;
-  margin-right: 7px;
-  border-radius: 50%;
-  background: var(--fluoresce);
+  content: ""; display: inline-block; width: 6px; height: 6px;
+  margin-right: 7px; border-radius: 50%; background: var(--fluoresce);
   animation: glow 1.6s ease-in-out infinite;
 }
 @keyframes glow {
-  0%, 100% { opacity: 0.35; box-shadow: 0 0 0 0 rgba(127, 212, 255, 0); }
-  50%      { opacity: 1;    box-shadow: 0 0 7px 1px rgba(127, 212, 255, 0.55); }
+  0%, 100% { opacity: 0.3; box-shadow: 0 0 0 0 rgba(127, 212, 255, 0); }
+  50% { opacity: 1; box-shadow: 0 0 7px 1px rgba(127, 212, 255, 0.5); }
 }
-@media (prefers-reduced-motion: reduce) {
-  .state.live::before { animation: none; opacity: 1; }
-}
-
-/* Forms ---------------------------------------------------------------- */
-
-.field { display: grid; gap: 5px; margin-bottom: 14px; max-width: 620px; }
-.field label { font-size: 12.5px; color: var(--dust); }
-.field input, .field select {
-  font: inherit;
-  background: var(--ore-sink);
-  border: 1px solid var(--seam);
-  border-radius: 5px;
-  color: var(--light);
-  padding: 7px 10px;
-}
-.field input { font-family: var(--mono); font-size: 13px; }
-.field .hint { font-size: 12px; color: var(--dust); }
-.row { display: flex; gap: 10px; align-items: end; }
-.row .field { flex: 1; margin-bottom: 0; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); max-width: 620px; }
+@media (prefers-reduced-motion: reduce) { .state.live::before { animation: none; opacity: 1; } }
 
 /* Notices -------------------------------------------------------------- */
 
-.notice { border-radius: 5px; padding: 10px 13px; margin: 14px 0; font-size: 13px; }
-.notice.bad { background: rgba(226, 112, 95, 0.1); border: 1px solid rgba(226, 112, 95, 0.4); }
+.notice { border-radius: var(--r); padding: 9px 12px; margin: 12px 0; font-size: 12.5px; }
+.notice.bad { background: rgba(226, 112, 95, 0.09); border: 1px solid rgba(226, 112, 95, 0.35); }
 .notice.calm { background: var(--ore-lift); border: 1px solid var(--seam); color: var(--dust); }
+.notice.good { background: rgba(111, 207, 151, 0.08); border: 1px solid rgba(111, 207, 151, 0.3); }
 
-.empty { color: var(--dust); max-width: 58ch; }
-.empty strong { color: var(--light); font-weight: 600; display: block; margin-bottom: 4px; }
-
-/* Conflict dialog ------------------------------------------------------ */
+/* Modal ---------------------------------------------------------------- */
 
 .veil {
-  position: fixed; inset: 0;
-  background: rgba(10, 12, 14, 0.72);
-  display: grid; place-items: center;
-  padding: 24px;
+  position: fixed; inset: 0; z-index: 40;
+  background: rgba(8, 10, 12, 0.66);
+  display: grid; place-items: center; padding: 24px;
+  animation: fade 0.12s ease;
 }
-.dialog {
+@keyframes fade { from { opacity: 0 } to { opacity: 1 } }
+@media (prefers-reduced-motion: reduce) { .veil { animation: none } }
+
+.modal {
   background: var(--ore-lift);
   border: 1px solid var(--seam);
-  border-radius: 8px;
-  padding: 22px 24px;
-  width: min(560px, 100%);
+  border-radius: 9px;
+  width: min(620px, 100%);
+  max-height: 86vh; overflow-y: auto;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.45);
 }
-.dialog h2 { margin: 0 0 6px; font-size: 16px; }
-.dialog .subject { font-family: var(--mono); font-size: 13px; word-break: break-all; margin: 10px 0; }
-.dialog .compare { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); margin: 14px 0 18px; }
-.dialog .compare div { border: 1px solid var(--seam); border-radius: 5px; padding: 10px 12px; }
-.dialog .compare span { display: block; color: var(--dust); font-size: 12px; }
-.dialog .compare b { font-family: var(--mono); font-weight: 500; font-size: 15px; }
-.choices { display: flex; flex-wrap: wrap; gap: 8px; }
-.forall { display: flex; align-items: center; gap: 7px; margin-top: 16px; color: var(--dust); font-size: 13px; }
+.modal .cap { padding: 18px 22px 0; }
+.modal h2 { margin: 0 0 4px; font-size: 15.5px; font-weight: 600; }
+.modal .why { color: var(--dust); margin: 0; font-size: 12.5px; }
+.modal .body { padding: 16px 22px; }
+.modal .feet {
+  display: flex; gap: 8px; align-items: center;
+  padding: 14px 22px; border-top: 1px solid var(--seam);
+  position: sticky; bottom: 0; background: var(--ore-lift);
+}
+.modal .feet .spacer { margin-left: auto; }
+
+/* The route line is the thing to read first in a sync dialog. */
+.route {
+  display: grid; grid-template-columns: 1fr auto 1fr; gap: 12px; align-items: center;
+  background: var(--ore-sink); border: 1px solid var(--seam);
+  border-radius: var(--r); padding: 12px 14px; margin-bottom: 16px;
+}
+.route .end { min-width: 0; }
+.route .end span { display: block; color: var(--dust-dim); font-size: 11px; margin-bottom: 2px; }
+.route .end b {
+  display: block; font-family: var(--mono); font-size: 12px; font-weight: 400;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.route .arrow { color: var(--fluoresce); font-size: 17px; }
+
+.opt { display: grid; gap: 5px; margin-bottom: 14px; }
+.opt > label { font-size: 12px; color: var(--dust); }
+.opt select, .opt input[type="text"] {
+  font: inherit; font-size: 12.5px;
+  background: var(--ore-sink); border: 1px solid var(--seam);
+  border-radius: var(--r); color: var(--light); padding: 6px 9px;
+}
+.opt .note { font-size: 11.5px; color: var(--dust-dim); }
+.pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
+.check { display: flex; align-items: flex-start; gap: 8px; color: var(--dust); font-size: 12.5px; }
+.check input { margin-top: 2px; }
+
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin: 14px 0 4px; }
+.compare div { border: 1px solid var(--seam); border-radius: var(--r); padding: 9px 11px; }
+.compare span { display: block; color: var(--dust-dim); font-size: 11px; }
+.compare b { font-family: var(--mono); font-weight: 500; font-size: 14px; }
+.subject { font-family: var(--mono); font-size: 12.5px; word-break: break-all; margin: 10px 0 0; }
+
+/* Onboarding ----------------------------------------------------------- */
+
+.welcome {
+  flex: 1; display: grid; place-items: center; padding: 30px;
+  background:
+    radial-gradient(680px 380px at 50% 8%, rgba(127, 212, 255, 0.07), transparent 70%),
+    var(--ore);
+}
+.welcome .card { max-width: 520px; text-align: left; }
+.welcome h1 { font-size: 25px; font-weight: 600; margin: 0 0 10px; letter-spacing: -0.01em; }
+.welcome p { color: var(--dust); margin: 0 0 14px; font-size: 13.5px; }
+.welcome ol { color: var(--dust); margin: 0 0 22px; padding-left: 19px; }
+.welcome li { margin-bottom: 7px; }
+.welcome li b { color: var(--light); font-weight: 600; }
+.welcome .go { display: flex; gap: 9px; align-items: center; }

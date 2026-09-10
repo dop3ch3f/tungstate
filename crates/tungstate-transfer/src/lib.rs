@@ -219,12 +219,41 @@ impl<'a> Transfer<'a> {
     /// way that should stop the run. Per-file conflicts are resolved rather than
     /// returned.
     pub fn run(&mut self) -> Result<Summary> {
+        let files = walk::files(self.source)?;
+        self.carry(files)
+    }
+
+    /// Transfer only the named paths, relative to the source root.
+    ///
+    /// A directory in the list brings everything under it. This is what the
+    /// browser's Move and Copy use, where the user has chosen the files rather
+    /// than asking for the whole folder.
+    ///
+    /// # Errors
+    /// As [`Transfer::run`].
+    pub fn run_selection(&mut self, chosen: &[PathBuf]) -> Result<Summary> {
+        let mut files = Vec::new();
+        for path in chosen {
+            let meta = self.source.stat(path)?;
+            if meta.is_dir {
+                files.extend(walk::files_under(self.source, path)?);
+            } else if !meta.is_symlink {
+                files.push(walk::File {
+                    path: path.clone(),
+                    size: meta.len,
+                    modified: meta.modified,
+                });
+            }
+        }
+        self.carry(files)
+    }
+
+    fn carry(&mut self, mut files: Vec<walk::File>) -> Result<Summary> {
         let mut summary = Summary {
             recovered: self.recover()?,
             ..Summary::default()
         };
 
-        let mut files = walk::files(self.source)?;
         walk::sort(&mut files, self.link.order);
 
         for file in files {
