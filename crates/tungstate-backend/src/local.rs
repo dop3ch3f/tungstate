@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{Backend, BackendError, Capabilities, Entry, Meta, Result, WriteFinish};
+use crate::{Backend, BackendError, Capabilities, Entry, Meta, Result, RootToken, WriteFinish};
 
 /// Prefix for probe files, so a leftover is obviously ours and obviously junk.
 const PROBE_PREFIX: &str = ".tungstate-probe";
@@ -181,6 +181,20 @@ impl Backend for LocalBackend {
         *self.capabilities.get_or_init(|| probe(&self.root))
     }
 
+    fn root_token(&self) -> Result<RootToken> {
+        let meta = std::fs::metadata(&self.root)
+            .map_err(|_| BackendError::RootUnreachable(self.root.clone()))?;
+        if !meta.is_dir() {
+            return Err(BackendError::RootUnreachable(self.root.clone()));
+        }
+        Ok(RootToken {
+            #[cfg(unix)]
+            device: Some(std::os::unix::fs::MetadataExt::dev(&meta)),
+            #[cfg(not(unix))]
+            device: None,
+        })
+    }
+
     fn stat(&self, path: &Path) -> Result<Meta> {
         // MayBeLink: symlink_metadata describes the link itself, and reporting
         // `is_symlink: true` is the whole point of the call.
@@ -241,6 +255,10 @@ impl Backend for LocalBackend {
     }
 
     fn create_dir_all(&self, path: &Path) -> Result<()> {
+        // Without this, create_dir_all would happily recreate a vanished root
+        // and everything below it. That is how an unmounted NAS turns into an
+        // empty folder on the boot disk that a drain then fills.
+        self.root_token()?;
         let full = self.guarded(path, Tail::MustNotBeLink)?;
         std::fs::create_dir_all(&full).map_err(io_at(&full))
     }

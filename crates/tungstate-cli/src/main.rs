@@ -395,6 +395,14 @@ fn report_summary(summary: &tungstate_transfer::Summary, link: &tungstate_journa
         summary.skipped,
         summary.quarantined,
     );
+    if summary.destination_lost {
+        println!(
+            "\nSTOPPED: {} is no longer reachable, or is not the storage it was.\n\
+             Nothing further was moved and every remaining original is untouched.\n\
+             Reconnect it and run this again.",
+            link.destination_root.display()
+        );
+    }
     if summary.recovered > 0 {
         println!(
             "{} interrupted transfer(s) were re-queued",

@@ -59,6 +59,10 @@ pub enum TransferError {
         source: std::io::Error,
     },
 
+    /// The destination went away, or became different storage, mid-run.
+    #[error("the destination is no longer reachable; nothing further was moved")]
+    DestinationLost,
+
     /// The copy completed but did not match the source.
     #[error("verification failed for `{path}`: {detail}")]
     Verification {
@@ -138,6 +142,8 @@ pub struct Summary {
     pub failures: Vec<Failure>,
     /// The run stopped early because it was asked to.
     pub cancelled: bool,
+    /// The run stopped because the destination stopped being the destination.
+    pub destination_lost: bool,
 }
 
 /// Told about each file as it is dealt with, so a caller can show progress.
@@ -249,6 +255,10 @@ impl<'a> Transfer<'a> {
     }
 
     fn carry(&mut self, mut files: Vec<walk::File>) -> Result<Summary> {
+        // Pin what the destination is before anything moves, so a volume
+        // swapped underneath us is detectable rather than silently written to.
+        let anchor = self.destination.root_token()?;
+
         let mut summary = Summary {
             recovered: self.recover()?,
             ..Summary::default()
@@ -261,6 +271,18 @@ impl<'a> Transfer<'a> {
                 tracing::info!("stopping at the user's request");
                 summary.cancelled = true;
                 break;
+            }
+
+            // Checked per file rather than once: a NAS can drop out at any
+            // point, and every file after that would otherwise be written to
+            // whatever now sits at that path, then have its original deleted.
+            match self.destination.root_token() {
+                Ok(token) if token == anchor => {}
+                _ => {
+                    tracing::error!("destination is no longer the storage we started with");
+                    summary.destination_lost = true;
+                    break;
+                }
             }
             // One unreadable file must not abandon the other three thousand.
             // The failure is journaled, reported, and the drain carries on;
@@ -296,7 +318,10 @@ impl<'a> Transfer<'a> {
         // files still need, so a cancelled run leaves the structure alone.
         // Only prune when we were the ones emptying directories. A --copy run
         // has removed nothing, so anything empty was already empty.
-        if self.link.source_policy != SourcePolicy::Keep && !summary.cancelled {
+        if self.link.source_policy != SourcePolicy::Keep
+            && !summary.cancelled
+            && !summary.destination_lost
+        {
             summary.pruned = walk::prune_empty(self.source, Path::new(""))?;
         }
 

@@ -26,6 +26,14 @@ pub enum BackendError {
     #[error("path `{0}` must be relative to the backend root")]
     PathNotRelative(PathBuf),
 
+    /// The backend's root is gone, or is no longer the storage it was.
+    ///
+    /// The dangerous case this exists for: a network volume unmounts, its mount
+    /// point becomes an ordinary empty directory on the boot disk, and a drain
+    /// cheerfully fills the disk it was emptying while deleting the originals.
+    #[error("`{0}` is no longer reachable, or is not the storage it was")]
+    RootUnreachable(PathBuf),
+
     /// A symlink lay on the path, and following it could leave the root.
     #[error("refusing to follow symlink `{0}`")]
     SymlinkNotFollowed(PathBuf),
@@ -85,6 +93,21 @@ pub struct Capabilities {
     pub case_sensitive: bool,
 }
 
+/// A cheap identifier for a backend's root.
+///
+/// Compared before each file so a volume swapped underneath a running transfer
+/// is noticed before anything is written to the wrong disk.
+///
+/// On Unix this carries the filesystem's device id, which distinguishes a
+/// mounted NAS from the boot disk even when the mount point still exists.
+/// Windows exposes no equivalent on stable Rust, so there it degrades to a
+/// reachability check, which still catches the mount point disappearing.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RootToken {
+    /// Filesystem identity, where the platform exposes one.
+    pub device: Option<u64>,
+}
+
 /// A sink for a file being written, which must be finished explicitly.
 ///
 /// `flush` is not enough. On a local file it does nothing at all, because
@@ -110,6 +133,13 @@ pub trait WriteFinish: Write + Send {
 pub trait Backend: Send + Sync {
     /// What this storage location supports.
     fn capabilities(&self) -> Capabilities;
+
+    /// Confirm the root is reachable, and identify which storage it is.
+    ///
+    /// # Errors
+    /// [`BackendError::RootUnreachable`] if the root is missing or is not a
+    /// directory.
+    fn root_token(&self) -> Result<RootToken>;
 
     /// Read metadata for `path` without following symlinks.
     ///

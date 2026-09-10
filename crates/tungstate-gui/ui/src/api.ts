@@ -38,6 +38,7 @@ export interface Summary {
   recovered: number;
   pruned: number;
   cancelled: boolean;
+  destination_lost: boolean;
   failures: Failure[];
 }
 

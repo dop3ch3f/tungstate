@@ -133,6 +133,7 @@ struct SummaryView {
     recovered: u64,
     pruned: u64,
     cancelled: bool,
+    destination_lost: bool,
     failures: Vec<FailureView>,
 }
 
@@ -154,6 +155,7 @@ impl From<&Summary> for SummaryView {
             recovered: summary.recovered,
             pruned: summary.pruned,
             cancelled: summary.cancelled,
+            destination_lost: summary.destination_lost,
             failures: summary
                 .failures
                 .iter()

@@ -54,8 +54,15 @@ const word: Record<string, string> = {
 
       <div v-if="props.error" class="notice bad">{{ props.error }}</div>
 
+      <div v-if="props.summary?.destination_lost" class="notice bad">
+        <b>Stopped: the destination is no longer reachable.</b>
+        It may have been disconnected, or something else is now at that location.
+        Nothing further was moved and every remaining original is untouched here.
+        Reconnect it and run this again.
+      </div>
+
       <div v-if="props.summary" class="notice" :class="props.summary.failed ? 'bad' : 'good'">
-        {{ props.summary.cancelled ? "Stopped early." : "Finished." }}
+        {{ props.summary.cancelled ? "Stopped early." : props.summary.destination_lost ? "Stopped." : "Finished." }}
         {{ props.summary.transferred }} moved,
         {{ props.summary.already_present }} already there,
         {{ props.summary.skipped }} left here,

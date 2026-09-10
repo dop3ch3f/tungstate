@@ -164,6 +164,9 @@ impl Backend for CorruptingBackend {
     fn capabilities(&self) -> tungstate_backend::Capabilities {
         self.0.capabilities()
     }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        self.0.root_token()
+    }
     fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
         self.0.stat(path)
     }
@@ -712,4 +715,100 @@ fn an_empty_selection_does_nothing() {
 
     assert_eq!(summary.transferred, 0);
     assert!(rig.src("a.mp4").exists());
+}
+
+/// A destination that reports different storage after the first file, which is
+/// what an unmounting NAS looks like from here.
+#[derive(Debug)]
+struct VanishingBackend {
+    inner: LocalBackend,
+    calls: std::sync::atomic::AtomicU64,
+}
+
+impl Backend for VanishingBackend {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.inner.capabilities()
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        let n = self
+            .calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        // First two calls are the anchor and the first file's check.
+        if n < 2 {
+            self.inner.root_token()
+        } else {
+            Ok(tungstate_backend::RootToken { device: Some(999) })
+        }
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.inner.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.inner.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.inner.open_read(path)
+    }
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
+        self.inner.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_destination_that_changes_underneath_us_stops_the_drain() {
+    // The catastrophic case: a NAS unmounts, its mount point becomes an empty
+    // folder on the boot disk, and the drain fills the disk it was emptying
+    // while deleting the originals. It must stop instead.
+    let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::Discovered);
+    for name in ["a.mp4", "b.mp4", "c.mp4", "d.mp4"] {
+        rig.write_source(name, b"irreplaceable footage");
+    }
+
+    let vanishing = VanishingBackend {
+        inner: LocalBackend::new(rig.dest_dir.path().to_path_buf()),
+        calls: std::sync::atomic::AtomicU64::new(0),
+    };
+    let summary = rig.run_over(&vanishing).unwrap();
+
+    assert!(summary.destination_lost, "the change must be noticed");
+    assert!(
+        summary.transferred <= 1,
+        "at most the file already in flight, got {}",
+        summary.transferred
+    );
+
+    let left = std::fs::read_dir(rig.source_dir.path()).unwrap().count();
+    assert!(
+        left >= 3,
+        "originals must survive when the destination is not what it was, {left} left"
+    );
+}
+
+#[test]
+fn a_missing_destination_root_is_never_recreated() {
+    // create_dir_all would otherwise rebuild a vanished mount point and write
+    // into it, which is exactly how the files end up on the wrong disk.
+    let dir = tempfile::tempdir().unwrap();
+    let gone = dir.path().join("unmounted");
+    let backend = LocalBackend::new(gone.clone());
+
+    let result = backend.create_dir_all(Path::new("2024"));
+
+    assert!(matches!(
+        result,
+        Err(tungstate_backend::BackendError::RootUnreachable(_))
+    ));
+    assert!(!gone.exists(), "the root must not have been conjured up");
 }
