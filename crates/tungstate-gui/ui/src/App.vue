@@ -5,7 +5,7 @@ import SyncModal, { type Payload } from "./components/SyncModal.vue";
 import TransfersView, { type Row } from "./components/TransfersView.vue";
 import ActivityView from "./components/ActivityView.vue";
 import Welcome from "./components/Welcome.vue";
-import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link } from "./api";
+import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg } from "./api";
 
 type Tab = "browse" | "transfers" | "activity";
 
@@ -26,18 +26,34 @@ const picked = ref<{ left: string[]; right: string[] }>({ left: [], right: [] })
 const pickedBytes = ref<{ left: number; right: number }>({ left: 0, right: 0 });
 const paths = ref<{ left: string; right: string }>({ left: "", right: "" });
 
-const source = computed<"left" | "right">(() => {
-  const here = picked.value[activeSide.value].length;
-  const other = activeSide.value === "left" ? picked.value.right.length : picked.value.left.length;
-  // Selecting on one side and clicking into the other should not silently flip
-  // the direction, so only fall through when the active pane has nothing.
-  if (here === 0 && other > 0) return activeSide.value === "left" ? "right" : "left";
-  return activeSide.value;
+// The ticks decide the direction, not which pane happens to be focused. Both
+// sides ticked means an exchange: each side's selection goes to the other.
+const mode = computed<"none" | "right" | "left" | "exchange">(() => {
+  const l = picked.value.left.length;
+  const r = picked.value.right.length;
+  if (l && r) return "exchange";
+  if (l) return "right";
+  if (r) return "left";
+  return "none";
 });
-const target = computed<"left" | "right">(() => (source.value === "left" ? "right" : "left"));
-const selection = computed(() => picked.value[source.value]);
-const selectionBytes = computed(() => pickedBytes.value[source.value]);
-const arrow = computed(() => (source.value === "left" ? "→" : "←"));
+
+const legs = computed<Leg[]>(() => {
+  const forward = { source: paths.value.left, destination: paths.value.right, names: picked.value.left };
+  const back = { source: paths.value.right, destination: paths.value.left, names: picked.value.right };
+  if (mode.value === "exchange") return [forward, back];
+  if (mode.value === "right") return [forward];
+  if (mode.value === "left") return [back];
+  return [];
+});
+
+const count = computed(() => picked.value.left.length + picked.value.right.length);
+const selectionBytes = computed(() => {
+  if (mode.value === "exchange") return pickedBytes.value.left + pickedBytes.value.right;
+  return mode.value === "right" ? pickedBytes.value.left : pickedBytes.value.right;
+});
+const arrow = computed(() =>
+  mode.value === "exchange" ? "⇄" : mode.value === "left" ? "←" : "→",
+);
 
 // Transfer state
 const rows = ref<Row[]>([]);
@@ -108,7 +124,7 @@ function record(side: "left" | "right", names: string[], total: number) {
 }
 
 function begin(which: "move" | "copy") {
-  if (!selection.value.length) return;
+  if (mode.value === "none") return;
   intent.value = which;
   syncing.value = true;
 }
@@ -120,12 +136,7 @@ async function go(payload: Payload) {
   runError.value = "";
   tab.value = "transfers";
   try {
-    await api.startTransfer({
-      source: paths.value[source.value],
-      destination: paths.value[target.value],
-      names: selection.value,
-      ...payload,
-    });
+    await api.startTransfer({ legs: legs.value, ...payload });
   } catch (e) { runError.value = String(e); }
 }
 
@@ -184,19 +195,24 @@ const running = computed(() => liveFile.value !== null);
 
       <footer class="actionbar chrome">
         <div class="tally">
-          <template v-if="selection.length">
-            <b>{{ selection.length }}</b> selected · {{ bytes(selectionBytes) }}
+          <template v-if="mode === 'exchange'">
+            <b>{{ picked.left.length }}</b> left and <b>{{ picked.right.length }}</b> right
+            · {{ bytes(selectionBytes) }}
+            <div class="route-line">each side goes to the other</div>
+          </template>
+          <template v-else-if="mode !== 'none'">
+            <b>{{ count }}</b> selected · {{ bytes(selectionBytes) }}
             <div class="route-line">
-              <b>{{ paths[source] }}</b> {{ arrow }} <b>{{ paths[target] }}</b>
+              <b>{{ legs[0].source }}</b> {{ arrow }} <b>{{ legs[0].destination }}</b>
             </div>
           </template>
           <template v-else>Tick files on either side, then move or copy them across.</template>
         </div>
-        <button class="btn" :disabled="!selection.length || running" @click="begin('copy')">
-          {{ arrow === "→" ? `Copy ${arrow}` : `${arrow} Copy` }}
+        <button class="btn" :disabled="mode === 'none' || running" @click="begin('copy')">
+          {{ mode === "left" ? `${arrow} Copy` : `Copy ${arrow}` }}
         </button>
-        <button class="btn primary" :disabled="!selection.length || running" @click="begin('move')">
-          {{ arrow === "→" ? `Move ${arrow}` : `${arrow} Move` }}
+        <button class="btn primary" :disabled="mode === 'none' || running" @click="begin('move')">
+          {{ mode === "left" ? `${arrow} Move` : `Move ${arrow}` }}
         </button>
       </footer>
     </template>
@@ -206,9 +222,8 @@ const running = computed(() => liveFile.value !== null);
 
     <ActivityView v-else />
 
-    <SyncModal v-if="syncing" :source="paths[source]" :destination="paths[target]"
-               :names="selection" :total-bytes="selectionBytes" :intent="intent"
-               @cancel="syncing = false" @start="go" />
+    <SyncModal v-if="syncing" :legs="legs" :count="count" :total-bytes="selectionBytes"
+               :intent="intent" @cancel="syncing = false" @start="go" />
 
     <div v-if="conflict" class="veil">
       <div class="modal" role="dialog" aria-modal="true">

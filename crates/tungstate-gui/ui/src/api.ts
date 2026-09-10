@@ -62,10 +62,14 @@ export interface Listing {
 
 export interface Place { label: string; path: string }
 
-export interface TransferRequest {
+export interface Leg {
   source: string;
   destination: string;
   names: string[];
+}
+
+export interface TransferRequest {
+  legs: Leg[];
   source_policy: string;
   verify: string;
   on_conflict: string;
@@ -77,9 +81,11 @@ export interface Prospect {
   size: number;
   outcome: "move" | "check" | "clash" | "hold";
   existing: number | null;
+  towards: "forward" | "back";
 }
 
 export interface Preview {
+  overlapping: string[];
   fresh: number;
   same_size: number;
   clashes: number;

@@ -375,13 +375,23 @@ fn browse(path: String) -> Result<Listing, String> {
     })
 }
 
-/// What the browser sends to move or copy a selection.
-#[derive(Debug, Deserialize)]
-struct TransferRequest {
+/// One direction of a transfer: what goes from where to where.
+#[derive(Debug, Clone, Deserialize)]
+struct Leg {
     source: String,
     destination: String,
     /// Names relative to `source`.
     names: Vec<String>,
+}
+
+/// What the browser sends to move or copy.
+///
+/// Two legs means an exchange: what is ticked on the left goes right while what
+/// is ticked on the right goes left, run one after the other so each is
+/// journaled and resumable on its own.
+#[derive(Debug, Deserialize)]
+struct TransferRequest {
+    legs: Vec<Leg>,
     source_policy: String,
     verify: String,
     on_conflict: String,
@@ -403,17 +413,17 @@ struct Plan {
 /// Kept separate from the command so it can be tested. The nesting check is the
 /// one that matters: draining a folder into its own subfolder would feed the
 /// walk its own output.
-fn plan_transfer(request: &TransferRequest) -> std::result::Result<Plan, String> {
+fn plan_transfer(request: &TransferRequest, leg: &Leg) -> std::result::Result<Plan, String> {
     let source_policy = SourcePolicy::parse(&request.source_policy)
         .ok_or("choose what happens to the originals")?;
     let verify = VerifyLevel::parse(&request.verify).ok_or("unknown verification level")?;
     let on_conflict =
         ConflictAction::parse(&request.on_conflict).ok_or("unknown conflict action")?;
 
-    let source = PathBuf::from(&request.source);
-    let destination = PathBuf::from(&request.destination);
+    let source = PathBuf::from(&leg.source);
+    let destination = PathBuf::from(&leg.destination);
 
-    if request.names.is_empty() {
+    if leg.names.is_empty() {
         return Err("nothing is selected".to_string());
     }
     if source == destination {
@@ -442,6 +452,8 @@ fn plan_transfer(request: &TransferRequest) -> std::result::Result<Plan, String>
 /// What a transfer would do, for the dialog to show before anything happens.
 #[derive(Debug, Serialize)]
 struct PreviewView {
+    /// Names ticked on both sides, which would clash in both directions.
+    overlapping: Vec<String>,
     fresh: u64,
     same_size: u64,
     clashes: u64,
@@ -458,105 +470,153 @@ struct ProspectView {
     /// move, check, clash or hold.
     outcome: &'static str,
     existing: Option<u64>,
+    /// Which leg this belongs to, so an exchange can be read at a glance.
+    towards: &'static str,
 }
 
 #[tauri::command]
 fn preview_transfer(request: TransferRequest) -> Result<PreviewView, String> {
-    let plan = plan_transfer(&request)?;
-
-    // A throwaway link carrying the chosen settings. Nothing is stored: a
-    // preview must not leave a trace any more than it moves a file.
-    let link = Link {
-        id: tungstate_journal::LinkId(0),
-        name: String::from("preview"),
-        source_root: plan.source.clone(),
-        destination_root: plan.destination.clone(),
-        source_policy: plan.source_policy,
-        verify: plan.verify,
-        order: Order::LargestFirst,
-        on_conflict: plan.on_conflict,
-        cooldown: Duration::ZERO,
-        saved: false,
+    let mut view = PreviewView {
+        fresh: 0,
+        same_size: 0,
+        clashes: 0,
+        too_recent: 0,
+        bytes: 0,
+        removes_originals: false,
+        overlapping: overlapping_names(&request.legs),
+        items: Vec::new(),
     };
 
-    let source = LocalBackend::new(plan.source);
-    let destination = LocalBackend::new(plan.destination);
-    let names: Vec<PathBuf> = request.names.iter().map(PathBuf::from).collect();
+    for leg in &request.legs {
+        let plan = plan_transfer(&request, leg)?;
 
-    let preview = tungstate_transfer::preview(&link, &source, &destination, Some(&names))
-        .map_err(describe)?;
+        // A throwaway link carrying the chosen settings. Nothing is stored: a
+        // preview must not leave a trace any more than it moves a file.
+        let link = Link {
+            id: tungstate_journal::LinkId(0),
+            name: String::from("preview"),
+            source_root: plan.source.clone(),
+            destination_root: plan.destination.clone(),
+            source_policy: plan.source_policy,
+            verify: plan.verify,
+            order: Order::LargestFirst,
+            on_conflict: plan.on_conflict,
+            cooldown: Duration::ZERO,
+            saved: false,
+        };
 
-    Ok(PreviewView {
-        fresh: preview.fresh,
-        same_size: preview.same_size,
-        clashes: preview.clashes,
-        too_recent: preview.too_recent,
-        bytes: preview.bytes,
-        removes_originals: preview.removes_originals,
-        items: preview
-            .items
-            .iter()
-            .map(|item| {
-                let (outcome, existing) = match &item.prospect {
-                    tungstate_transfer::Prospect::Fresh => ("move", None),
-                    tungstate_transfer::Prospect::SameSize { existing } => {
-                        ("check", Some(*existing))
-                    }
-                    tungstate_transfer::Prospect::Clash { existing } => ("clash", Some(*existing)),
-                    tungstate_transfer::Prospect::TooRecent => ("hold", None),
-                };
-                ProspectView {
-                    path: item.path.display().to_string(),
-                    size: item.size,
-                    outcome,
-                    existing,
-                }
-            })
-            .collect(),
-    })
+        let source = LocalBackend::new(plan.source);
+        let destination = LocalBackend::new(plan.destination);
+        let names: Vec<PathBuf> = leg.names.iter().map(PathBuf::from).collect();
+        let preview = tungstate_transfer::preview(&link, &source, &destination, Some(&names))
+            .map_err(describe)?;
+
+        view.fresh += preview.fresh;
+        view.same_size += preview.same_size;
+        view.clashes += preview.clashes;
+        view.too_recent += preview.too_recent;
+        view.bytes += preview.bytes;
+        view.removes_originals |= preview.removes_originals;
+        view.items.extend(preview.items.iter().map(|item| {
+            let (outcome, existing) = match &item.prospect {
+                tungstate_transfer::Prospect::Fresh => ("move", None),
+                tungstate_transfer::Prospect::SameSize { existing } => ("check", Some(*existing)),
+                tungstate_transfer::Prospect::Clash { existing } => ("clash", Some(*existing)),
+                tungstate_transfer::Prospect::TooRecent => ("hold", None),
+            };
+            ProspectView {
+                path: item.path.display().to_string(),
+                size: item.size,
+                outcome,
+                existing,
+                towards: if leg.source == request.legs[0].source {
+                    "forward"
+                } else {
+                    "back"
+                },
+            }
+        }));
+    }
+
+    Ok(view)
+}
+
+/// Names ticked on both sides at once.
+///
+/// Worth naming in the preview: such a file clashes in both directions, and the
+/// result of resolving it twice is rarely what anyone intended.
+fn overlapping_names(legs: &[Leg]) -> Vec<String> {
+    if legs.len() < 2 {
+        return Vec::new();
+    }
+    let first: std::collections::BTreeSet<&String> = legs[0].names.iter().collect();
+    legs[1]
+        .names
+        .iter()
+        .filter(|n| first.contains(n))
+        .cloned()
+        .collect()
 }
 
 #[tauri::command]
 fn start_transfer(request: TransferRequest, app: AppHandle) -> Result<String, String> {
-    let Plan {
-        source,
-        destination,
-        source_policy,
-        verify,
-        on_conflict,
-    } = plan_transfer(&request)?;
+    if request.legs.is_empty() {
+        return Err("nothing is selected".to_string());
+    }
+    // Validate every leg before creating anything, so a bad second leg cannot
+    // leave a half-configured exchange behind.
+    let plans: Vec<Plan> = request
+        .legs
+        .iter()
+        .map(|leg| plan_transfer(&request, leg))
+        .collect::<std::result::Result<_, _>>()?;
 
-    let saved = request.save_as.is_some();
-    let name = request.save_as.clone().unwrap_or_else(|| {
-        format!(
-            "browser-{}",
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |d| d.as_millis())
-        )
-    });
+    // Saving only makes sense for a single direction: a link is one source and
+    // one destination, and an exchange is two of them.
+    let saved = request.save_as.is_some() && plans.len() == 1;
+    let stamp = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_millis());
 
     let state = app.state::<App>();
-    state
-        .journal
-        .create_link(&NewLink {
-            name: name.clone(),
-            source_root: source,
-            destination_root: destination,
-            source_policy,
-            verify,
-            order: Order::LargestFirst,
-            on_conflict,
-            // The user is looking at these files and chose them, so there is no
-            // reason to hold back something written moments ago.
-            cooldown: Duration::ZERO,
-            saved,
-        })
-        .map_err(describe)?;
+    let mut names = Vec::new();
+    for (index, plan) in plans.iter().enumerate() {
+        let name = match (&request.save_as, saved) {
+            (Some(chosen), true) => chosen.clone(),
+            _ => format!("browser-{stamp}-{index}"),
+        };
+        state
+            .journal
+            .create_link(&NewLink {
+                name: name.clone(),
+                source_root: plan.source.clone(),
+                destination_root: plan.destination.clone(),
+                source_policy: plan.source_policy,
+                verify: plan.verify,
+                order: Order::LargestFirst,
+                on_conflict: plan.on_conflict,
+                // The user is looking at these files and chose them, so there is
+                // no reason to hold back something written moments ago.
+                cooldown: Duration::ZERO,
+                saved,
+            })
+            .map_err(describe)?;
+        names.push(name);
+    }
 
-    let names = request.names.iter().map(PathBuf::from).collect::<Vec<_>>();
-    spawn_run(&app, &name, Some(names))?;
-    Ok(name)
+    let selections: Vec<Vec<PathBuf>> = request
+        .legs
+        .iter()
+        .map(|leg| leg.names.iter().map(PathBuf::from).collect())
+        .collect();
+
+    spawn_run(&app, names, selections)?;
+    Ok(names_summary(&request))
+}
+
+fn names_summary(request: &TransferRequest) -> String {
+    let total: usize = request.legs.iter().map(|l| l.names.len()).sum();
+    format!("{total}")
 }
 
 #[tauri::command]
@@ -645,11 +705,19 @@ fn resolve_conflict(
 
 #[tauri::command]
 fn run_link(name: String, app: AppHandle) -> Result<(), String> {
-    spawn_run(&app, &name, None)
+    spawn_run(&app, vec![name], vec![Vec::new()])
 }
 
-/// Start a run on its own thread, optionally limited to a chosen set of names.
-fn spawn_run(app: &AppHandle, name: &str, only: Option<Vec<PathBuf>>) -> Result<(), String> {
+/// Run each leg in turn on one worker thread, reporting a single combined result.
+///
+/// Sequential rather than parallel: two legs of an exchange can touch the same
+/// names, and running them at once would race. Each leg is its own link, so each
+/// is journaled and resumable on its own terms.
+fn spawn_run(
+    app: &AppHandle,
+    links: Vec<String>,
+    selections: Vec<Vec<PathBuf>>,
+) -> Result<(), String> {
     let state = app.state::<App>();
 
     // compare_exchange rather than load-then-store: two rapid clicks on Run
@@ -663,13 +731,16 @@ fn spawn_run(app: &AppHandle, name: &str, only: Option<Vec<PathBuf>>) -> Result<
         return Err("a transfer is already running".to_string());
     }
 
-    let link = match state.journal.link_by_name(name) {
-        Ok(link) => link,
-        Err(error) => {
-            state.running.store(false, Ordering::SeqCst);
-            return Err(describe(error));
+    let mut resolved = Vec::new();
+    for name in &links {
+        match state.journal.link_by_name(name) {
+            Ok(link) => resolved.push(link),
+            Err(error) => {
+                state.running.store(false, Ordering::SeqCst);
+                return Err(describe(error));
+            }
         }
-    };
+    }
 
     state.cancel.store(false, Ordering::Relaxed);
     let replies = state.conflicts.open();
@@ -680,36 +751,73 @@ fn spawn_run(app: &AppHandle, name: &str, only: Option<Vec<PathBuf>>) -> Result<
     // Its own thread keeps the window responsive throughout.
     std::thread::spawn(move || {
         let state = worker.state::<App>();
-        let source = LocalBackend::new(link.source_root.clone());
-        let destination = LocalBackend::new(link.destination_root.clone());
-        let mut resolver = WindowResolver::new(worker.clone(), replies, link.on_conflict);
+        let fallback = resolved[0].on_conflict;
+        let mut resolver = WindowResolver::new(worker.clone(), replies, fallback);
         let mut progress = EventProgress::new(worker.clone());
+        let mut total = Summary::default();
+        let mut failure = None;
 
-        let mut transfer = Transfer::new(
-            &link,
-            &source,
-            &destination,
-            &state.journal,
-            &mut resolver,
-            &mut progress,
-        )
-        .cancellable(cancel);
+        for (index, link) in resolved.iter().enumerate() {
+            let source = LocalBackend::new(link.source_root.clone());
+            let destination = LocalBackend::new(link.destination_root.clone());
+            let chosen = selections.get(index).cloned().unwrap_or_default();
 
-        let outcome = match &only {
-            Some(names) => transfer.run_selection(names),
-            None => transfer.run(),
-        };
+            let mut transfer = Transfer::new(
+                link,
+                &source,
+                &destination,
+                &state.journal,
+                &mut resolver,
+                &mut progress,
+            )
+            .cancellable(Arc::clone(&cancel));
+
+            let outcome = if chosen.is_empty() {
+                transfer.run()
+            } else {
+                transfer.run_selection(&chosen)
+            };
+
+            match outcome {
+                Ok(summary) => {
+                    let stop = summary.cancelled || summary.destination_lost;
+                    accumulate(&mut total, summary);
+                    if stop {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    failure = Some(describe(error));
+                    break;
+                }
+            }
+        }
 
         state.conflicts.close();
         state.running.store(false, Ordering::SeqCst);
 
-        let _ = match outcome {
-            Ok(summary) => worker.emit("transfer://done", SummaryView::from(&summary)),
-            Err(error) => worker.emit("transfer://error", describe(error)),
+        let _ = match failure {
+            Some(message) => worker.emit("transfer://error", message),
+            None => worker.emit("transfer://done", SummaryView::from(&total)),
         };
     });
 
     Ok(())
+}
+
+/// Fold one leg's result into the running total for the whole operation.
+fn accumulate(total: &mut Summary, leg: Summary) {
+    total.transferred += leg.transferred;
+    total.already_present += leg.already_present;
+    total.skipped += leg.skipped;
+    total.quarantined += leg.quarantined;
+    total.failed += leg.failed;
+    total.bytes += leg.bytes;
+    total.recovered += leg.recovered;
+    total.pruned += leg.pruned;
+    total.cancelled |= leg.cancelled;
+    total.destination_lost |= leg.destination_lost;
+    total.failures.extend(leg.failures);
 }
 
 /// Render an error and everything underneath it.
@@ -779,11 +887,17 @@ fn main() {
 mod tests {
     use super::*;
 
-    fn request(source: &str, destination: &str) -> TransferRequest {
-        TransferRequest {
+    fn leg(source: &str, destination: &str) -> Leg {
+        Leg {
             source: source.to_string(),
             destination: destination.to_string(),
             names: vec!["a.mp4".to_string()],
+        }
+    }
+
+    fn request(legs: Vec<Leg>) -> TransferRequest {
+        TransferRequest {
+            legs,
             source_policy: "delete".to_string(),
             verify: "hash".to_string(),
             on_conflict: "quarantine".to_string(),
@@ -793,7 +907,8 @@ mod tests {
 
     #[test]
     fn an_ordinary_transfer_is_accepted() {
-        assert!(plan_transfer(&request("/tmp/from", "/tmp/to")).is_ok());
+        let r = request(vec![leg("/tmp/from", "/tmp/to")]);
+        assert!(plan_transfer(&r, &r.legs[0]).is_ok());
     }
 
     #[test]
@@ -804,8 +919,9 @@ mod tests {
             ("/tmp/videos", "/tmp/videos/archive"),
             ("/tmp/videos/archive", "/tmp/videos"),
         ] {
+            let r = request(vec![leg(from, to)]);
             assert!(
-                plan_transfer(&request(from, to)).is_err(),
+                plan_transfer(&r, &r.legs[0]).is_err(),
                 "`{from}` -> `{to}` should have been refused"
             );
         }
@@ -815,24 +931,56 @@ mod tests {
     fn a_sibling_with_a_shared_prefix_is_still_fine() {
         // starts_with on paths compares components, so `videos-old` is not
         // inside `videos`. A naive string prefix check would refuse this.
-        assert!(plan_transfer(&request("/tmp/videos", "/tmp/videos-old")).is_ok());
+        let r = request(vec![leg("/tmp/videos", "/tmp/videos-old")]);
+        assert!(plan_transfer(&r, &r.legs[0]).is_ok());
     }
 
     #[test]
     fn an_empty_selection_is_refused() {
-        let mut r = request("/tmp/from", "/tmp/to");
-        r.names.clear();
-        assert!(plan_transfer(&r).is_err());
+        let mut r = request(vec![leg("/tmp/from", "/tmp/to")]);
+        r.legs[0].names.clear();
+        assert!(plan_transfer(&r, &r.legs[0]).is_err());
     }
 
     #[test]
     fn unknown_settings_are_refused_rather_than_guessed() {
-        let mut r = request("/tmp/from", "/tmp/to");
+        let mut r = request(vec![leg("/tmp/from", "/tmp/to")]);
         r.source_policy = "obliterate".to_string();
-        assert!(plan_transfer(&r).is_err());
+        assert!(plan_transfer(&r, &r.legs[0]).is_err());
 
-        let mut r = request("/tmp/from", "/tmp/to");
+        let mut r = request(vec![leg("/tmp/from", "/tmp/to")]);
         r.verify = "vibes".to_string();
-        assert!(plan_transfer(&r).is_err());
+        assert!(plan_transfer(&r, &r.legs[0]).is_err());
+    }
+
+    #[test]
+    fn both_legs_of_an_exchange_are_validated() {
+        // A bad second leg must be caught before the first creates anything.
+        let r = request(vec![
+            leg("/tmp/left", "/tmp/right"),
+            leg("/tmp/right", "/tmp/right/inside"),
+        ]);
+        assert!(plan_transfer(&r, &r.legs[0]).is_ok());
+        assert!(plan_transfer(&r, &r.legs[1]).is_err());
+    }
+
+    #[test]
+    fn a_name_ticked_on_both_sides_is_reported() {
+        // It would clash in both directions, and resolving it twice is rarely
+        // what anyone meant.
+        let mut r = request(vec![
+            leg("/tmp/left", "/tmp/right"),
+            leg("/tmp/right", "/tmp/left"),
+        ]);
+        r.legs[0].names = vec!["shared.mp4".into(), "onlyleft.mp4".into()];
+        r.legs[1].names = vec!["shared.mp4".into(), "onlyright.mp4".into()];
+
+        assert_eq!(overlapping_names(&r.legs), vec!["shared.mp4".to_string()]);
+    }
+
+    #[test]
+    fn one_direction_has_nothing_to_overlap_with() {
+        let r = request(vec![leg("/tmp/left", "/tmp/right")]);
+        assert!(overlapping_names(&r.legs).is_empty());
     }
 }

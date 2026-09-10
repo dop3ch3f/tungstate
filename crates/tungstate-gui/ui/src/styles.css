@@ -360,3 +360,6 @@ button, .chrome { user-select: none; }
 .lines .s { font-family: var(--mono); color: var(--dust); font-variant-numeric: tabular-nums; }
 .lines li.clash .w, .lines li.hold .w { color: var(--held); }
 .lines li.move .w { color: var(--verified); }
+
+.lines .dir { color: var(--fluoresce); margin-right: 5px; }
+.modal .route + .route { margin-top: -6px; }

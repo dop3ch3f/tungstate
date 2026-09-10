@@ -1,14 +1,15 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
-import { api, bytes, type Preview } from "../api";
+import { api, bytes, type Preview, type Leg } from "../api";
 
 const props = defineProps<{
-  source: string;
-  destination: string;
-  names: string[];
+  legs: Leg[];
   totalBytes: number;
+  count: number;
   intent: "move" | "copy";
 }>();
+
+const exchange = computed(() => props.legs.length > 1);
 const emit = defineEmits<{ cancel: []; start: [payload: Payload] }>();
 
 export interface Payload {
@@ -36,9 +37,7 @@ async function look() {
   looking.value = true;
   try {
     preview.value = await api.previewTransfer({
-      source: props.source,
-      destination: props.destination,
-      names: props.names,
+      legs: props.legs,
       source_policy: policy.value,
       verify: verify.value,
       on_conflict: conflict.value,
@@ -77,17 +76,30 @@ function start() {
   <div class="veil" @click.self="emit('cancel')">
     <div class="modal" role="dialog" aria-modal="true">
       <div class="cap">
-        <h2>{{ props.intent === "move" ? "Move" : "Copy" }} {{ props.names.length }}
-          item{{ props.names.length === 1 ? "" : "s" }}</h2>
+        <h2>
+          {{ props.intent === "move" ? "Move" : "Copy" }} {{ props.count }}
+          item{{ props.count === 1 ? "" : "s" }}{{ exchange ? " both ways" : "" }}
+        </h2>
         <p class="why">{{ bytes(props.totalBytes) }} in total. Every file is checked at the far
-          end before anything here is touched.</p>
+          end before anything is removed.</p>
       </div>
 
       <div class="body">
-        <div class="route">
-          <div class="end"><span>From</span><b>{{ props.source }}</b></div>
-          <div class="arrow">→</div>
-          <div class="end"><span>To</span><b>{{ props.destination }}</b></div>
+        <div v-for="(l, i) in props.legs" :key="i" class="route">
+          <div class="end">
+            <span>{{ exchange ? (i === 0 ? "Ticked on the left" : "Ticked on the right") : "From" }}</span>
+            <b>{{ l.source }}</b>
+          </div>
+          <div class="arrow">{{ exchange && i === 1 ? "←" : "→" }}</div>
+          <div class="end"><span>To</span><b>{{ l.destination }}</b></div>
+        </div>
+
+        <div v-if="preview?.overlapping.length" class="notice bad">
+          <b>{{ preview.overlapping.length }} name{{ preview.overlapping.length === 1 ? " is" : "s are" }}
+          ticked on both sides.</b>
+          Each would clash in both directions, and resolving it twice is unlikely to give you what
+          you want. Consider unticking one side:
+          <span style="font-family: var(--mono)">{{ preview.overlapping.slice(0, 6).join(", ") }}</span>
         </div>
 
         <div v-if="previewError" class="notice bad">{{ previewError }}</div>
@@ -102,8 +114,11 @@ function start() {
             <div v-if="preview.too_recent"><b class="warn">{{ preview.too_recent }}</b><span>too recent</span></div>
           </div>
           <ul class="lines">
-            <li v-for="item in preview.items.slice(0, 60)" :key="item.path" :class="item.outcome">
-              <span class="p">{{ item.path }}</span>
+            <li v-for="(item, i) in preview.items.slice(0, 60)" :key="item.path + i" :class="item.outcome">
+              <span class="p">
+                <span v-if="exchange" class="dir">{{ item.towards === "forward" ? "→" : "←" }}</span>
+                {{ item.path }}
+              </span>
               <span class="w">{{ word[item.outcome] }}</span>
               <span class="s">{{ bytes(item.size) }}</span>
             </li>
@@ -156,10 +171,13 @@ function start() {
           <span class="note">An identical file already there counts as done, not a clash.</span>
         </div>
 
-        <label class="check">
+        <label v-if="!exchange" class="check">
           <input type="checkbox" v-model="remember" />
           <span>Remember this pair so I can run it again later</span>
         </label>
+        <p v-else class="note">
+          A remembered pair is one source and one destination, so an exchange cannot be saved.
+        </p>
         <div v-if="remember" class="opt" style="margin-top: 10px">
           <input type="text" v-model="name" placeholder="laptop-to-nas" />
         </div>
@@ -169,7 +187,7 @@ function start() {
         <span class="spacer"></span>
         <button class="btn" @click="emit('cancel')">Cancel</button>
         <button class="btn primary" :disabled="remember && !name.trim()" @click="start">
-          {{ props.intent === "move" ? "Move" : "Copy" }} {{ props.names.length }}
+          {{ props.intent === "move" ? "Move" : "Copy" }} {{ props.count }}{{ exchange ? " both ways" : "" }}
         </button>
       </div>
     </div>
