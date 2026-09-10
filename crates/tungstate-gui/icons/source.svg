@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024"><defs>
+      <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#23272c"/><stop offset="1" stop-color="#13161a"/></linearGradient>
+      <radialGradient id="core" cx="0.5" cy="0.52" r="0.52">
+        <stop offset="0" stop-color="#7fd4ff" stop-opacity="0.5"/>
+        <stop offset="0.6" stop-color="#7fd4ff" stop-opacity="0.12"/>
+        <stop offset="1" stop-color="#7fd4ff" stop-opacity="0"/></radialGradient>
+      <linearGradient id="fL" x1="0.1" y1="0" x2="0.7" y2="1">
+        <stop offset="0" stop-color="#dff2ff"/><stop offset="1" stop-color="#7fd4ff"/></linearGradient>
+      <linearGradient id="fR" x1="0.9" y1="0" x2="0.3" y2="1">
+        <stop offset="0" stop-color="#7fd4ff" stop-opacity="0.72"/>
+        <stop offset="1" stop-color="#7fd4ff" stop-opacity="0.42"/></linearGradient>
+      <linearGradient id="bL" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#7fd4ff" stop-opacity="0.46"/>
+        <stop offset="1" stop-color="#7fd4ff" stop-opacity="0.16"/></linearGradient>
+      <linearGradient id="bR" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#7fd4ff" stop-opacity="0.26"/>
+        <stop offset="1" stop-color="#7fd4ff" stop-opacity="0.07"/></linearGradient>
+    </defs><rect x="104" y="104" width="816" height="816" rx="184" fill="url(#plate)"/><circle cx="512" cy="524" r="336" fill="url(#core)"/><polygon points="512.0,200.0 288.0,512.0 512.0,612.0" fill="url(#fL)"/><polygon points="512.0,200.0 512.0,612.0 736.0,512.0" fill="url(#fR)"/><polygon points="512.0,824.0 288.0,512.0 512.0,612.0" fill="url(#bL)"/><polygon points="512.0,824.0 512.0,612.0 736.0,512.0" fill="url(#bR)"/><polygon points="512.0,200.0 288.0,512.0 512.0,824.0 736.0,512.0" fill="none" stroke="#7fd4ff" stroke-width="12.0" stroke-linejoin="round"/><line x1="512.0" y1="200.0" x2="512.0" y2="612.0" stroke="#ffffff" stroke-width="10.0" stroke-opacity="0.85" stroke-linecap="round"/><line x1="512.0" y1="612.0" x2="512.0" y2="824.0" stroke="#7fd4ff" stroke-width="8.0" stroke-opacity="0.6" stroke-linecap="round"/></svg>
