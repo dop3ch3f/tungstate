@@ -731,10 +731,10 @@ fn spawn_run(
         return Err("a transfer is already running".to_string());
     }
 
-    let mut resolved = Vec::new();
+    let mut queue = Vec::new();
     for name in &links {
         match state.journal.link_by_name(name) {
-            Ok(link) => resolved.push(link),
+            Ok(link) => queue.push(link),
             Err(error) => {
                 state.running.store(false, Ordering::SeqCst);
                 return Err(describe(error));
@@ -751,13 +751,13 @@ fn spawn_run(
     // Its own thread keeps the window responsive throughout.
     std::thread::spawn(move || {
         let state = worker.state::<App>();
-        let fallback = resolved[0].on_conflict;
+        let fallback = queue[0].on_conflict;
         let mut resolver = WindowResolver::new(worker.clone(), replies, fallback);
         let mut progress = EventProgress::new(worker.clone());
         let mut total = Summary::default();
         let mut failure = None;
 
-        for (index, link) in resolved.iter().enumerate() {
+        for (index, link) in queue.iter().enumerate() {
             let source = LocalBackend::new(link.source_root.clone());
             let destination = LocalBackend::new(link.destination_root.clone());
             let chosen = selections.get(index).cloned().unwrap_or_default();
