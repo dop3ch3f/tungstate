@@ -1,0 +1,252 @@
+/* Tungstate.
+   Scheelite (calcium tungstate) is a dense grey mineral that fluoresces
+   blue-white under UV. The interface is mineral and heavy; only what is
+   currently happening glows. */
+
+:root {
+  --ore: #1c1f23;
+  --ore-lift: #262a2f;
+  --ore-sink: #16191c;
+  --seam: #3a4048;
+  --dust: #9aa3ad;
+  --light: #e8ecef;
+  --fluoresce: #7fd4ff;
+
+  --verified: #6fcf97;
+  --held: #e0b44c;
+  --failed: #e2705f;
+
+  --sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  --gap: 12px;
+  --pad: 20px;
+}
+
+* { box-sizing: border-box; }
+
+html, body, #app { height: 100%; margin: 0; }
+
+body {
+  background: var(--ore);
+  color: var(--light);
+  font-family: var(--sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Nothing here is selectable chrome; paths and hashes are. */
+button, nav { user-select: none; }
+
+.shell { display: grid; grid-template-columns: 208px 1fr; height: 100%; }
+
+.rail {
+  background: var(--ore-sink);
+  border-right: 1px solid var(--seam);
+  padding: var(--pad) 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.wordmark {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  padding: 0 var(--pad) 22px;
+}
+/* The single flourish: the mark carries the mineral's glow. */
+.wordmark span { color: var(--fluoresce); }
+
+.rail nav { display: flex; flex-direction: column; }
+
+.rail button {
+  appearance: none;
+  background: none;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: var(--dust);
+  font: inherit;
+  text-align: left;
+  padding: 8px var(--pad);
+  cursor: pointer;
+}
+.rail button:hover { color: var(--light); }
+.rail button[aria-current="true"] {
+  color: var(--light);
+  border-left-color: var(--fluoresce);
+  background: rgba(127, 212, 255, 0.06);
+}
+
+.rail .foot { margin-top: auto; padding: 0 var(--pad); color: var(--dust); font-size: 12px; }
+
+.pane { overflow-y: auto; padding: var(--pad) 28px 40px; }
+
+.pane header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--gap);
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--seam);
+  margin-bottom: 18px;
+}
+
+h1 { font-size: 19px; font-weight: 600; margin: 0; }
+h2 { font-size: 14px; font-weight: 600; margin: 26px 0 10px; }
+
+p.lede { color: var(--dust); margin: 0 0 18px; max-width: 62ch; }
+
+/* Actions -------------------------------------------------------------- */
+
+.act {
+  appearance: none;
+  font: inherit;
+  border-radius: 5px;
+  padding: 6px 13px;
+  cursor: pointer;
+  border: 1px solid var(--seam);
+  background: var(--ore-lift);
+  color: var(--light);
+}
+.act:hover { border-color: var(--dust); }
+.act:disabled { opacity: 0.45; cursor: not-allowed; }
+.act.primary {
+  background: var(--fluoresce);
+  border-color: var(--fluoresce);
+  color: #08202b;
+  font-weight: 600;
+}
+.act.primary:hover { filter: brightness(1.08); }
+.act.danger { color: var(--failed); border-color: rgba(226, 112, 95, 0.4); }
+
+:focus-visible { outline: 2px solid var(--fluoresce); outline-offset: 2px; }
+
+/* Links ---------------------------------------------------------------- */
+
+.link-row {
+  border: 1px solid var(--seam);
+  border-radius: 6px;
+  padding: 14px 16px;
+  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 4px var(--gap);
+  align-items: center;
+}
+.link-row .name { font-weight: 600; }
+.link-row .route { grid-column: 1; font-family: var(--mono); font-size: 12.5px; color: var(--dust); }
+.link-row .rules { grid-column: 1; font-size: 12.5px; color: var(--dust); }
+.link-row .go { grid-row: 1 / span 3; grid-column: 2; }
+
+/* Transfer ledger ------------------------------------------------------ */
+
+.readout {
+  display: flex;
+  align-items: baseline;
+  gap: 28px;
+  padding: 4px 0 18px;
+}
+.readout .mass {
+  font-family: var(--mono);
+  font-size: 34px;
+  font-weight: 500;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+.readout .unit { color: var(--dust); font-size: 13px; }
+.readout .count { color: var(--dust); font-family: var(--mono); font-variant-numeric: tabular-nums; }
+
+.ledger { width: 100%; border-collapse: collapse; font-size: 13px; }
+.ledger th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--dust);
+  font-size: 12px;
+  padding: 0 10px 6px 0;
+  border-bottom: 1px solid var(--seam);
+}
+.ledger td {
+  padding: 6px 10px 6px 0;
+  border-bottom: 1px solid rgba(58, 64, 72, 0.45);
+  vertical-align: baseline;
+}
+.ledger .path { font-family: var(--mono); word-break: break-all; }
+.ledger .size { font-family: var(--mono); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--dust); }
+.ledger .state { white-space: nowrap; }
+.ledger .detail { color: var(--dust); font-size: 12px; }
+
+.state.live { color: var(--fluoresce); }
+.state.transferred, .state.ok { color: var(--verified); }
+.state.skipped, .state.quarantined { color: var(--held); }
+.state.already-present { color: var(--dust); }
+.state.failed { color: var(--failed); }
+
+/* The one piece of ambient motion: what is happening right now fluoresces. */
+.state.live::before {
+  content: "";
+  display: inline-block;
+  width: 6px; height: 6px;
+  margin-right: 7px;
+  border-radius: 50%;
+  background: var(--fluoresce);
+  animation: glow 1.6s ease-in-out infinite;
+}
+@keyframes glow {
+  0%, 100% { opacity: 0.35; box-shadow: 0 0 0 0 rgba(127, 212, 255, 0); }
+  50%      { opacity: 1;    box-shadow: 0 0 7px 1px rgba(127, 212, 255, 0.55); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .state.live::before { animation: none; opacity: 1; }
+}
+
+/* Forms ---------------------------------------------------------------- */
+
+.field { display: grid; gap: 5px; margin-bottom: 14px; max-width: 620px; }
+.field label { font-size: 12.5px; color: var(--dust); }
+.field input, .field select {
+  font: inherit;
+  background: var(--ore-sink);
+  border: 1px solid var(--seam);
+  border-radius: 5px;
+  color: var(--light);
+  padding: 7px 10px;
+}
+.field input { font-family: var(--mono); font-size: 13px; }
+.field .hint { font-size: 12px; color: var(--dust); }
+.row { display: flex; gap: 10px; align-items: end; }
+.row .field { flex: 1; margin-bottom: 0; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); max-width: 620px; }
+
+/* Notices -------------------------------------------------------------- */
+
+.notice { border-radius: 5px; padding: 10px 13px; margin: 14px 0; font-size: 13px; }
+.notice.bad { background: rgba(226, 112, 95, 0.1); border: 1px solid rgba(226, 112, 95, 0.4); }
+.notice.calm { background: var(--ore-lift); border: 1px solid var(--seam); color: var(--dust); }
+
+.empty { color: var(--dust); max-width: 58ch; }
+.empty strong { color: var(--light); font-weight: 600; display: block; margin-bottom: 4px; }
+
+/* Conflict dialog ------------------------------------------------------ */
+
+.veil {
+  position: fixed; inset: 0;
+  background: rgba(10, 12, 14, 0.72);
+  display: grid; place-items: center;
+  padding: 24px;
+}
+.dialog {
+  background: var(--ore-lift);
+  border: 1px solid var(--seam);
+  border-radius: 8px;
+  padding: 22px 24px;
+  width: min(560px, 100%);
+}
+.dialog h2 { margin: 0 0 6px; font-size: 16px; }
+.dialog .subject { font-family: var(--mono); font-size: 13px; word-break: break-all; margin: 10px 0; }
+.dialog .compare { display: grid; grid-template-columns: 1fr 1fr; gap: var(--gap); margin: 14px 0 18px; }
+.dialog .compare div { border: 1px solid var(--seam); border-radius: 5px; padding: 10px 12px; }
+.dialog .compare span { display: block; color: var(--dust); font-size: 12px; }
+.dialog .compare b { font-family: var(--mono); font-weight: 500; font-size: 15px; }
+.choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.forall { display: flex; align-items: center; gap: 7px; margin-top: 16px; color: var(--dust); font-size: 13px; }

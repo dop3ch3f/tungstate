@@ -215,9 +215,13 @@ fn a_source_survives_when_verification_fails() {
     rig.write_source("holiday.mp4", b"irreplaceable");
 
     let corrupting = CorruptingBackend(LocalBackend::new(rig.dest_dir.path().to_path_buf()));
-    let result = rig.run_over(&corrupting);
+    let summary = rig.run_over(&corrupting).unwrap();
 
-    assert!(result.is_err(), "a corrupted copy must not report success");
+    assert_eq!(
+        summary.failed, 1,
+        "the failure must be reported, not swallowed"
+    );
+    assert_eq!(summary.transferred, 0);
     assert!(
         rig.src("holiday.mp4").exists(),
         "source deleted despite failed verification"
@@ -554,3 +558,98 @@ fn an_empty_source_is_not_an_error() {
 
 #[allow(dead_code)]
 fn unused(_: LinkId) {}
+
+#[test]
+fn one_bad_file_does_not_abandon_the_rest_of_the_drain() {
+    // A GUI watching four thousand files must not appear to die because one of
+    // them is unreadable.
+    let rig = Rig::with(
+        SourcePolicy::Delete,
+        VerifyLevel::Readback,
+        Order::Discovered,
+    );
+    rig.write_source("a.mp4", b"first");
+    rig.write_source("b.mp4", b"second");
+    rig.write_source("c.mp4", b"third");
+
+    // Corrupts every write, so all three fail verification.
+    let corrupting = CorruptingBackend(LocalBackend::new(rig.dest_dir.path().to_path_buf()));
+    let summary = rig.run_over(&corrupting).unwrap();
+
+    assert_eq!(summary.failed, 3, "every file should have been attempted");
+    assert_eq!(summary.failures.len(), 3);
+    for name in ["a.mp4", "b.mp4", "c.mp4"] {
+        assert!(
+            rig.src(name).exists(),
+            "{name} must survive a failed transfer"
+        );
+    }
+}
+
+#[test]
+fn a_failure_carries_a_reason_worth_reading() {
+    let rig = Rig::with(
+        SourcePolicy::Delete,
+        VerifyLevel::Readback,
+        Order::Discovered,
+    );
+    rig.write_source("a.mp4", b"first");
+
+    let corrupting = CorruptingBackend(LocalBackend::new(rig.dest_dir.path().to_path_buf()));
+    let summary = rig.run_over(&corrupting).unwrap();
+
+    assert_eq!(summary.failures[0].path, Path::new("a.mp4"));
+    assert!(
+        summary.failures[0].reason.contains("verification"),
+        "reason should name what went wrong, got: {}",
+        summary.failures[0].reason
+    );
+}
+
+#[test]
+fn a_cancelled_run_stops_cleanly_and_keeps_what_it_finished() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::Discovered);
+    rig.write_source("a.mp4", b"first");
+    rig.write_source("b.mp4", b"second");
+    rig.write_source("c.mp4", b"third");
+
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut stopper = StopAfterFirst {
+        flag: Arc::clone(&flag),
+    };
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut stopper,
+    )
+    .cancellable(Arc::clone(&flag))
+    .run()
+    .unwrap();
+
+    assert!(summary.cancelled);
+    assert_eq!(summary.transferred, 1, "the in-flight file still completes");
+    // Whatever it finished is committed; the rest are untouched, not half-done.
+    assert_eq!(summary.transferred + summary.skipped, 1);
+    let remaining = std::fs::read_dir(rig.source_dir.path()).unwrap().count();
+    assert_eq!(remaining, 2, "unstarted files must be left alone");
+    let _ = flag.load(Ordering::Relaxed);
+}
+
+struct StopAfterFirst {
+    flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Progress for StopAfterFirst {
+    fn starting(&mut self, _path: &Path, _size: u64) {}
+    fn finished(&mut self, _path: &Path, _outcome: FileOutcome) {
+        self.flag.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}

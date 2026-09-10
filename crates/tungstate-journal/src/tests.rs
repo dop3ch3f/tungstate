@@ -336,3 +336,20 @@ fn migrating_an_existing_v1_journal_preserves_its_rows() {
     assert_eq!(upgraded.incomplete().unwrap()[0].id, id);
     assert!(upgraded.links().unwrap().is_empty());
 }
+
+#[test]
+fn recent_returns_newest_first_and_respects_the_limit() {
+    let journal = Journal::open_in_memory().unwrap();
+    let mut ids = Vec::new();
+    for _ in 0..5 {
+        ids.push(journal.begin(&drain_op()).unwrap());
+    }
+
+    let recent = journal.recent(3).unwrap();
+    assert_eq!(recent.len(), 3);
+    assert_eq!(
+        recent.iter().map(|o| o.id).collect::<Vec<_>>(),
+        vec![ids[4], ids[3], ids[2]],
+        "newest first"
+    );
+}

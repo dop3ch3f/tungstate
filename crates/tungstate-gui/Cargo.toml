@@ -1,0 +1,28 @@
+[package]
+name = "tungstate-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "tungstate-gui"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { workspace = true }
+
+[dependencies]
+tungstate-backend = { path = "../tungstate-backend" }
+tungstate-journal = { path = "../tungstate-journal" }
+tungstate-transfer = { path = "../tungstate-transfer" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+tauri = { workspace = true }
+tauri-plugin-dialog = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+[lints]
+workspace = true

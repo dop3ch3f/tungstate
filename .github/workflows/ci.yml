@@ -14,9 +14,35 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4
+
+      # Tauri needs a system webview to build against. Only Linux ships it as
+      # separate packages; macOS and Windows have theirs already.
+      - name: Install Linux webview dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libgtk-3-dev \
+            libayatana-appindicator3-dev librsvg2-dev libsoup-3.0-dev \
+            libjavascriptcoregtk-4.1-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: crates/tungstate-gui/ui/package-lock.json
+
+      # generate_context! embeds the built frontend at compile time, so the
+      # Rust build cannot start until these files exist.
+      - name: Build the interface
+        working-directory: crates/tungstate-gui/ui
+        run: |
+          npm ci
+          npm run build
+
       # Components come from rust-toolchain.toml, so none are listed here.
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
       # --locked fails the build on a stale lockfile instead of silently
       # resolving new dependency versions nobody reviewed.
       - run: cargo fmt --all --check

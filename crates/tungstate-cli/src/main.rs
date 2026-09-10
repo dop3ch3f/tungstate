@@ -400,6 +400,15 @@ fn report_summary(summary: &tungstate_transfer::Summary, link: &tungstate_journa
             summary.recovered
         );
     }
+    if !summary.failures.is_empty() {
+        println!(
+            "\n{} file(s) failed; their originals were left alone:",
+            summary.failed
+        );
+        for failure in &summary.failures {
+            println!("  {}: {}", failure.path.display(), failure.reason);
+        }
+    }
     if summary.quarantined > 0 {
         println!(
             "review quarantined files at {}",
@@ -444,6 +453,7 @@ impl Progress for CliProgress {
                     "skipped (written too recently; will move next run)",
                 FileOutcome::Skipped(SkipReason::Conflict) => "skipped (name taken)",
                 FileOutcome::Quarantined => "quarantined",
+                FileOutcome::Failed => "FAILED (original left in place)",
             }
         );
     }

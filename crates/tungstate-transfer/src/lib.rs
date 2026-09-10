@@ -21,6 +21,8 @@ pub use conflict::{Conflict, ConflictResolver, Decision, FixedResolver, Interact
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, SystemTime};
 
 use tungstate_backend::{Backend, BackendError};
@@ -91,6 +93,17 @@ pub enum FileOutcome {
     Skipped(SkipReason),
     /// Parked under the quarantine directory.
     Quarantined,
+    /// Could not be transferred. The original was left untouched.
+    Failed,
+}
+
+/// One file that could not be transferred, and why.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    /// Path relative to the source root.
+    pub path: PathBuf,
+    /// Human-readable reason, including the underlying cause.
+    pub reason: String,
 }
 
 /// Why a file was left alone.
@@ -119,6 +132,12 @@ pub struct Summary {
     pub recovered: u64,
     /// Source directories removed because the drain emptied them.
     pub pruned: u64,
+    /// Files that could not be transferred. Their originals are untouched.
+    pub failed: u64,
+    /// Detail for each failure, for reporting at the end of a run.
+    pub failures: Vec<Failure>,
+    /// The run stopped early because it was asked to.
+    pub cancelled: bool,
 }
 
 /// Told about each file as it is dealt with, so a caller can show progress.
@@ -146,6 +165,9 @@ pub struct Transfer<'a> {
     journal: &'a Journal,
     resolver: &'a mut dyn ConflictResolver,
     progress: &'a mut dyn Progress,
+    // Checked between files, never mid-file: stopping partway through a copy
+    // would leave a partial, and the next run would redo it anyway.
+    cancel: Option<Arc<AtomicBool>>,
 }
 
 impl<'a> Transfer<'a> {
@@ -166,7 +188,24 @@ impl<'a> Transfer<'a> {
             journal,
             resolver,
             progress,
+            cancel: None,
         }
+    }
+
+    /// Stop cleanly when `flag` is set.
+    ///
+    /// Honoured between files rather than mid-copy, so a cancelled run leaves
+    /// completed transfers committed and nothing half-written.
+    #[must_use]
+    pub fn cancellable(mut self, flag: Arc<AtomicBool>) -> Self {
+        self.cancel = Some(flag);
+        self
+    }
+
+    fn cancelled(&self) -> bool {
+        self.cancel
+            .as_ref()
+            .is_some_and(|flag| flag.load(Ordering::Relaxed))
     }
 
     /// Transfer everything the link covers.
@@ -189,7 +228,26 @@ impl<'a> Transfer<'a> {
         walk::sort(&mut files, self.link.order);
 
         for file in files {
-            let outcome = self.transfer_one(&file)?;
+            if self.cancelled() {
+                tracing::info!("stopping at the user's request");
+                summary.cancelled = true;
+                break;
+            }
+            // One unreadable file must not abandon the other three thousand.
+            // The failure is journaled, reported, and the drain carries on;
+            // `failures` is what the caller shows at the end.
+            let outcome = match self.transfer_one(&file) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    tracing::warn!(path = %file.path.display(), %error, "transfer failed");
+                    summary.failed += 1;
+                    summary.failures.push(Failure {
+                        path: file.path.clone(),
+                        reason: error.to_string(),
+                    });
+                    FileOutcome::Failed
+                }
+            };
             self.progress.finished(&file.path, outcome);
 
             match outcome {
@@ -200,12 +258,16 @@ impl<'a> Transfer<'a> {
                 FileOutcome::AlreadyPresent => summary.already_present += 1,
                 FileOutcome::Skipped(_) => summary.skipped += 1,
                 FileOutcome::Quarantined => summary.quarantined += 1,
+                // Already counted above; the source was left untouched.
+                FileOutcome::Failed => {}
             }
         }
 
+        // Pruning a half-drained tree would remove directories the remaining
+        // files still need, so a cancelled run leaves the structure alone.
         // Only prune when we were the ones emptying directories. A --copy run
         // has removed nothing, so anything empty was already empty.
-        if self.link.source_policy != SourcePolicy::Keep {
+        if self.link.source_policy != SourcePolicy::Keep && !summary.cancelled {
             summary.pruned = walk::prune_empty(self.source, Path::new(""))?;
         }
 

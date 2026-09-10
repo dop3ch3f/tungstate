@@ -406,6 +406,21 @@ impl Journal {
         )
     }
 
+    /// The most recent operations, newest first.
+    ///
+    /// Backs the window's activity view, where the interesting rows are the
+    /// ones that just happened.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn recent(&self, limit: u32) -> Result<Vec<Op>> {
+        self.select(
+            "SELECT * FROM ops ORDER BY id DESC LIMIT ?1",
+            rusqlite::params![limit],
+            "reading recent activity",
+        )
+    }
+
     /// Where something ended up, most recent first.
     ///
     /// # Errors

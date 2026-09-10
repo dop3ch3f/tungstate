@@ -5,7 +5,7 @@
 
 # Node (web client, slice 14)
 node_modules/
-crates/tungstate-web/dist/
+crates/tungstate-gui/ui/dist/
 
 # Local state that must never be committed
 *.db
