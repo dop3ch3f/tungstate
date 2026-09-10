@@ -140,6 +140,27 @@ export function shortPath(path: string, keep = 3): string {
   return "…/" + parts.slice(-keep).join("/");
 }
 
+/** A human name for what a file is, for the Type column. */
+export function kind(entry: { is_dir: boolean; name: string }): string {
+  if (entry.is_dir) return "Folder";
+  const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
+  if (!entry.name.includes(".")) return "File";
+  const groups: Record<string, string[]> = {
+    Video: ["mp4", "mov", "mkv", "avi", "m4v", "webm", "mpg", "mpeg", "wmv", "flv", "mts", "m2ts"],
+    Image: ["jpg", "jpeg", "png", "heic", "heif", "gif", "tiff", "tif", "webp", "bmp", "svg"],
+    "Raw image": ["raw", "cr2", "cr3", "nef", "arw", "dng", "orf", "raf"],
+    Audio: ["mp3", "wav", "flac", "aac", "m4a", "aiff", "ogg", "opus"],
+    Archive: ["zip", "tar", "gz", "bz2", "xz", "7z", "rar", "dmg", "iso"],
+    Document: ["pdf", "doc", "docx", "pages", "txt", "md", "rtf", "odt"],
+    Sheet: ["xls", "xlsx", "numbers", "csv", "tsv"],
+    Project: ["fcpbundle", "prproj", "aep", "logicx", "als", "ptx"],
+  };
+  for (const [label, exts] of Object.entries(groups)) {
+    if (exts.includes(ext)) return label;
+  }
+  return ext.toUpperCase();
+}
+
 /** A quiet type mark rather than an icon set: no assets, no licensing, no weight. */
 export function mark(entry: { is_dir: boolean; name: string }): string {
   if (entry.is_dir) return "▸";

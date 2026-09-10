@@ -137,19 +137,34 @@ button, .chrome { user-select: none; }
 
 .head, .row {
   display: grid;
-  grid-template-columns: 1fr 84px 108px;
-  gap: 10px;
-  padding: 0 12px;
+  grid-template-columns: 26px 1fr 92px 82px 96px;
+  gap: 8px;
+  padding: 0 10px;
   align-items: center;
 }
 .head {
   position: sticky; top: 0; z-index: 1;
-  height: 26px;
+  height: 27px;
   background: var(--ore);
   border-bottom: 1px solid var(--seam-soft);
   color: var(--dust-dim); font-size: 11px;
 }
-.head .num, .row .num { text-align: right; }
+.row .num, .head .num { text-align: right; }
+.row .kind { color: var(--dust-dim); font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Sortable headers read as controls without shouting. */
+.sorter {
+  appearance: none; background: none; border: 0; padding: 0;
+  font: inherit; font-size: 11px; color: var(--dust-dim);
+  cursor: pointer; text-align: left; white-space: nowrap;
+  display: flex; align-items: baseline; gap: 4px;
+}
+.sorter.num { justify-content: flex-end; }
+.sorter:hover { color: var(--light); }
+.sorter i { font-style: normal; font-size: 8px; color: var(--fluoresce); }
+
+.tick { cursor: pointer; margin: 0 auto; accent-color: var(--fluoresce); }
+.tick:disabled { cursor: default; opacity: 0.4; }
 
 .row {
   height: var(--row);
@@ -183,6 +198,9 @@ button, .chrome { user-select: none; }
 }
 .actionbar .tally { color: var(--dust); font-size: 12px; margin-right: auto; }
 .actionbar .tally b { color: var(--light); font-weight: 600; font-variant-numeric: tabular-nums; }
+/* The route is the thing that must never be misread in a two-pane tool. */
+.actionbar .route-line { color: var(--dust-dim); font-size: 11.5px; }
+.actionbar .route-line b { color: var(--fluoresce); font-weight: 500; font-family: var(--mono); }
 
 /* Transfer ledger ------------------------------------------------------ */
 

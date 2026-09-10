@@ -26,10 +26,18 @@ const picked = ref<{ left: string[]; right: string[] }>({ left: [], right: [] })
 const pickedBytes = ref<{ left: number; right: number }>({ left: 0, right: 0 });
 const paths = ref<{ left: string; right: string }>({ left: "", right: "" });
 
-const source = computed(() => (activeSide.value === "left" ? "left" : "right") as "left" | "right");
-const target = computed(() => (activeSide.value === "left" ? "right" : "left") as "left" | "right");
+const source = computed<"left" | "right">(() => {
+  const here = picked.value[activeSide.value].length;
+  const other = activeSide.value === "left" ? picked.value.right.length : picked.value.left.length;
+  // Selecting on one side and clicking into the other should not silently flip
+  // the direction, so only fall through when the active pane has nothing.
+  if (here === 0 && other > 0) return activeSide.value === "left" ? "right" : "left";
+  return activeSide.value;
+});
+const target = computed<"left" | "right">(() => (source.value === "left" ? "right" : "left"));
 const selection = computed(() => picked.value[source.value]);
 const selectionBytes = computed(() => pickedBytes.value[source.value]);
+const arrow = computed(() => (source.value === "left" ? "→" : "←"));
 
 // Transfer state
 const rows = ref<Row[]>([]);
@@ -178,15 +186,17 @@ const running = computed(() => liveFile.value !== null);
         <div class="tally">
           <template v-if="selection.length">
             <b>{{ selection.length }}</b> selected · {{ bytes(selectionBytes) }}
-            <span style="color: var(--dust-dim)"> · from the {{ source }} side</span>
+            <div class="route-line">
+              <b>{{ paths[source] }}</b> {{ arrow }} <b>{{ paths[target] }}</b>
+            </div>
           </template>
-          <template v-else>Select files, then move or copy them to the other side.</template>
+          <template v-else>Tick files on either side, then move or copy them across.</template>
         </div>
         <button class="btn" :disabled="!selection.length || running" @click="begin('copy')">
-          Copy {{ source === "left" ? "→" : "←" }}
+          {{ arrow === "→" ? `Copy ${arrow}` : `${arrow} Copy` }}
         </button>
         <button class="btn primary" :disabled="!selection.length || running" @click="begin('move')">
-          Move {{ source === "left" ? "→" : "←" }}
+          {{ arrow === "→" ? `Move ${arrow}` : `${arrow} Move` }}
         </button>
       </footer>
     </template>
