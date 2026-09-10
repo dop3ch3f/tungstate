@@ -315,3 +315,30 @@ button, .chrome { user-select: none; }
 .welcome li { margin-bottom: 7px; }
 .welcome li b { color: var(--light); font-weight: 600; }
 .welcome .go { display: flex; gap: 9px; align-items: center; }
+
+/* Preview inside the sync dialog ---------------------------------------- */
+
+.prospect { margin-bottom: 18px; }
+.tallies { display: flex; gap: 22px; margin-bottom: 10px; }
+.tallies div { display: flex; flex-direction: column; }
+.tallies b { font-family: var(--mono); font-size: 19px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.tallies b.warn { color: var(--held); }
+.tallies span { color: var(--dust-dim); font-size: 11px; }
+
+.lines {
+  list-style: none; margin: 0; padding: 0;
+  max-height: 168px; overflow-y: auto;
+  border: 1px solid var(--seam); border-radius: var(--r);
+  background: var(--ore-sink);
+}
+.lines li {
+  display: grid; grid-template-columns: 1fr auto auto; gap: 10px;
+  padding: 4px 10px; font-size: 12px; align-items: baseline;
+  border-bottom: 1px solid var(--seam-soft);
+}
+.lines li:last-child { border-bottom: 0; }
+.lines .p { font-family: var(--mono); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lines .w { color: var(--dust-dim); font-size: 11px; }
+.lines .s { font-family: var(--mono); color: var(--dust); font-variant-numeric: tabular-nums; }
+.lines li.clash .w, .lines li.hold .w { color: var(--held); }
+.lines li.move .w { color: var(--verified); }

@@ -812,3 +812,108 @@ fn a_missing_destination_root_is_never_recreated() {
     ));
     assert!(!gone.exists(), "the root must not have been conjured up");
 }
+
+#[test]
+fn a_preview_changes_absolutely_nothing() {
+    // The whole point: you can look before you leap, and looking is free.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("a.mp4", b"aaaa");
+    rig.write_source("sub/b.mp4", b"bbbb");
+
+    let before: Vec<_> = std::fs::read_dir(rig.source_dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+
+    let preview = preview(&rig.link, &rig.source, &rig.destination, None).unwrap();
+
+    assert_eq!(preview.fresh, 2);
+    assert_eq!(preview.bytes, 8);
+    assert!(preview.removes_originals);
+
+    let after: Vec<_> = std::fs::read_dir(rig.source_dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
+    assert_eq!(before, after, "the source must be untouched");
+    assert_eq!(
+        std::fs::read_dir(rig.dest_dir.path()).unwrap().count(),
+        0,
+        "the destination must be untouched"
+    );
+}
+
+#[test]
+fn a_preview_distinguishes_a_clash_from_a_same_size_file() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("same.mp4", b"1234");
+    rig.write_dest("same.mp4", b"5678");
+    rig.write_source("clash.mp4", b"1234");
+    rig.write_dest("clash.mp4", b"much longer contents");
+    rig.write_source("new.mp4", b"1234");
+
+    let preview = preview(&rig.link, &rig.source, &rig.destination, None).unwrap();
+
+    assert_eq!(preview.fresh, 1);
+    assert_eq!(
+        preview.same_size, 1,
+        "same size is reported, not guessed at"
+    );
+    assert_eq!(preview.clashes, 1);
+
+    let by_name = |n: &str| {
+        preview
+            .items
+            .iter()
+            .find(|i| i.path == Path::new(n))
+            .unwrap()
+            .prospect
+            .clone()
+    };
+    assert_eq!(by_name("new.mp4"), Prospect::Fresh);
+    assert_eq!(by_name("same.mp4"), Prospect::SameSize { existing: 4 });
+    assert_eq!(by_name("clash.mp4"), Prospect::Clash { existing: 20 });
+}
+
+#[test]
+fn a_preview_reports_what_the_cooldown_would_hold_back() {
+    let mut rig = Rig::new(SourcePolicy::Delete);
+    rig.link.cooldown = Duration::from_secs(3600);
+    rig.write_source("downloading.mp4", b"partial");
+
+    let preview = preview(&rig.link, &rig.source, &rig.destination, None).unwrap();
+
+    assert_eq!(preview.too_recent, 1);
+    assert_eq!(
+        preview.bytes, 0,
+        "held-back files are not counted as moving"
+    );
+}
+
+#[test]
+fn a_preview_of_an_unreachable_destination_says_so() {
+    // Worth knowing before agreeing to anything, not after.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("a.mp4", b"aaaa");
+    let gone = LocalBackend::new(rig.dest_dir.path().join("not-mounted"));
+
+    assert!(preview(&rig.link, &rig.source, &gone, None).is_err());
+}
+
+#[test]
+fn a_preview_can_be_limited_to_a_selection() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("wanted.mp4", b"aaaa");
+    rig.write_source("ignored.mp4", b"bbbb");
+
+    let preview = preview(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        Some(&[PathBuf::from("wanted.mp4")]),
+    )
+    .unwrap();
+
+    assert_eq!(preview.items.len(), 1);
+    assert_eq!(preview.items[0].path, Path::new("wanted.mp4"));
+}

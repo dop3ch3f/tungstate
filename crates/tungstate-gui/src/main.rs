@@ -439,6 +439,83 @@ fn plan_transfer(request: &TransferRequest) -> std::result::Result<Plan, String>
     })
 }
 
+/// What a transfer would do, for the dialog to show before anything happens.
+#[derive(Debug, Serialize)]
+struct PreviewView {
+    fresh: u64,
+    same_size: u64,
+    clashes: u64,
+    too_recent: u64,
+    bytes: u64,
+    removes_originals: bool,
+    items: Vec<ProspectView>,
+}
+
+#[derive(Debug, Serialize)]
+struct ProspectView {
+    path: String,
+    size: u64,
+    /// move, check, clash or hold.
+    outcome: &'static str,
+    existing: Option<u64>,
+}
+
+#[tauri::command]
+fn preview_transfer(request: TransferRequest) -> Result<PreviewView, String> {
+    let plan = plan_transfer(&request)?;
+
+    // A throwaway link carrying the chosen settings. Nothing is stored: a
+    // preview must not leave a trace any more than it moves a file.
+    let link = Link {
+        id: tungstate_journal::LinkId(0),
+        name: String::from("preview"),
+        source_root: plan.source.clone(),
+        destination_root: plan.destination.clone(),
+        source_policy: plan.source_policy,
+        verify: plan.verify,
+        order: Order::LargestFirst,
+        on_conflict: plan.on_conflict,
+        cooldown: Duration::ZERO,
+        saved: false,
+    };
+
+    let source = LocalBackend::new(plan.source);
+    let destination = LocalBackend::new(plan.destination);
+    let names: Vec<PathBuf> = request.names.iter().map(PathBuf::from).collect();
+
+    let preview = tungstate_transfer::preview(&link, &source, &destination, Some(&names))
+        .map_err(describe)?;
+
+    Ok(PreviewView {
+        fresh: preview.fresh,
+        same_size: preview.same_size,
+        clashes: preview.clashes,
+        too_recent: preview.too_recent,
+        bytes: preview.bytes,
+        removes_originals: preview.removes_originals,
+        items: preview
+            .items
+            .iter()
+            .map(|item| {
+                let (outcome, existing) = match &item.prospect {
+                    tungstate_transfer::Prospect::Fresh => ("move", None),
+                    tungstate_transfer::Prospect::SameSize { existing } => {
+                        ("check", Some(*existing))
+                    }
+                    tungstate_transfer::Prospect::Clash { existing } => ("clash", Some(*existing)),
+                    tungstate_transfer::Prospect::TooRecent => ("hold", None),
+                };
+                ProspectView {
+                    path: item.path.display().to_string(),
+                    size: item.size,
+                    outcome,
+                    existing,
+                }
+            })
+            .collect(),
+    })
+}
+
 #[tauri::command]
 fn start_transfer(request: TransferRequest, app: AppHandle) -> Result<String, String> {
     let Plan {
@@ -686,6 +763,7 @@ fn main() {
             last_panes,
             remember_panes,
             start_transfer,
+            preview_transfer,
             cancel_run,
             resolve_conflict,
             history,

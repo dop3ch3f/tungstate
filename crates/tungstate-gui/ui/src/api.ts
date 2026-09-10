@@ -72,7 +72,25 @@ export interface TransferRequest {
   save_as: string | null;
 }
 
+export interface Prospect {
+  path: string;
+  size: number;
+  outcome: "move" | "check" | "clash" | "hold";
+  existing: number | null;
+}
+
+export interface Preview {
+  fresh: number;
+  same_size: number;
+  clashes: number;
+  too_recent: number;
+  bytes: number;
+  removes_originals: boolean;
+  items: Prospect[];
+}
+
 export const api = {
+  previewTransfer: (request: TransferRequest) => invoke<Preview>("preview_transfer", { request }),
   browse: (path: string) => invoke<Listing>("browse", { path }),
   places: () => invoke<Place[]>("places"),
   lastPanes: () => invoke<{ left: string | null; right: string | null }>("last_panes"),

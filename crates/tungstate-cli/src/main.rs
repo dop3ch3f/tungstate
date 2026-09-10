@@ -94,6 +94,11 @@ enum LinkAction {
         #[arg(long, default_value_t = 30)]
         cooldown: u64,
     },
+    /// Show what a run would do, without doing any of it.
+    Preview {
+        /// The link name.
+        name: String,
+    },
     /// List configured links.
     List,
     /// Run a link, resuming anything a previous run left unfinished.
@@ -315,12 +320,78 @@ fn link(action: LinkAction) -> std::process::ExitCode {
             Err(error) => fail(&error),
         },
 
+        LinkAction::Preview { name } => preview_link(&journal, &name),
+
         LinkAction::Run {
             name,
             yes,
             on_conflict,
         } => run_link(&journal, &name, yes, on_conflict.as_deref()),
     }
+}
+
+fn preview_link(journal: &Journal, name: &str) -> std::process::ExitCode {
+    let link = match journal.link_by_name(name) {
+        Ok(link) => link,
+        Err(error) => return fail(&error),
+    };
+    let source = LocalBackend::new(link.source_root.clone());
+    let destination = LocalBackend::new(link.destination_root.clone());
+
+    let preview = match tungstate_transfer::preview(&link, &source, &destination, None) {
+        Ok(preview) => preview,
+        Err(error) => return fail(&error),
+    };
+
+    println!(
+        "{} -> {}\n",
+        link.source_root.display(),
+        link.destination_root.display()
+    );
+
+    for item in &preview.items {
+        let (verb, detail) = match &item.prospect {
+            tungstate_transfer::Prospect::Fresh => ("move", String::new()),
+            tungstate_transfer::Prospect::SameSize { .. } => (
+                "check",
+                " (same size already there; fingerprints compared when you run)".to_string(),
+            ),
+            tungstate_transfer::Prospect::Clash { existing } => (
+                "clash",
+                format!(
+                    " (a different {} file holds that name)",
+                    human_bytes(*existing)
+                ),
+            ),
+            tungstate_transfer::Prospect::TooRecent => {
+                ("hold", " (written too recently)".to_string())
+            }
+        };
+        println!(
+            "  {verb:<6} {:<48} {:>10}{detail}",
+            item.path.display(),
+            human_bytes(item.size)
+        );
+    }
+
+    println!(
+        "\n{} to move ({}), {} same size, {} clash, {} held back",
+        preview.fresh,
+        human_bytes(preview.bytes),
+        preview.same_size,
+        preview.clashes,
+        preview.too_recent
+    );
+    println!(
+        "{}",
+        if preview.removes_originals {
+            "Originals here would be removed once each copy is verified."
+        } else {
+            "Originals here would be left alone."
+        }
+    );
+    println!("\nNothing has been changed. Run it with: tungstate link run {name}");
+    std::process::ExitCode::SUCCESS
 }
 
 fn run_link(

@@ -163,6 +163,153 @@ impl Progress for SilentProgress {
     fn finished(&mut self, _path: &Path, _outcome: FileOutcome) {}
 }
 
+/// What would happen to one file, without anything happening to it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Prospect {
+    /// Nothing holds that name; it would be copied across.
+    Fresh,
+    /// Something of the same size is already there. Whether it is the same file
+    /// is only knowable by reading both, which a preview deliberately does not
+    /// do; the run itself compares fingerprints and decides.
+    SameSize {
+        /// Size of the file already at the destination.
+        existing: u64,
+    },
+    /// Something of a different size holds that name, so it is a genuine clash.
+    Clash {
+        /// Size of the file already at the destination.
+        existing: u64,
+    },
+    /// Written too recently to be safe to move; it would be left for next time.
+    TooRecent,
+}
+
+/// One line of a preview.
+#[derive(Debug, Clone)]
+pub struct Prospective {
+    /// Path relative to the source root.
+    pub path: PathBuf,
+    /// Where it would land, relative to the destination root.
+    pub destination: PathBuf,
+    /// Size in bytes.
+    pub size: u64,
+    /// What would happen.
+    pub prospect: Prospect,
+}
+
+/// Everything a run would do, computed without touching either side.
+#[derive(Debug, Clone, Default)]
+pub struct Preview {
+    /// Every file the run would consider, largest first.
+    pub items: Vec<Prospective>,
+    /// Files that would be copied across.
+    pub fresh: u64,
+    /// Files whose name is taken by something the same size.
+    pub same_size: u64,
+    /// Files whose name is taken by something different.
+    pub clashes: u64,
+    /// Files that would be left for next time.
+    pub too_recent: u64,
+    /// Bytes that would move, excluding anything held back.
+    pub bytes: u64,
+    /// True when the originals would be removed once verified.
+    pub removes_originals: bool,
+}
+
+/// Work out what a run would do, changing nothing.
+///
+/// Deliberately cheap: it compares sizes rather than fingerprints, because
+/// hashing both sides would read every byte twice before the user has agreed to
+/// anything. A same-size pair is reported as such rather than guessed at.
+///
+/// # Errors
+/// [`TransferError`] if either side cannot be listed, or if the destination is
+/// not reachable, which is worth knowing before agreeing to a transfer.
+pub fn preview(
+    link: &Link,
+    source: &dyn Backend,
+    destination: &dyn Backend,
+    only: Option<&[PathBuf]>,
+) -> Result<Preview> {
+    destination.root_token()?;
+
+    let mut files = match only {
+        Some(chosen) => gather(source, chosen)?,
+        None => walk::files(source)?,
+    };
+    walk::sort(&mut files, link.order);
+
+    let mut preview = Preview {
+        removes_originals: link.source_policy != SourcePolicy::Keep,
+        ..Preview::default()
+    };
+
+    for file in files {
+        let landing = file.path.clone();
+        let prospect = if within(link, &file) {
+            preview.too_recent += 1;
+            Prospect::TooRecent
+        } else {
+            match destination.stat(&landing) {
+                Err(_) => {
+                    preview.fresh += 1;
+                    preview.bytes += file.size;
+                    Prospect::Fresh
+                }
+                Ok(existing) if existing.len == file.size => {
+                    preview.same_size += 1;
+                    preview.bytes += file.size;
+                    Prospect::SameSize {
+                        existing: existing.len,
+                    }
+                }
+                Ok(existing) => {
+                    preview.clashes += 1;
+                    preview.bytes += file.size;
+                    Prospect::Clash {
+                        existing: existing.len,
+                    }
+                }
+            }
+        };
+
+        preview.items.push(Prospective {
+            path: file.path,
+            destination: landing,
+            size: file.size,
+            prospect,
+        });
+    }
+
+    Ok(preview)
+}
+
+/// Expand a chosen set into the files it covers.
+fn gather(source: &dyn Backend, chosen: &[PathBuf]) -> Result<Vec<walk::File>> {
+    let mut files = Vec::new();
+    for path in chosen {
+        let meta = source.stat(path)?;
+        if meta.is_dir {
+            files.extend(walk::files_under(source, path)?);
+        } else if !meta.is_symlink {
+            files.push(walk::File {
+                path: path.clone(),
+                size: meta.len,
+                modified: meta.modified,
+            });
+        }
+    }
+    Ok(files)
+}
+
+fn within(link: &Link, file: &walk::File) -> bool {
+    file.modified.is_some_and(|modified| {
+        SystemTime::now()
+            .duration_since(modified)
+            .is_ok_and(|age| age < link.cooldown)
+    })
+}
+
 /// One run of one link.
 pub struct Transfer<'a> {
     link: &'a Link,
