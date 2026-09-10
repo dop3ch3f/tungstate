@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import Mark from "./Mark.vue";
 defineEmits<{ begin: [] }>();
 </script>
 
 <template>
   <div class="welcome">
     <div class="card">
+      <Mark :size="62" class="hero-mark" />
       <h1>Move files without holding your breath</h1>
       <p>
         Tungstate copies one file at a time, checks it arrived intact, and only then

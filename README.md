@@ -1,4 +1,6 @@
-# tungstate
+<p align="center">
+  <img src="docs/brand/wordmark.png" alt="tungstate" width="620">
+</p>
 
 A reconciliation controller for filesystems.
 
@@ -11,3 +13,13 @@ Status: early construction. The durable drain works: `tungstate link add <from> 
 `docs/SYLLABUS.md` for the build order.
 
 Licensed under either of Apache License, Version 2.0 or MIT license at your option.
+
+## The name
+
+Tungsten is element 74, `W`. A **tungstate** is the WO₄²⁻ anion, and *scheelite*
+is calcium tungstate, CaWO₄: a dense grey mineral that fluoresces bright
+blue-white under ultraviolet light.
+
+That is where the identity comes from. The mark is a periodic tile carrying the
+anion, and the interface is mineral grey with a single fluorescent accent
+reserved for the file being verified right now. See [docs/brand](docs/brand).

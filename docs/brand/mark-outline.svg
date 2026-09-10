@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024"><defs>
+      <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#23272c"/><stop offset="1" stop-color="#13161a"/></linearGradient>
+      <linearGradient id="face" x1="0" y1="0" x2="0.3" y2="1">
+        <stop offset="0" stop-color="#a9e2ff"/><stop offset="1" stop-color="#7fd4ff"/></linearGradient>
+      <radialGradient id="core" cx="0.5" cy="0.46" r="0.6">
+        <stop offset="0" stop-color="#7fd4ff" stop-opacity="0.30"/>
+        <stop offset="1" stop-color="#7fd4ff" stop-opacity="0"/></radialGradient></defs><rect x="104.00" y="104.00" width="816.00" height="816.00" rx="184.00" fill="url(#plate)"/><circle cx="512.00" cy="508.00" r="348.00" fill="url(#core)"/><rect x="232.00" y="232.00" width="560.00" height="560.00" rx="52.00" fill="none" stroke="#7fd4ff" stroke-width="20.00"/><text x="732.00" y="332.00" font-family="ui-sans-serif,-apple-system,Helvetica Neue,Helvetica,Arial" font-size="54.40" font-weight="500" fill="#98a2ac" fill-opacity="0.85" text-anchor="end">2−</text><text x="512.00" y="576.00" font-family="ui-sans-serif,-apple-system,Helvetica Neue,Helvetica,Arial" font-size="272.00" font-weight="600" fill="#7fd4ff" text-anchor="middle" letter-spacing="-8.00">WO</text><text x="512.00" y="660.00" font-family="ui-sans-serif,-apple-system,Helvetica Neue,Helvetica,Arial" font-size="52.00" font-weight="500" fill="#98a2ac" fill-opacity="0.85" text-anchor="middle" letter-spacing="6.00">TUNGSTATE</text><text x="732.00" y="732.00" font-family="ui-sans-serif,-apple-system,Helvetica Neue,Helvetica,Arial" font-size="54.40" font-weight="500" fill="#98a2ac" fill-opacity="0.85" text-anchor="end">4</text></svg>

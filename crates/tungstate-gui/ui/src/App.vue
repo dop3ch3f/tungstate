@@ -5,6 +5,7 @@ import SyncModal, { type Payload } from "./components/SyncModal.vue";
 import TransfersView, { type Row } from "./components/TransfersView.vue";
 import ActivityView from "./components/ActivityView.vue";
 import Welcome from "./components/Welcome.vue";
+import Mark from "./components/Mark.vue";
 import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg } from "./api";
 
 type Tab = "browse" | "transfers" | "activity";
@@ -163,7 +164,7 @@ const running = computed(() => liveFile.value !== null);
 <template>
   <div class="frame">
     <header class="topbar chrome">
-      <div class="wordmark">tung<span>state</span></div>
+      <div class="wordmark"><Mark :size="20" /><span class="name">tung<span>state</span></span></div>
       <nav class="tabs">
         <button :aria-current="tab === 'browse'" @click="tab = 'browse'">Browse</button>
         <button :aria-current="tab === 'transfers'" @click="tab = 'transfers'">

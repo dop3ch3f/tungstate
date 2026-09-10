@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512"><defs>
+      <linearGradient id="plate" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0" stop-color="#23272c"/><stop offset="1" stop-color="#13161a"/></linearGradient>
+      <linearGradient id="face" x1="0" y1="0" x2="0.3" y2="1">
+        <stop offset="0" stop-color="#a9e2ff"/><stop offset="1" stop-color="#7fd4ff"/></linearGradient>
+      <radialGradient id="core" cx="0.5" cy="0.46" r="0.6">
+        <stop offset="0" stop-color="#7fd4ff" stop-opacity="0.30"/>
+        <stop offset="1" stop-color="#7fd4ff" stop-opacity="0"/></radialGradient></defs><rect x="116.00" y="116.00" width="280.00" height="280.00" rx="26.00" fill="none" stroke="#7fd4ff" stroke-width="16.00"/><text x="256.00" y="302.00" font-family="ui-sans-serif,-apple-system,Helvetica Neue,Helvetica,Arial" font-size="150.00" font-weight="600" fill="#7fd4ff" text-anchor="middle" letter-spacing="-5.00">WO</text></svg>

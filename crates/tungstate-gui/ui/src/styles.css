@@ -62,8 +62,8 @@ button, .chrome { user-select: none; }
   background: var(--ore-sink);
   border-bottom: 1px solid var(--seam);
 }
-.wordmark { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
-.wordmark span { color: var(--fluoresce); }
+.wordmark { display: flex; align-items: center; gap: 8px; font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+.wordmark .name span { color: var(--fluoresce); }
 
 .tabs { display: flex; gap: 2px; }
 .tabs button {
@@ -363,3 +363,5 @@ button, .chrome { user-select: none; }
 
 .lines .dir { color: var(--fluoresce); margin-right: 5px; }
 .modal .route + .route { margin-top: -6px; }
+
+.welcome .hero-mark { margin-bottom: 20px; }
