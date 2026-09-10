@@ -492,12 +492,12 @@ impl<'a> Transfer<'a> {
             written += read as u64;
         }
 
-        writer.flush().map_err(|e| TransferError::Io {
-            path: destination.to_path_buf(),
-            source: e,
-        })?;
-        // Dropping closes the handle, which Windows requires before the rename.
-        drop(writer);
+        // finish() consumes the writer, so it cannot be used afterwards, and it
+        // fsyncs. Without that the bytes would only be in the page cache and a
+        // power cut after the journal commit could leave a deleted original and
+        // an empty destination. It also closes the handle, which Windows
+        // requires before the rename.
+        writer.finish()?;
 
         Ok((hasher.finalize().to_hex().to_string(), written))
     }

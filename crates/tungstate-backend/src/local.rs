@@ -4,7 +4,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use crate::{Backend, BackendError, Capabilities, Entry, Meta, Result};
+use crate::{Backend, BackendError, Capabilities, Entry, Meta, Result, WriteFinish};
 
 /// Prefix for probe files, so a leftover is obviously ours and obviously junk.
 const PROBE_PREFIX: &str = ".tungstate-probe";
@@ -216,10 +216,10 @@ impl Backend for LocalBackend {
         Ok(Box::new(file))
     }
 
-    fn create_write(&self, path: &Path) -> Result<Box<dyn std::io::Write + Send>> {
+    fn create_write(&self, path: &Path) -> Result<Box<dyn WriteFinish>> {
         let full = self.guarded(path, Tail::MustNotBeLink)?;
         let file = std::fs::File::create(&full).map_err(io_at(&full))?;
-        Ok(Box::new(file))
+        Ok(Box::new(LocalWrite { file, path: full }))
     }
 
     fn rename(&self, from: &Path, to: &Path) -> Result<()> {
@@ -243,6 +243,33 @@ impl Backend for LocalBackend {
     fn create_dir_all(&self, path: &Path) -> Result<()> {
         let full = self.guarded(path, Tail::MustNotBeLink)?;
         std::fs::create_dir_all(&full).map_err(io_at(&full))
+    }
+}
+
+/// A local file that fsyncs when finished.
+#[derive(Debug)]
+struct LocalWrite {
+    file: std::fs::File,
+    path: PathBuf,
+}
+
+impl std::io::Write for LocalWrite {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.file.write(buf)
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.file.flush()
+    }
+}
+
+impl WriteFinish for LocalWrite {
+    fn finish(mut self: Box<Self>) -> Result<()> {
+        use std::io::Write as _;
+        self.file.flush().map_err(io_at(&self.path))?;
+        // The one that matters. Without it the bytes are only in the page cache,
+        // and a power cut after the journal commit would leave a deleted
+        // original and an empty destination.
+        self.file.sync_all().map_err(io_at(&self.path))
     }
 }
 
@@ -483,6 +510,21 @@ mod tests {
         assert!(backend.stat(Path::new("link")).unwrap().is_symlink);
         backend.remove_file(Path::new("link")).unwrap();
         assert!(backend.stat(Path::new("link")).is_err());
+    }
+
+    #[test]
+    fn a_finished_write_is_readable_and_complete() {
+        // finish() is what makes a write durable. This cannot observe an fsync
+        // directly without pulling the power, but it does lock the contract:
+        // the writer commits, closes, and cannot be used afterwards.
+        let (dir, backend) = backend();
+
+        let mut writer = backend.create_write(Path::new("v.mp4")).unwrap();
+        writer.write_all(b"payload").unwrap();
+        writer.finish().unwrap();
+
+        assert_eq!(std::fs::read(dir.path().join("v.mp4")).unwrap(), b"payload");
+        assert_eq!(backend.stat(Path::new("v.mp4")).unwrap().len, 7);
     }
 
     #[cfg(unix)]

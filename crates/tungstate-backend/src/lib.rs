@@ -85,6 +85,24 @@ pub struct Capabilities {
     pub case_sensitive: bool,
 }
 
+/// A sink for a file being written, which must be finished explicitly.
+///
+/// `flush` is not enough. On a local file it does nothing at all, because
+/// `write_all` has already reached the kernel and the bytes are sitting in the
+/// page cache; a power cut then loses them. Remote backends have the mirror
+/// problem: a protocol write is not committed until the stream is closed.
+///
+/// [`WriteFinish::finish`] consumes the writer so it cannot be used afterwards,
+/// which makes "did you commit this?" a compile-time question.
+pub trait WriteFinish: Write + Send {
+    /// Commit everything written durably, then close.
+    ///
+    /// # Errors
+    /// [`BackendError::Io`] if the data cannot be committed. The destination
+    /// must be treated as incomplete if this fails.
+    fn finish(self: Box<Self>) -> Result<()>;
+}
+
 /// A place files live.
 ///
 /// All paths are relative to the backend's root. Implementations must reject
@@ -122,9 +140,12 @@ pub trait Backend: Send + Sync {
 
     /// Create or truncate `path` and open it for streaming writes.
     ///
+    /// The caller must call [`WriteFinish::finish`]; dropping the writer without
+    /// it leaves the destination unreliable.
+    ///
     /// # Errors
     /// As [`Backend::stat`], plus [`BackendError::Io`] if the file cannot be created.
-    fn create_write(&self, path: &Path) -> Result<Box<dyn Write + Send>>;
+    fn create_write(&self, path: &Path) -> Result<Box<dyn WriteFinish>>;
 
     /// Move `from` to `to`, replacing `to` if it exists.
     ///

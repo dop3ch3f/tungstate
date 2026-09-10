@@ -2,8 +2,8 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use tungstate_backend::Backend;
 use tungstate_backend::local::LocalBackend;
+use tungstate_backend::{Backend, WriteFinish};
 use tungstate_journal::{
     ConflictAction, Journal, Link, LinkId, NewLink, Order, SourcePolicy, VerifyLevel,
 };
@@ -172,7 +172,7 @@ impl Backend for CorruptingBackend {
     fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
         self.0.open_read(path)
     }
-    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn Write + Send>> {
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
         Ok(Box::new(Corrupt(self.0.create_write(path)?)))
     }
     fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
@@ -189,7 +189,7 @@ impl Backend for CorruptingBackend {
     }
 }
 
-struct Corrupt(Box<dyn Write + Send>);
+struct Corrupt(Box<dyn WriteFinish>);
 
 impl Write for Corrupt {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
@@ -200,6 +200,12 @@ impl Write for Corrupt {
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.0.flush()
+    }
+}
+
+impl WriteFinish for Corrupt {
+    fn finish(self: Box<Self>) -> tungstate_backend::Result<()> {
+        self.0.finish()
     }
 }
 
