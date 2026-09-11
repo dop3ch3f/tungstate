@@ -71,21 +71,35 @@ const syncing = ref(false);
 const unlisten: Array<() => void> = [];
 
 onMounted(async () => {
-  places.value = await api.places();
-  const home = places.value.find((p) => p.label === "Home")?.path ?? "/";
-  const volume = places.value.find((p) => p.path.startsWith("/Volumes"))?.path;
-
-  // Where you were last beats any guess we could make.
-  const last = await api.lastPanes();
-  leftStart.value = last.left ?? places.value.find((p) => p.label === "Movies")?.path ?? home;
-  rightStart.value = last.right ?? volume ?? home;
+  // Listeners first, before anything that can throw. They were registered
+  // last, after four awaits, and when `listen` itself was being refused the
+  // whole of onMounted stopped there: browsing worked, transfers ran, and the
+  // Transfers tab stayed empty for ever with nothing on screen to say why.
+  try {
+    await attach();
+  } catch (e) {
+    error.value =
+      `This window cannot receive progress from the engine, so transfers will ` +
+      `run without showing here: ${String(e)}`;
+  }
 
   try {
+    places.value = await api.places();
+    const home = places.value.find((p) => p.label === "Home")?.path ?? "/";
+    const volume = places.value.find((p) => p.path.startsWith("/Volumes"))?.path;
+
+    // Where you were last beats any guess we could make.
+    const last = await api.lastPanes();
+    leftStart.value = last.left ?? places.value.find((p) => p.label === "Movies")?.path ?? home;
+    rightStart.value = last.right ?? volume ?? home;
+
     links.value = await api.links();
     const seen = await api.recent();
     onboarding.value = links.value.length === 0 && seen.length === 0;
   } catch (e) { error.value = String(e); }
+});
 
+async function attach() {
   unlisten.push(
     await on.started((e) => {
       liveFile.value = e.path;
@@ -104,7 +118,7 @@ onMounted(async () => {
     }),
     await on.failed((e) => { runError.value = e; stopping.value = false; }),
   );
-});
+}
 
 onUnmounted(() => unlisten.forEach((f) => f()));
 

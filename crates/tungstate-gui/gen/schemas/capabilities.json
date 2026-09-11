@@ -1,1 +1,1 @@
-{}
+{"default":{"identifier":"default","description":"Without this file Tauri resolves an empty ACL, and every core command the window calls is denied. The one that matters is event:listen: the window registers its progress listeners at startup, and a denial there means a running transfer never appears on screen and a conflict can never be answered.","local":true,"windows":["main"],"permissions":["core:default"]}}

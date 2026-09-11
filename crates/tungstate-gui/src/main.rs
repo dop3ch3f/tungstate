@@ -628,6 +628,14 @@ fn overlapping_names(legs: &[Leg]) -> Vec<String> {
 
 #[tauri::command]
 fn start_transfer(request: TransferRequest, app: AppHandle) -> Result<String, String> {
+    start_transfer_inner(request, app).inspect_err(|error| {
+        // Also in the log, so a terminal run or a bug report carries the
+        // reason without anyone having to read it off the screen.
+        tracing::error!(%error, "a transfer could not be started");
+    })
+}
+
+fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<String, String> {
     if request.legs.is_empty() {
         return Err("nothing is selected".to_string());
     }
@@ -831,6 +839,12 @@ fn spawn_run(
     // Its own thread keeps the window responsive throughout.
     std::thread::spawn(move || {
         let state = worker.state::<App>();
+        // Clears `running` however this thread ends, including a panic. Set
+        // with a plain store at the end, one panic would leave the flag stuck
+        // true and every later Move would be refused with "a transfer is
+        // already running" — for the rest of the session, with no way back
+        // but restarting the app.
+        let _guard = RunGuard(worker.clone());
         let fallback = queue[0].on_conflict;
         let mut resolver = WindowResolver::new(worker.clone(), replies, fallback);
         let mut progress = EventProgress::new(worker.clone());
@@ -881,9 +895,6 @@ fn spawn_run(
             }
         }
 
-        state.conflicts.close();
-        state.running.store(false, Ordering::SeqCst);
-
         let _ = match failure {
             Some(message) => worker.emit("transfer://error", message),
             None => worker.emit("transfer://done", SummaryView::from(&total)),
@@ -891,6 +902,22 @@ fn spawn_run(
     });
 
     Ok(())
+}
+
+/// Releases the "a transfer is running" flag however the worker thread ends.
+///
+/// `Drop` runs while a thread unwinds, so this holds even if the engine or a
+/// backend panics. The alternative — a store at the end of the happy path —
+/// turns one panic into a window that refuses every transfer until it is
+/// restarted.
+struct RunGuard(AppHandle);
+
+impl Drop for RunGuard {
+    fn drop(&mut self) {
+        let state = self.0.state::<App>();
+        state.conflicts.close();
+        state.running.store(false, Ordering::SeqCst);
+    }
 }
 
 /// Fold one leg's result into the running total for the whole operation.

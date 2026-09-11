@@ -38,11 +38,20 @@ const word: Record<string, string> = {
       </button>
     </div>
 
-    <div v-if="!props.rows.length && !props.summary" class="sub">
+    <!-- Outside the branches below on purpose. A run that fails before its
+         first file has no rows and no summary, and that is exactly when the
+         reason is the only thing worth showing. -->
+    <div v-if="props.error" class="notice bad">
+      <b>That transfer could not start.</b>
+      <div style="font-family: var(--mono); margin-top: 6px">{{ props.error }}</div>
+      <div class="note" style="margin-top: 6px">Nothing was moved, and every original is where it was.</div>
+    </div>
+
+    <div v-if="!props.rows.length && !props.summary && !props.error" class="sub">
       Nothing running. Select files in the browser and move or copy them.
     </div>
 
-    <template v-else>
+    <template v-else-if="props.rows.length || props.summary">
       <div class="readout">
         <div>
           <div class="mass">{{ bytes(reclaimed) }}</div>
@@ -51,8 +60,6 @@ const word: Record<string, string> = {
         <div class="count">{{ done }} of {{ props.rows.length }} files</div>
       </div>
       <div class="bar"><div :style="{ width: progress + '%' }"></div></div>
-
-      <div v-if="props.error" class="notice bad">{{ props.error }}</div>
 
       <div v-if="props.summary?.destination_lost" class="notice bad">
         <b>Stopped: the destination is no longer reachable.</b>
