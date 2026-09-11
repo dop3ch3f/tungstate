@@ -71,12 +71,41 @@ jobs:
             -e USERS="tungstate|s3cret|/ftp/tungstate|10000" \
             -e ADDRESS=127.0.0.1 -e MIN_PORT=30000 -e MAX_PORT=30039 \
             delfer/alpine-ftp-server
-          # The image creates the account before the directory, so make it.
+
+          # Wait for a real login, not for the container to exist. `docker exec`
+          # succeeds within a moment of `docker run`, so the previous version of
+          # this waited for nothing and the suite raced vsftpd to the port —
+          # passing twice and then failing with "Connection refused".
+          #
+          # The home directory is made inside the loop because the image creates
+          # the account before it creates the directory, and vsftpd refuses a
+          # login whose home is missing.
+          python3 - <<'PY'
+          import ftplib, sys, time
+          last = None
+          for _ in range(60):
+              try:
+                  ftp = ftplib.FTP()
+                  ftp.connect("127.0.0.1", 2121, timeout=3)
+                  ftp.login("tungstate", "s3cret")
+                  ftp.quit()
+                  print("ftp server is ready")
+                  sys.exit(0)
+              except Exception as error:
+                  last = error
+                  time.sleep(1)
+          print(f"ftp server never came up: {last}", file=sys.stderr)
+          sys.exit(1)
+          PY
+        # Separate step so the readiness poll above can retry the directory.
+      - name: Ensure the account has a home
+        run: |
           for _ in $(seq 1 30); do
             docker exec tungstate-ftp sh -c \
-              'mkdir -p /ftp/tungstate && chown tungstate:tungstate /ftp/tungstate' && break
+              'mkdir -p /ftp/tungstate && chown tungstate:tungstate /ftp/tungstate' && exit 0
             sleep 1
           done
+          exit 1
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
