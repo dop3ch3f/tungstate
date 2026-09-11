@@ -500,24 +500,8 @@ impl<'a> Transfer<'a> {
     fn recover(&mut self) -> Result<u64> {
         let interrupted = self.journal.incomplete_for_link(self.link.id)?;
 
-        let atomic = self.destination.capabilities().atomic_rename;
-
         for op in &interrupted {
-            if let Some(destination) = &op.destination {
-                if atomic {
-                    let partial = temp_name(&destination.path, op.id);
-                    // Already gone is the common case and not an error.
-                    let _ = self.destination.remove_file(&partial);
-                } else {
-                    // Nothing was written to a temp name, so the only partial
-                    // there can be is under the real name. Removing it is safe
-                    // because the source has not been touched: `copy_to`
-                    // applies the source policy only after the journal commit
-                    // this operation never reached.
-                    let _ = self.destination.remove_file(&destination.path);
-                    self.sweep_orphans(&destination.path);
-                }
-            }
+            clear_partial(self.destination, op);
             self.journal.finish(
                 op.id,
                 &Outcome::Failed {
@@ -542,28 +526,6 @@ impl<'a> Transfer<'a> {
     /// that are this destination's name plus the exact suffix shape. Assumes
     /// no second process is mid-write to the same destination path, which is
     /// already true — a link is run one at a time.
-    fn sweep_orphans(&self, destination: &Path) {
-        let Some(name) = destination.file_name().and_then(|n| n.to_str()) else {
-            return;
-        };
-        let directory = destination.parent().unwrap_or(Path::new(""));
-        let Ok(entries) = self.destination.read_dir(directory) else {
-            return;
-        };
-
-        for entry in entries {
-            if entry
-                .path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|candidate| is_orphan_temp(candidate, name))
-            {
-                tracing::debug!(path = %entry.path.display(), "removing an abandoned temporary file");
-                let _ = self.destination.remove_file(&entry.path);
-            }
-        }
-    }
-
     fn transfer_one(&mut self, file: &walk::File) -> Result<FileOutcome> {
         self.progress.starting(&file.path, file.size);
 
@@ -868,6 +830,110 @@ fn explain(error: &dyn std::error::Error) -> String {
         source = cause.source();
     }
     message
+}
+
+/// Remove whatever an interrupted operation left at the destination.
+///
+/// One function rather than one per caller. Resuming and discarding both have
+/// to clear exactly the same things, and a sweep that matched in one path and
+/// not the other is how a file gets deleted that should not have been.
+///
+/// Safe to call for an operation the journal still shows as `intended`,
+/// because `copy_to` applies the source policy only after the commit such an
+/// operation never reached: the original is still on the source.
+fn clear_partial(destination: &dyn Backend, op: &tungstate_journal::Op) {
+    let Some(landing) = &op.destination else {
+        return;
+    };
+
+    if destination.capabilities().atomic_rename {
+        let partial = temp_name(&landing.path, op.id);
+        // Already gone is the common case and not an error.
+        let _ = destination.remove_file(&partial);
+        return;
+    }
+
+    // Without rename nothing was written to a temp name, so the only partial
+    // there can be is under the real name.
+    let _ = destination.remove_file(&landing.path);
+    sweep_orphans(destination, &landing.path);
+}
+
+/// Delete temporary files a backend left beside `destination` when it died.
+///
+/// Only for backends that cannot rename, because those are the ones that may
+/// be doing their own temp-and-rename internally. `OpenDAL`'s FTP service is the
+/// case in hand: it streams to `<name>.<8 random chars>` and renames on close,
+/// and because the name is random neither it nor we can find it again
+/// afterwards. Left alone, a NAS accumulates one of these next to every
+/// transfer that was ever interrupted.
+///
+/// Scoped hard: only this destination's own directory, only names that are
+/// this file's name plus the exact suffix shape. Assumes no second process is
+/// mid-write to the same destination path, which is already true — a link runs
+/// one at a time.
+fn sweep_orphans(destination: &dyn Backend, path: &Path) {
+    let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+        return;
+    };
+    let directory = path.parent().unwrap_or(Path::new(""));
+    let Ok(entries) = destination.read_dir(directory) else {
+        return;
+    };
+
+    for entry in entries {
+        if entry
+            .path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|candidate| is_orphan_temp(candidate, name))
+        {
+            tracing::debug!(path = %entry.path.display(), "removing an abandoned temporary file");
+            let _ = destination.remove_file(&entry.path);
+        }
+    }
+}
+
+/// What discarding an interrupted run removed.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Discarded {
+    /// Operations marked failed rather than left claiming to be in flight.
+    pub operations: u64,
+    /// Total size of the files those operations were carrying.
+    ///
+    /// What the transfer was *for*, not what was reclaimed: how much of each
+    /// partial had landed is only knowable by asking the destination before
+    /// deleting, which is a round trip per file.
+    pub bytes: u64,
+}
+
+/// Abandon an interrupted run: clear what it left behind, copy nothing.
+///
+/// The counterpart to resuming. Same cleanup the next run would have done,
+/// without the transfer — for when the answer to "shall I finish this?" is no
+/// and the part-copied file should stop occupying the destination.
+///
+/// # Errors
+/// [`TransferError::Journal`] if the operations cannot be read or updated.
+/// Failing to remove a partial is not an error: already gone is the outcome
+/// the caller wanted.
+pub fn discard(link: &Link, destination: &dyn Backend, journal: &Journal) -> Result<Discarded> {
+    let interrupted = journal.incomplete_for_link(link.id)?;
+    let mut discarded = Discarded::default();
+
+    for op in &interrupted {
+        clear_partial(destination, op);
+        journal.finish(
+            op.id,
+            &Outcome::Failed {
+                error: "interrupted; discarded at the user's request".to_string(),
+            },
+        )?;
+        discarded.operations += 1;
+        discarded.bytes += op.size.unwrap_or(0);
+    }
+
+    Ok(discarded)
 }
 
 /// How many random characters a backend's temporary suffix has.

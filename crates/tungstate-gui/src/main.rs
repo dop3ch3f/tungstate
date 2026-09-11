@@ -769,6 +769,62 @@ fn quarantined(link: String, state: State<'_, App>) -> Result<Vec<String>, Strin
     Ok(found)
 }
 
+/// A run that was begun and never finished, as the window shows it.
+#[derive(Debug, Serialize)]
+struct InterruptedView {
+    link: String,
+    source: String,
+    destination: String,
+    files: usize,
+    bytes: u64,
+    /// The first few filenames, so the banner can say what rather than only
+    /// how many.
+    names: Vec<String>,
+}
+
+#[tauri::command]
+fn interrupted(state: State<'_, App>) -> Result<Vec<InterruptedView>, String> {
+    state
+        .journal
+        .interrupted()
+        .map(|runs| {
+            runs.iter()
+                .map(|run| InterruptedView {
+                    link: run.link.name.clone(),
+                    source: describe_end(&run.link.source, &state.journal),
+                    destination: describe_end(&run.link.destination, &state.journal),
+                    files: run.ops.len(),
+                    bytes: run.bytes(),
+                    names: run
+                        .ops
+                        .iter()
+                        .filter_map(|op| op.source.as_ref())
+                        .map(|l| l.path.display().to_string())
+                        .take(5)
+                        .collect(),
+                })
+                .collect()
+        })
+        .map_err(describe)
+}
+
+/// Finish an interrupted run. Works for a one-off browser link, which is the
+/// case that would otherwise be unreachable: `list_links` hides unsaved links.
+#[tauri::command]
+fn resume_interrupted(link: String, app: AppHandle) -> Result<(), String> {
+    spawn_run(&app, vec![link], vec![Vec::new()])
+}
+
+/// Abandon an interrupted run and reclaim what it left at the destination.
+#[tauri::command]
+fn discard_interrupted(link: String, state: State<'_, App>) -> Result<u64, String> {
+    let found = state.journal.link_by_name(&link).map_err(describe)?;
+    let destination = backend_for(&found.destination, &state.journal)?;
+    tungstate_transfer::discard(&found, destination.as_ref(), &state.journal)
+        .map(|removed| removed.bytes)
+        .map_err(describe)
+}
+
 #[tauri::command]
 fn cancel_run(state: State<'_, App>) {
     state.cancel.store(true, Ordering::Relaxed);
@@ -917,6 +973,16 @@ impl Drop for RunGuard {
         let state = self.0.state::<App>();
         state.conflicts.close();
         state.running.store(false, Ordering::SeqCst);
+
+        // If the window was hidden to let this run carry on, bring it back now
+        // that there is a result to read. Without this a hidden window has no
+        // way back on Windows or Linux, which have no dock icon to click.
+        if let Some(window) = self.0.get_webview_window("main")
+            && !window.is_visible().unwrap_or(true)
+        {
+            let _ = window.show();
+            let _ = window.set_focus();
+        }
     }
 }
 
@@ -970,6 +1036,20 @@ fn main() {
     };
 
     tauri::Builder::default()
+        // Closing the window while a drain is running hides it instead of
+        // ending the process. There is no daemon until slice 10, so the engine
+        // lives inside this process: letting the window close would abandon a
+        // transfer mid-file with nothing said about it.
+        .on_window_event(|window, event| {
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                let state = window.state::<App>();
+                if state.running.load(Ordering::SeqCst) {
+                    api.prevent_close();
+                    let _ = window.hide();
+                    tracing::info!("window hidden; the transfer continues");
+                }
+            }
+        })
         .plugin(tauri_plugin_dialog::init())
         .manage(App {
             journal,
@@ -993,9 +1073,22 @@ fn main() {
             whereis,
             recent,
             quarantined,
+            interrupted,
+            resume_interrupted,
+            discard_interrupted,
         ])
-        .run(tauri::generate_context!())
-        .expect("the window could not start");
+        .build(tauri::generate_context!())
+        .expect("the window could not start")
+        // macOS keeps an app alive with no windows, so clicking the dock icon
+        // is how someone gets back to a drain they hid.
+        .run(|app, event| {
+            if let tauri::RunEvent::Reopen { .. } = event
+                && let Some(window) = app.get_webview_window("main")
+            {
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        });
 }
 
 #[cfg(test)]

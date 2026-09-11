@@ -313,8 +313,13 @@ pub struct Op {
     pub size: Option<u64>,
     /// BLAKE3 hex digest where computed.
     pub hash: Option<String>,
-    /// Which transfer link asked for this.
+    /// Which transfer link asked for this, by name.
     pub link: Option<String>,
+    /// Which transfer link asked for this, by id.
+    ///
+    /// The name is for reading; this is for finding the link again, which is
+    /// what makes an interrupted run resumable.
+    pub link_id: Option<links::LinkId>,
     /// Failure reason or skip reason.
     pub note: Option<String>,
     /// When the intent was written, in milliseconds since the Unix epoch.
@@ -642,6 +647,7 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<Op> {
             .and_then(|v| u64::try_from(v).ok()),
         hash: row.get("hash")?,
         link: row.get("link")?,
+        link_id: row.get::<_, Option<i64>>("link_id")?.map(links::LinkId),
         note: row.get("note")?,
         started_at: row.get("started_at")?,
         finished_at: row.get("finished_at")?,

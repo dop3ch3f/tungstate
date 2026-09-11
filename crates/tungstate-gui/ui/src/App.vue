@@ -6,7 +6,7 @@ import TransfersView, { type Row } from "./components/TransfersView.vue";
 import ActivityView from "./components/ActivityView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
-import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg } from "./api";
+import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun} from "./api";
 
 type Tab = "browse" | "transfers" | "activity";
 
@@ -64,6 +64,36 @@ const liveFile = ref<string | null>(null);
 const stopping = ref(false);
 const conflict = ref<ConflictAsk | null>(null);
 const applyAll = ref(false);
+const interrupted = ref<InterruptedRun[]>([]);
+const busy = ref("");
+
+/// Work the last process left behind. Re-read whenever a run ends, so
+/// finishing one clears its banner and a fresh failure grows one.
+async function refreshInterrupted() {
+  try { interrupted.value = await api.interrupted(); } catch { /* shown elsewhere */ }
+}
+
+async function resumeRun(link: string) {
+  busy.value = link;
+  rows.value = []; summary.value = null; runError.value = ""; discarded.value = "";
+  try { await api.resumeInterrupted(link); }
+  catch (e) { runError.value = String(e); }
+  finally { busy.value = ""; }
+  await refreshInterrupted();
+}
+
+async function discardRun(link: string) {
+  busy.value = link;
+  try {
+    const freed = await api.discardInterrupted(link);
+    runError.value = "";
+    discarded.value = `Cleaned up ${bytes(freed)} of part-copied files. The originals are untouched.`;
+  } catch (e) { runError.value = String(e); }
+  finally { busy.value = ""; }
+  await refreshInterrupted();
+}
+
+const discarded = ref("");
 
 const intent = ref<"move" | "copy">("move");
 const syncing = ref(false);
@@ -96,6 +126,10 @@ onMounted(async () => {
     links.value = await api.links();
     const seen = await api.recent();
     onboarding.value = links.value.length === 0 && seen.length === 0;
+    await refreshInterrupted();
+    // Unfinished work is the first thing worth knowing about, ahead of
+    // whichever folders the panes happen to be pointed at.
+    if (interrupted.value.length) tab.value = "transfers";
   } catch (e) { error.value = String(e); }
 });
 
@@ -113,6 +147,7 @@ async function attach() {
     await on.conflict((e) => { conflict.value = e; }),
     await on.done((e) => {
       summary.value = e; liveFile.value = null; stopping.value = false;
+      refreshInterrupted();
       left.value?.reload(); right.value?.reload();
       api.links().then((l) => (links.value = l)).catch(() => {});
     }),
@@ -233,7 +268,9 @@ const running = computed(() => liveFile.value !== null);
     </template>
 
     <TransfersView v-else-if="tab === 'transfers'" :rows="rows" :summary="summary"
-                   :error="runError" :live="running" :stopping="stopping" @stop="stop" />
+                   :error="runError" :live="running" :stopping="stopping"
+                   :interrupted="interrupted" :busy="busy" :note="discarded"
+                   @stop="stop" @resume="resumeRun" @discard="discardRun" />
 
     <ActivityView v-else />
 

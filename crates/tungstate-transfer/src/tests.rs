@@ -1451,3 +1451,195 @@ fn quarantine_and_rename_still_work_without_rename_support() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Interrupted work that nothing else can find.
+//
+// A one-off transfer from the browser makes an unsaved link. `links()` does
+// not return those, and recovery is scoped per link, so before this existed a
+// crash mid-file left an operation stuck at `intended` and a multi-gigabyte
+// partial that nothing would ever look at again.
+// ---------------------------------------------------------------------------
+
+/// A `NewLink` pointing at the same two places the rig uses.
+fn rig_link(rig: &Rig) -> NewLink {
+    NewLink {
+        name: "unused".to_string(),
+        source: rig.link.source.clone(),
+        destination: rig.link.destination.clone(),
+        source_policy: rig.link.source_policy,
+        verify: rig.link.verify,
+        order: rig.link.order,
+        on_conflict: rig.link.on_conflict,
+        cooldown: rig.link.cooldown,
+        saved: true,
+    }
+}
+
+/// Leave the rig looking like a run that died mid-file.
+fn strand(rig: &Rig, name: &str, partial: &[u8]) -> tungstate_journal::OpId {
+    rig.write_source(name, b"the whole file, still here");
+    let op = rig
+        .journal
+        .begin(&tungstate_journal::NewOp {
+            kind: tungstate_journal::OpKind::Move,
+            source: Some(tungstate_journal::Location::within(&rig.link.source, name)),
+            destination: Some(tungstate_journal::Location::within(
+                &rig.link.destination,
+                name,
+            )),
+            size: Some(26),
+            link: Some(rig.link.name.clone()),
+            link_id: Some(rig.link.id),
+        })
+        .unwrap();
+    let temp = tungstate_journal::temp_name(Path::new(name), op);
+    rig.write_dest(&temp.to_string_lossy(), partial);
+    op
+}
+
+#[test]
+fn interrupted_work_is_found_even_on_a_link_the_saved_list_hides() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    // Exactly what `start_transfer` creates for a browser move.
+    let id = rig
+        .journal
+        .create_link(&NewLink {
+            name: "browser-1789128635946-0".to_string(),
+            saved: false,
+            ..rig_link(&rig)
+        })
+        .unwrap();
+    let op = rig
+        .journal
+        .begin(&tungstate_journal::NewOp {
+            kind: tungstate_journal::OpKind::Move,
+            source: Some(tungstate_journal::Location::within(
+                &rig.link.source,
+                "a.mp4",
+            )),
+            destination: Some(tungstate_journal::Location::within(
+                &rig.link.destination,
+                "a.mp4",
+            )),
+            size: Some(4_000_000_000),
+            link: Some("browser-1789128635946-0".to_string()),
+            link_id: Some(id),
+        })
+        .unwrap();
+
+    assert!(
+        !rig.journal.links().unwrap().iter().any(|l| l.id == id),
+        "an unsaved link must stay out of the saved-pairs list"
+    );
+
+    let runs = rig.journal.interrupted().unwrap();
+    let found = runs
+        .iter()
+        .find(|r| r.link.id == id)
+        .expect("the unsaved link's unfinished work must still be findable");
+    assert_eq!(found.ops.len(), 1);
+    assert_eq!(found.ops[0].id, op);
+    assert_eq!(found.bytes(), 4_000_000_000);
+    assert_eq!(found.ops[0].link_id, Some(id));
+}
+
+#[test]
+fn a_link_whose_work_all_finished_is_not_reported_as_interrupted() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("a.mp4", b"done");
+    rig.run().unwrap();
+
+    assert!(
+        rig.journal.interrupted().unwrap().is_empty(),
+        "a completed run must not look like unfinished work"
+    );
+}
+
+#[test]
+fn discarding_removes_the_partial_and_copies_nothing() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    let op = strand(&rig, "huge.mp4", b"a few bytes of it");
+    let partial = tungstate_journal::temp_name(Path::new("huge.mp4"), op);
+    assert!(rig.dest_dir.path().join(&partial).exists());
+
+    let removed = discard(&rig.link, &rig.destination, &rig.journal).unwrap();
+
+    assert_eq!(removed.operations, 1);
+    assert_eq!(removed.bytes, 26);
+    assert!(
+        !rig.dest_dir.path().join(&partial).exists(),
+        "the partial must be gone"
+    );
+    assert!(
+        !rig.dest("huge.mp4").exists(),
+        "discarding must not copy the file across"
+    );
+    assert!(
+        rig.src("huge.mp4").exists(),
+        "and must never touch the original"
+    );
+    assert!(rig.journal.interrupted().unwrap().is_empty());
+}
+
+#[test]
+fn discarding_without_rename_clears_the_real_name_and_sweeps() {
+    // The FTP shape: no temp name, so the partial is under the real name, and
+    // the backend may have left its own randomly-named orphan beside it.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("huge.mp4", b"the whole file, still here");
+    rig.journal
+        .begin(&tungstate_journal::NewOp {
+            kind: tungstate_journal::OpKind::Move,
+            source: Some(tungstate_journal::Location::within(
+                &rig.link.source,
+                "huge.mp4",
+            )),
+            destination: Some(tungstate_journal::Location::within(
+                &rig.link.destination,
+                "huge.mp4",
+            )),
+            size: Some(26),
+            link: Some(rig.link.name.clone()),
+            link_id: Some(rig.link.id),
+        })
+        .unwrap();
+    rig.write_dest("huge.mp4", b"half of it");
+    rig.write_dest("huge.mp4.k3xq9wpz", b"half of it");
+    rig.write_dest("huge.mp4.backup", b"not ours");
+
+    let destination = NoRenameBackend::local(rig.dest_dir.path());
+    discard(&rig.link, &destination, &rig.journal).unwrap();
+
+    assert!(!rig.dest("huge.mp4").exists(), "the partial must be gone");
+    assert!(
+        !rig.dest("huge.mp4.k3xq9wpz").exists(),
+        "and the backend's orphan with it"
+    );
+    assert_eq!(
+        std::fs::read(rig.dest("huge.mp4.backup")).unwrap(),
+        b"not ours",
+        "a real sibling must survive"
+    );
+    assert!(rig.src("huge.mp4").exists());
+}
+
+#[test]
+fn resuming_an_unsaved_link_finishes_what_it_started() {
+    // The whole point: the file completes, the partial is gone, and the
+    // original is reclaimed, all through a link the saved list never shows.
+    let rig = Rig::new(SourcePolicy::Delete);
+    let op = strand(&rig, "huge.mp4", b"a few bytes of it");
+    let partial = tungstate_journal::temp_name(Path::new("huge.mp4"), op);
+
+    let summary = rig.run().unwrap();
+
+    assert_eq!(summary.recovered, 1, "its own old operation must be seen");
+    assert_eq!(
+        std::fs::read(rig.dest("huge.mp4")).unwrap(),
+        b"the whole file, still here"
+    );
+    assert!(!rig.dest_dir.path().join(&partial).exists());
+    assert!(!rig.src("huge.mp4").exists());
+    assert!(rig.journal.interrupted().unwrap().is_empty());
+}

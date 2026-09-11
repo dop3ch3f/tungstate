@@ -62,6 +62,15 @@ export interface Listing {
 
 export interface Place { label: string; path: string }
 
+export interface InterruptedRun {
+  link: string;
+  source: string;
+  destination: string;
+  files: number;
+  bytes: number;
+  names: string[];
+}
+
 export interface Leg {
   source: string;
   destination: string;
@@ -113,6 +122,9 @@ export const api = {
   whereis: (target: string) => invoke<Op[]>("whereis", { target }),
   recent: () => invoke<Op[]>("recent"),
   quarantined: (link: string) => invoke<string[]>("quarantined", { link }),
+  interrupted: () => invoke<InterruptedRun[]>("interrupted"),
+  resumeInterrupted: (link: string) => invoke<void>("resume_interrupted", { link }),
+  discardInterrupted: (link: string) => invoke<number>("discard_interrupted", { link }),
 };
 
 export const on = {

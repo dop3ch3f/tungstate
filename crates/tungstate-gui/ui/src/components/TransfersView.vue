@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { bytes, type Summary } from "../api";
+import { bytes, type InterruptedRun, type Summary } from "../api";
 
 export interface Row { path: string; size: number; state: string; detail: string | null }
 
@@ -10,8 +10,11 @@ const props = defineProps<{
   error: string;
   live: boolean;
   stopping: boolean;
+  interrupted: InterruptedRun[];
+  busy: string;
+  note: string;
 }>();
-const emit = defineEmits<{ stop: [] }>();
+const emit = defineEmits<{ stop: []; resume: [link: string]; discard: [link: string] }>();
 
 const reclaimed = computed(() =>
   props.rows.filter((r) => r.state === "transferred").reduce((n, r) => n + r.size, 0),
@@ -41,13 +44,42 @@ const word: Record<string, string> = {
     <!-- Outside the branches below on purpose. A run that fails before its
          first file has no rows and no summary, and that is exactly when the
          reason is the only thing worth showing. -->
+    <div v-if="props.note" class="notice good">{{ props.note }}</div>
+
     <div v-if="props.error" class="notice bad">
       <b>That transfer could not start.</b>
       <div style="font-family: var(--mono); margin-top: 6px">{{ props.error }}</div>
       <div class="note" style="margin-top: 6px">Nothing was moved, and every original is where it was.</div>
     </div>
 
-    <div v-if="!props.rows.length && !props.summary && !props.error" class="sub">
+    <!-- Work that outlived the process. Offered, never acted on: resuming
+         starts a multi-gigabyte transfer and discarding deletes something,
+         and neither is a thing to do to somebody while they are reading. -->
+    <div v-for="run in props.interrupted" :key="run.link" class="stranded">
+      <div>
+        <strong>{{ run.files }} {{ run.files === 1 ? "file was" : "files were" }} left
+        unfinished</strong>
+        — {{ bytes(run.bytes) }} towards <span class="where">{{ run.destination }}</span>.
+        <div class="detail">{{ run.names.join(", ") }}</div>
+        <div class="note">
+          Nothing was lost: every original is still where it was. Resuming copies
+          the unfinished ones again from the start. Cleaning up removes what was
+          part-copied at the destination and leaves the originals alone.
+        </div>
+      </div>
+      <div class="go">
+        <button class="btn primary" :disabled="!!props.busy || props.live"
+                @click="emit('resume', run.link)">
+          {{ props.busy === run.link ? "Working…" : "Resume" }}
+        </button>
+        <button class="btn" :disabled="!!props.busy || props.live"
+                @click="emit('discard', run.link)">Clean up</button>
+      </div>
+    </div>
+
+    <div v-if="!props.rows.length && !props.summary && !props.error
+                && !props.interrupted.length && !props.note"
+         class="sub">
       Nothing running. Select files in the browser and move or copy them.
     </div>
 

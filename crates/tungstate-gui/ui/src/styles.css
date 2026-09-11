@@ -263,6 +263,20 @@ button, .chrome { user-select: none; }
 }
 .empty strong { color: var(--light); font-weight: 600; }
 
+/* Work that outlived the process -------------------------------------- */
+
+.stranded {
+  display: flex; gap: 18px; align-items: flex-start; justify-content: space-between;
+  padding: 14px 16px; margin-bottom: 16px;
+  border: 1px solid rgba(226, 179, 95, 0.38); border-radius: var(--r);
+  background: rgba(226, 179, 95, 0.07);
+}
+.stranded strong { color: var(--light); font-weight: 600; }
+.stranded .where { font-family: var(--mono); }
+.stranded .detail { font-family: var(--mono); font-size: 11.5px; color: var(--dust-dim); margin-top: 5px; }
+.stranded .note { color: var(--dust); font-size: 12px; margin-top: 7px; max-width: 62ch; }
+.stranded .go { display: flex; gap: 8px; flex: none; }
+
 /* Notices -------------------------------------------------------------- */
 
 .notice { border-radius: var(--r); padding: 9px 12px; margin: 12px 0; font-size: 12.5px; }

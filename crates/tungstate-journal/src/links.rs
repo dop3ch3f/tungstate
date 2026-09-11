@@ -71,6 +71,27 @@ pub enum ConflictAction {
     Quarantine,
 }
 
+/// One link's unfinished work.
+#[derive(Debug, Clone)]
+pub struct Interrupted {
+    /// The link the work belongs to, saved or not.
+    pub link: Link,
+    /// Its operations that were begun and never finished.
+    pub ops: Vec<crate::Op>,
+}
+
+impl Interrupted {
+    /// Total size of the files involved, where it was recorded.
+    ///
+    /// The size of each *file*, not of the bytes already copied: how much of a
+    /// partial actually landed is only knowable by asking the destination, and
+    /// that is a network round trip this is not worth doing at startup.
+    #[must_use]
+    pub fn bytes(&self) -> u64 {
+        self.ops.iter().filter_map(|op| op.size).sum()
+    }
+}
+
 /// A configured transfer link.
 #[derive(Debug, Clone)]
 pub struct Link {
@@ -236,6 +257,62 @@ impl Journal {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(query("listing links"))?;
         Ok(links)
+    }
+
+    /// Look a link up by id.
+    ///
+    /// # Errors
+    /// [`JournalError::UnknownLink`] if there is no such link, or
+    /// [`JournalError::Query`] if the row cannot be read.
+    pub fn link_by_id(&self, id: LinkId) -> Result<Link> {
+        let conn = self.lock();
+        conn.query_row(
+            "SELECT * FROM links WHERE id = ?1",
+            rusqlite::params![id.0],
+            row_to_link,
+        )
+        .map_err(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => JournalError::UnknownLink(format!("#{}", id.0)),
+            other => JournalError::Query {
+                context: "looking up a link by id",
+                source: other,
+            },
+        })
+    }
+
+    /// Every link with work begun and never finished, and that work.
+    ///
+    /// Deliberately not filtered by `saved`. That flag answers "did the user
+    /// ask to keep this pair?", which is the right question for the saved-pairs
+    /// list and the wrong one here: a one-off transfer from the browser is
+    /// unsaved, and it is exactly the case that would otherwise strand a
+    /// part-copied file with nothing able to find it again.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn interrupted(&self) -> Result<Vec<Interrupted>> {
+        let mut by_link: std::collections::BTreeMap<i64, Vec<crate::Op>> =
+            std::collections::BTreeMap::new();
+        for op in self.incomplete()? {
+            // An op with no link predates links, or was written by something
+            // that is not a transfer. There is nothing to resume it with.
+            if let Some(id) = op.link_id {
+                by_link.entry(id.0).or_default().push(op);
+            }
+        }
+
+        let mut runs = Vec::with_capacity(by_link.len());
+        for (id, ops) in by_link {
+            // Propagated rather than skipped. The foreign key makes a missing
+            // link unreachable, so if it ever happens something is wrong that
+            // is worth hearing about, not worth hiding by returning a shorter
+            // list than the truth.
+            runs.push(Interrupted {
+                link: self.link_by_id(LinkId(id))?,
+                ops,
+            });
+        }
+        Ok(runs)
     }
 
     /// Operations for one link that were begun and never finished.

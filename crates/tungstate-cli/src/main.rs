@@ -123,6 +123,13 @@ enum LinkAction {
     },
     /// List configured links.
     List,
+    /// List work a previous run left unfinished, across every link.
+    Unfinished,
+    /// Abandon a link's unfinished work and clear what it left behind.
+    Discard {
+        /// The link name.
+        name: String,
+    },
     /// Run a link, resuming anything a previous run left unfinished.
     Run {
         /// The link name.
@@ -431,6 +438,10 @@ fn link(action: LinkAction) -> std::process::ExitCode {
             Err(error) => fail(&error),
         },
 
+        LinkAction::Unfinished => unfinished(&journal),
+
+        LinkAction::Discard { name } => discard_link(&journal, &name),
+
         LinkAction::Preview { name } => preview_link(&journal, &name),
 
         LinkAction::Run {
@@ -438,6 +449,83 @@ fn link(action: LinkAction) -> std::process::ExitCode {
             yes,
             on_conflict,
         } => run_link(&journal, &name, yes, on_conflict.as_deref()),
+    }
+}
+
+/// Report every link with work begun and never finished.
+///
+/// Deliberately not filtered by whether the link was saved. A one-off transfer
+/// from the browser is unsaved, and it is exactly the case that would
+/// otherwise leave a part-copied file with nothing able to find it again.
+fn unfinished(journal: &Journal) -> std::process::ExitCode {
+    let runs = match journal.interrupted() {
+        Ok(runs) => runs,
+        Err(error) => return fail(&error),
+    };
+    if runs.is_empty() {
+        println!("nothing was left unfinished");
+        return std::process::ExitCode::SUCCESS;
+    }
+
+    for run in &runs {
+        println!(
+            "{}  {} -> {}",
+            run.link.name,
+            ends::describe(&run.link.source, journal),
+            ends::describe(&run.link.destination, journal),
+        );
+        println!(
+            "  {} file(s), {} — every original is still in place",
+            run.ops.len(),
+            human_bytes(run.bytes())
+        );
+        for op in run.ops.iter().take(5) {
+            if let Some(source) = &op.source {
+                println!("    {}", source.path.display());
+            }
+        }
+        if run.ops.len() > 5 {
+            println!("    and {} more", run.ops.len() - 5);
+        }
+        println!(
+            "  finish it with:  tungstate link run {}\n  \
+             or clear it with: tungstate link discard {}\n",
+            run.link.name, run.link.name
+        );
+    }
+    std::process::ExitCode::SUCCESS
+}
+
+/// Clear what an interrupted run left behind, without copying anything.
+fn discard_link(journal: &Journal, name: &str) -> std::process::ExitCode {
+    let link = match journal.link_by_name(name) {
+        Ok(link) => link,
+        Err(error) => return fail(&error),
+    };
+    let destination = match tungstate_backend_opendal::open(
+        &link.destination,
+        journal,
+        secret_store().as_ref(),
+    ) {
+        Ok(backend) => backend,
+        Err(error) => return fail(&error),
+    };
+
+    match tungstate_transfer::discard(&link, destination.as_ref(), journal) {
+        Ok(removed) if removed.operations == 0 => {
+            println!("`{name}` had nothing unfinished");
+            std::process::ExitCode::SUCCESS
+        }
+        Ok(removed) => {
+            println!(
+                "cleared {} unfinished operation(s) for `{name}`, covering {}",
+                removed.operations,
+                human_bytes(removed.bytes)
+            );
+            println!("every original is untouched; nothing was copied");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(error) => fail(&error),
     }
 }
 
