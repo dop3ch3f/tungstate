@@ -256,7 +256,19 @@ button, .chrome { user-select: none; }
   0%, 100% { opacity: 0.3; box-shadow: 0 0 0 0 rgba(127, 212, 255, 0); }
   50% { opacity: 1; box-shadow: 0 0 7px 1px rgba(127, 212, 255, 0.5); }
 }
-@media (prefers-reduced-motion: reduce) { .state.live::before { animation: none; opacity: 1; } }
+/* Comparing reads both copies and sends nothing, so it is deliberately not
+   the copying colour: two rows that are doing entirely different things
+   should not look identical while one of them sits at zero bytes. */
+.state.checking { color: var(--held); }
+.filebar.reading > span { background: var(--held); }
+.state.checking::before {
+  content: ""; display: inline-block; width: 6px; height: 6px;
+  margin-right: 7px; border-radius: 50%; background: var(--held);
+  animation: glow 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .state.live::before, .state.checking::before { animation: none; opacity: 1; }
+}
 
 /* Activity ------------------------------------------------------------- */
 

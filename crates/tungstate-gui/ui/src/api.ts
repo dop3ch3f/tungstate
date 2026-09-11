@@ -49,6 +49,8 @@ export interface Advanced { path: string; done: number; total: number }
 export interface Started { path: string; size: number }
 export interface Finished { path: string; outcome: string; detail: string | null }
 export interface ConflictAsk { path: string; incoming_size: number; existing_size: number }
+/** A file already at the destination, byte for byte, on a move. */
+export interface IdenticalAsk { path: string; size: number }
 
 export interface Entry {
   name: string;
@@ -120,8 +122,11 @@ export const api = {
   createLink: (form: Omit<Link, never>) => invoke<void>("create_link", { form }),
   run: (name: string) => invoke<void>("run_link", { name }),
   cancel: () => invoke<void>("cancel_run"),
+  stopNow: () => invoke<void>("stop_now"),
   resolve: (action: string, applyToAll: boolean) =>
     invoke<void>("resolve_conflict", { action, applyToAll }),
+  resolveIdentical: (remove: boolean, applyToAll: boolean) =>
+    invoke<void>("resolve_identical", { remove, applyToAll }),
   history: (path: string) => invoke<Op[]>("history", { path }),
   whereis: (target: string) => invoke<Op[]>("whereis", { target }),
   recent: () => invoke<Op[]>("recent"),
@@ -137,9 +142,14 @@ export const on = {
     listen<PlannedFile[]>("transfer://planned", (e) => f(e.payload)),
   advanced: (f: (e: Advanced) => void) =>
     listen<Advanced>("transfer://advanced", (e) => f(e.payload)),
+  checking: (f: (e: Advanced) => void) =>
+    listen<Advanced>("transfer://checking", (e) => f(e.payload)),
+  atOnce: (f: (e: number) => void) => listen<number>("transfer://at-once", (e) => f(e.payload)),
   started: (f: (e: Started) => void) => listen<Started>("transfer://started", (e) => f(e.payload)),
   finished: (f: (e: Finished) => void) => listen<Finished>("transfer://finished", (e) => f(e.payload)),
   conflict: (f: (e: ConflictAsk) => void) => listen<ConflictAsk>("transfer://conflict", (e) => f(e.payload)),
+  identical: (f: (e: IdenticalAsk) => void) =>
+    listen<IdenticalAsk>("transfer://identical", (e) => f(e.payload)),
   done: (f: (e: Summary) => void) => listen<Summary>("transfer://done", (e) => f(e.payload)),
   failed: (f: (e: string) => void) => listen<string>("transfer://error", (e) => f(e.payload)),
 };

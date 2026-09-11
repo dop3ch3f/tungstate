@@ -6,7 +6,7 @@ import TransfersView, { type Row } from "./components/TransfersView.vue";
 import ActivityView from "./components/ActivityView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
-import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began} from "./api";
+import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk} from "./api";
 
 type Tab = "browse" | "transfers" | "activity";
 
@@ -63,11 +63,16 @@ const runError = ref("");
 const liveFile = ref<string | null>(null);
 const stopping = ref(false);
 const conflict = ref<ConflictAsk | null>(null);
+const sameFile = ref<IdenticalAsk | null>(null);
 const applyAll = ref(false);
 const interrupted = ref<InterruptedRun[]>([]);
 // From the engine, not from which button was pressed: a resumed run has no
 // button behind it, and only the engine knows what the far side agreed to.
 const shape = ref<Began | null>(null);
+// Tracked apart from `shape` because the width changes during a run while
+// everything else in `shape` is fixed at the start.
+const atOnce = ref<number | null>(null);
+const halting = ref(false);
 const busy = ref("");
 
 /// Work the last process left behind. Re-read whenever a run ends, so
@@ -78,7 +83,7 @@ async function refreshInterrupted() {
 
 async function resumeRun(link: string) {
   busy.value = link;
-  rows.value = []; summary.value = null; runError.value = ""; discarded.value = ""; shape.value = null;
+  rows.value = []; summary.value = null; runError.value = ""; discarded.value = ""; shape.value = null; atOnce.value = null;
   try { await api.resumeInterrupted(link); }
   catch (e) { runError.value = String(e); }
   finally { busy.value = ""; }
@@ -138,39 +143,48 @@ onMounted(async () => {
 
 async function attach() {
   unlisten.push(
-    await on.began((e) => { shape.value = e; }),
+    await on.began((e) => { shape.value = e; atOnce.value = e.at_once; }),
+    await on.atOnce((n) => { atOnce.value = n; }),
+    await on.checking((e) => {
+      const row = rows.value.find((r) => r.path === e.path);
+      if (row) { row.state = "checking"; row.done = e.done; row.checked = e.total; }
+    }),
     // The whole plan arrives before the first file, so the list shows what is
     // waiting rather than growing one row at a time as things happen.
     await on.planned((files) => {
       rows.value = files.map((f) => ({
-        path: f.path, size: f.size, state: "waiting", detail: null, done: 0,
+        path: f.path, size: f.size, state: "waiting", detail: null, done: 0, checked: 0,
       }));
     }),
     await on.started((e) => {
       liveFile.value = e.path;
       const row = rows.value.find((r) => r.path === e.path);
-      if (row) { row.state = "live"; row.done = 0; }
+      if (row) { row.state = "live"; row.done = 0; row.checked = 0; }
       // A file the plan did not mention: possible when a conflict lands it
       // under another name. Better shown than dropped.
-      else rows.value.push({ path: e.path, size: e.size, state: "live", detail: null, done: 0 });
+      else rows.value.push({ path: e.path, size: e.size, state: "live", detail: null, done: 0, checked: 0 });
     }),
     await on.advanced((e) => {
       const row = rows.value.find((r) => r.path === e.path);
-      if (row) { row.done = e.done; if (e.total) row.size = e.total; }
+      // Back to copying: a file that was being compared and is now sending
+      // bytes has to lose the checking state or the row keeps the wrong word.
+      if (row) { row.state = "live"; row.checked = 0; row.done = e.done; if (e.total) row.size = e.total; }
     }),
     await on.finished((e) => {
-      const row = rows.value.find((r) => r.path === e.path && r.state === "live");
+      const row = rows.value.find((r) => r.path === e.path && (r.state === "live" || r.state === "checking"));
       if (row) { row.state = e.outcome; row.detail = e.detail; row.done = row.size; }
       if (liveFile.value === e.path) liveFile.value = null;
     }),
     await on.conflict((e) => { conflict.value = e; }),
+    await on.identical((e) => { sameFile.value = e; }),
     await on.done((e) => {
-      summary.value = e; liveFile.value = null; stopping.value = false;
+      summary.value = e; liveFile.value = null; stopping.value = false; halting.value = false;
+      atOnce.value = null; sameFile.value = null;
       refreshInterrupted();
       left.value?.reload(); right.value?.reload();
       api.links().then((l) => (links.value = l)).catch(() => {});
     }),
-    await on.failed((e) => { runError.value = e; stopping.value = false; }),
+    await on.failed((e) => { runError.value = e; stopping.value = false; halting.value = false; }),
   );
 }
 
@@ -204,6 +218,7 @@ async function go(payload: Payload) {
   summary.value = null;
   runError.value = "";
   shape.value = null;
+  atOnce.value = null;
   tab.value = "transfers";
   try {
     await api.startTransfer({ legs: legs.value, ...payload });
@@ -211,7 +226,7 @@ async function go(payload: Payload) {
 }
 
 async function runSaved(name: string) {
-  rows.value = []; summary.value = null; runError.value = ""; shape.value = null;
+  rows.value = []; summary.value = null; runError.value = ""; shape.value = null; atOnce.value = null;
   tab.value = "transfers";
   try { await api.run(name); } catch (e) { runError.value = String(e); }
 }
@@ -225,6 +240,18 @@ async function answer(action: string) {
 async function stop() {
   stopping.value = true;
   try { await api.cancel(); } catch (e) { runError.value = String(e); }
+}
+
+async function stopNow() {
+  halting.value = true;
+  stopping.value = true;
+  try { await api.stopNow(); } catch (e) { runError.value = String(e); }
+}
+
+async function answerIdentical(remove: boolean) {
+  const all = applyAll.value;
+  sameFile.value = null; applyAll.value = false;
+  try { await api.resolveIdentical(remove, all); } catch (e) { runError.value = String(e); }
 }
 
 const running = computed(() => liveFile.value !== null);
@@ -290,12 +317,44 @@ const running = computed(() => liveFile.value !== null);
     <TransfersView v-else-if="tab === 'transfers'" :rows="rows" :summary="summary"
                    :error="runError" :live="running" :stopping="stopping"
                    :interrupted="interrupted" :busy="busy" :note="discarded" :shape="shape"
-                   @stop="stop" @resume="resumeRun" @discard="discardRun" />
+                   :at-once="atOnce" :halting="halting"
+                   @stop="stop" @stop-now="stopNow" @resume="resumeRun" @discard="discardRun" />
 
     <ActivityView v-else />
 
     <SyncModal v-if="syncing" :legs="legs" :count="count" :total-bytes="selectionBytes"
                :intent="intent" @cancel="syncing = false" @start="go" />
+
+    <!-- Asked before the original here is removed, never after. A hash match
+         is good evidence, but acting on it alone means this program deleting
+         the user's other copy on the strength of its own arithmetic. -->
+    <div v-if="sameFile" class="veil">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="cap">
+          <h2>This one is already there</h2>
+          <p class="why">
+            Both copies were read all the way through and they match exactly, so
+            there is nothing to send. The only question left is the copy on this
+            machine.
+          </p>
+        </div>
+        <div class="body">
+          <p class="subject">{{ sameFile.path }}</p>
+          <div class="compare">
+            <div><span>Both copies</span><b>{{ bytes(sameFile.size) }}</b></div>
+          </div>
+          <label class="check" style="margin-top:16px">
+            <input type="checkbox" v-model="applyAll" />
+            <span>Do this for every other file already there in this transfer</span>
+          </label>
+        </div>
+        <div class="feet">
+          <button class="btn" @click="answerIdentical(false)">Keep it here</button>
+          <span class="spacer"></span>
+          <button class="btn danger" @click="answerIdentical(true)">Remove it from here</button>
+        </div>
+      </div>
+    </div>
 
     <div v-if="conflict" class="veil">
       <div class="modal" role="dialog" aria-modal="true">

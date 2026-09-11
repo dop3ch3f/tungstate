@@ -16,6 +16,28 @@ pub struct Conflict {
     pub existing_size: u64,
 }
 
+/// A file whose content is already byte-for-byte at the destination.
+///
+/// Not a conflict: there is nothing to decide about the *destination*, which
+/// is already correct. The only open question is what happens to the copy
+/// still sitting here.
+#[derive(Debug, Clone)]
+pub struct Identical {
+    /// Path relative to the source root.
+    pub path: PathBuf,
+    /// Size of both copies; they are the same file.
+    pub size: u64,
+}
+
+/// What to do with the original when the destination already matches it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IdenticalAction {
+    /// Apply the link's source policy, as if the file had just been moved.
+    DeleteOriginal,
+    /// Leave it here. The destination is correct either way.
+    KeepOriginal,
+}
+
 /// What a resolver decided, and whether it applies to everything that follows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Decision {
@@ -33,6 +55,18 @@ pub enum Decision {
 pub trait ConflictResolver: Send {
     /// Decide. Called once per conflict, unless a previous answer applied to all.
     fn resolve(&mut self, conflict: &Conflict) -> ConflictAction;
+
+    /// An identical copy is already at the destination, and the link's policy
+    /// would remove the original. Consulted only for a move; a copy has
+    /// nothing to ask about.
+    ///
+    /// Defaulted to removing it, which is what the engine did before anyone
+    /// was asked and what an unattended drain has to keep doing — a scheduled
+    /// run that stopped reclaiming space because nobody was there to answer
+    /// would be a worse failure than the silence this exists to fix.
+    fn identical(&mut self, _found: &Identical) -> IdenticalAction {
+        IdenticalAction::DeleteOriginal
+    }
 }
 
 /// Always answers the same way. Used for unattended runs, `--on-conflict`, and tests.

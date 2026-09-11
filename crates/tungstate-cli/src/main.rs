@@ -14,8 +14,8 @@ use tungstate_journal::{
 };
 use tungstate_secret::{EnvOverride, KeyringStore, MemoryStore, SecretStore};
 use tungstate_transfer::{
-    ConflictResolver, FileOutcome, FixedResolver, InteractiveResolver, Progress, SkipReason,
-    Transfer,
+    ConflictResolver, FileOutcome, FixedResolver, InteractiveResolver, Original, Progress,
+    SkipReason, Transfer,
 };
 
 #[derive(Parser)]
@@ -805,6 +805,22 @@ impl Progress for CliProgress {
         }
     }
 
+    fn checking(&mut self, _path: &Path, done: u64, total: u64) {
+        if !self.interactive || total < 8 * 1024 * 1024 {
+            return;
+        }
+        let Some((name, _)) = self.current.clone() else {
+            return;
+        };
+        // Named differently from `advanced` on purpose: nothing is being sent,
+        // and a progress line that says otherwise is why this phase exists.
+        self.redraw(&format!(
+            "  {name} (comparing, {} of {})... ",
+            human_bytes(done),
+            human_bytes(total)
+        ));
+    }
+
     fn advanced(&mut self, _path: &Path, done: u64, total: u64) {
         // Nothing to watch on a file that finishes inside one report.
         if !self.interactive || total < 8 * 1024 * 1024 || done == total {
@@ -834,7 +850,10 @@ impl Progress for CliProgress {
             "{}",
             match outcome {
                 FileOutcome::Transferred => "done",
-                FileOutcome::AlreadyPresent => "already there",
+                FileOutcome::AlreadyPresent(Original::Removed) =>
+                    "identical copy already there; original removed",
+                FileOutcome::AlreadyPresent(Original::Kept) =>
+                    "identical copy already there; original kept",
                 FileOutcome::Skipped(SkipReason::RecentlyModified) =>
                     "skipped (written too recently; will move next run)",
                 FileOutcome::Skipped(SkipReason::Conflict) => "skipped (name taken)",
