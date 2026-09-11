@@ -277,6 +277,10 @@ button, .chrome { user-select: none; }
 .seek { display: flex; align-items: flex-end; gap: 9px; margin-bottom: 18px; }
 .seek .opt { margin-bottom: 0; flex: 1; max-width: 46ch; }
 .ledger .when { font-family: var(--mono); color: var(--dust); white-space: nowrap; }
+/* A row's own buttons. Right-aligned so the verbs line up down the table
+   rather than ragging with the width of whatever is beside them. */
+.ledger .actions { text-align: right; white-space: nowrap; padding-right: 0; }
+.ledger .actions .btn + .btn { margin-left: 2px; }
 
 .empty {
   display: grid; gap: 4px; justify-items: start;
@@ -298,6 +302,11 @@ button, .chrome { user-select: none; }
 .stranded .detail { font-family: var(--mono); font-size: 11.5px; color: var(--dust-dim); margin-top: 5px; }
 .stranded .note { color: var(--dust); font-size: 12px; margin-top: 7px; max-width: 62ch; }
 .stranded .go { display: flex; gap: 8px; flex: none; }
+
+/* A row of buttons pushed to one side. Defined once, unscoped: it was only
+   ever written under `.welcome` and `.stranded`, so `TransfersView`'s bare
+   `class="go"` had been picking up nothing at all. */
+.go { display: flex; gap: 8px; align-items: center; flex: none; }
 
 /* Notices -------------------------------------------------------------- */
 
@@ -352,7 +361,10 @@ button, .chrome { user-select: none; }
 
 .opt { display: grid; gap: 5px; margin-bottom: 14px; }
 .opt > label { font-size: 12px; color: var(--dust); }
-.opt select, .opt input[type="text"] {
+/* `password` alongside `text`: without it a password field falls back to the
+   browser's own chrome and is the one box on screen that does not look like
+   the others. */
+.opt select, .opt input[type="text"], .opt input[type="password"] {
   font: inherit; font-size: 12.5px;
   background: var(--ore-sink); border: 1px solid var(--seam);
   border-radius: var(--r); color: var(--light); padding: 6px 9px;

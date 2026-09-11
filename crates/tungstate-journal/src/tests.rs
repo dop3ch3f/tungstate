@@ -565,6 +565,137 @@ fn a_connection_a_link_still_points_at_cannot_be_deleted() {
 }
 
 #[test]
+fn a_connection_update_replaces_every_mutable_field() {
+    let journal = Journal::open_in_memory().unwrap();
+    journal.create_connection(&a_connection()).unwrap();
+
+    journal
+        .update_connection(
+            "nas",
+            &ConnectionSettings {
+                scheme: Scheme::Ftps,
+                host: Some("nas.example".to_string()),
+                port: Some(990),
+                username: Some("someone-else".to_string()),
+                root: "/volume2".to_string(),
+                options: std::collections::BTreeMap::from([(
+                    "passive".to_string(),
+                    "false".to_string(),
+                )]),
+            },
+        )
+        .unwrap();
+
+    let found = journal.connection_by_name("nas").unwrap();
+    assert_eq!(found.scheme, Scheme::Ftps);
+    assert_eq!(found.host.as_deref(), Some("nas.example"));
+    assert_eq!(found.port, Some(990));
+    assert_eq!(found.username.as_deref(), Some("someone-else"));
+    assert_eq!(found.root, "/volume2");
+    assert_eq!(
+        found.options.get("passive").map(String::as_str),
+        Some("false")
+    );
+}
+
+#[test]
+fn an_update_can_clear_a_field_that_was_set() {
+    // The reason the API is a full replace: a partial patch over
+    // `Option<Option<T>>` makes this case unreachable.
+    let journal = Journal::open_in_memory().unwrap();
+    journal.create_connection(&a_connection()).unwrap();
+
+    let cleared = ConnectionSettings {
+        port: None,
+        username: None,
+        options: std::collections::BTreeMap::new(),
+        ..ConnectionSettings::from(&journal.connection_by_name("nas").unwrap())
+    };
+    journal.update_connection("nas", &cleared).unwrap();
+
+    let found = journal.connection_by_name("nas").unwrap();
+    assert_eq!(found.port, None);
+    assert_eq!(found.username, None);
+    assert!(found.options.is_empty());
+}
+
+#[test]
+fn updating_an_unknown_connection_is_an_error() {
+    let journal = Journal::open_in_memory().unwrap();
+    journal.create_connection(&a_connection()).unwrap();
+    let settings = ConnectionSettings::from(&journal.connection_by_name("nas").unwrap());
+
+    assert!(matches!(
+        journal.update_connection("nope", &settings),
+        Err(JournalError::UnknownConnection(name)) if name == "nope"
+    ));
+}
+
+#[test]
+fn a_connection_a_link_points_at_can_still_be_edited() {
+    // The asymmetry that makes editing safe: a link references a connection by
+    // id, so moving the connection re-points every link at once. Deleting it
+    // would leave those links pointing at nothing, which is why that is
+    // refused and this is not.
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_connection(&a_connection()).unwrap();
+    journal
+        .create_link(&NewLink {
+            destination: Endpoint::remote(id, "inbox"),
+            ..a_link()
+        })
+        .unwrap();
+
+    let moved = ConnectionSettings {
+        root: "/volume2/media".to_string(),
+        ..ConnectionSettings::from(&journal.connection_by_name("nas").unwrap())
+    };
+    journal.update_connection("nas", &moved).unwrap();
+
+    let link = journal.link_by_name("laptop-to-nas").unwrap();
+    assert_eq!(link.destination.connection, Some(id));
+    assert_eq!(
+        journal.connection_by_id(id).unwrap().root,
+        "/volume2/media",
+        "the link still resolves, and now resolves somewhere else"
+    );
+}
+
+#[test]
+fn the_links_blocking_a_delete_can_be_named() {
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_connection(&a_connection()).unwrap();
+    journal
+        .create_link(&NewLink {
+            name: "drain-to-nas".to_string(),
+            destination: Endpoint::remote(id, "inbox"),
+            ..a_link()
+        })
+        .unwrap();
+    journal
+        .create_link(&NewLink {
+            name: "back-from-nas".to_string(),
+            source: Endpoint::remote(id, "outbox"),
+            ..a_link()
+        })
+        .unwrap();
+
+    // Both ends count, and the order is stable so a message reads the same
+    // way twice.
+    assert_eq!(
+        journal.links_using(id).unwrap(),
+        vec!["back-from-nas".to_string(), "drain-to-nas".to_string()]
+    );
+}
+
+#[test]
+fn an_unused_connection_has_no_links_to_name() {
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_connection(&a_connection()).unwrap();
+    assert!(journal.links_using(id).unwrap().is_empty());
+}
+
+#[test]
 fn an_unreferenced_connection_can_be_deleted() {
     let journal = Journal::open_in_memory().unwrap();
     journal.create_connection(&a_connection()).unwrap();

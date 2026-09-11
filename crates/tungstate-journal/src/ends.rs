@@ -1,12 +1,20 @@
-//! Reading a link end off the command line.
+//! Writing a link end down as one string, and reading it back.
 //!
 //! An end used to be a path and nothing else. It is now either a path on this
-//! machine or a path inside a named connection, and the command line has to
-//! tell them apart without a mode flag.
+//! machine or a path inside a named connection, and both front ends have to
+//! tell them apart without a mode flag — the command line has no room for one
+//! and a browser pane has nowhere to put one.
+//!
+//! So the composite string *is* the wire format: `/Users/me/Videos` or
+//! `nas:inbox/2026`. It lives here rather than in either front end because
+//! this crate owns [`Endpoint`] and [`Connection`], and because there are now
+//! three callers of it.
+//!
+//! [`Connection`]: crate::Connection
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use tungstate_journal::{Endpoint, Journal, JournalError};
+use crate::{Endpoint, Journal, JournalError, Location};
 
 /// Why an end could not be resolved.
 #[derive(Debug, thiserror::Error)]
@@ -72,7 +80,7 @@ pub fn parse_end(
     }
 }
 
-fn lookup(journal: &Journal, name: &str) -> Result<tungstate_journal::ConnectionId, EndError> {
+fn lookup(journal: &Journal, name: &str) -> Result<crate::ConnectionId, EndError> {
     match journal.connection_by_name(name) {
         Ok(connection) => Ok(connection.id),
         Err(JournalError::UnknownConnection(_)) => {
@@ -87,12 +95,7 @@ fn lookup(journal: &Journal, name: &str) -> Result<tungstate_journal::Connection
 pub fn describe(end: &Endpoint, journal: &Journal) -> String {
     match end.connection {
         None => end.path.display().to_string(),
-        Some(id) => {
-            let name = journal
-                .connection_by_id(id)
-                .map_or_else(|_| format!("#{}", id.0), |c| c.name);
-            format!("{name}:{}", end.path.display())
-        }
+        Some(id) => format!("{}:{}", name_of(journal, id), end.path.display()),
     }
 }
 
@@ -101,24 +104,65 @@ pub fn describe(end: &Endpoint, journal: &Journal) -> String {
 /// A local location is its full path; a remote one is `connection:path`,
 /// because the path on its own means nothing without the place it is in.
 #[must_use]
-pub fn place(location: &tungstate_journal::Location, journal: &Journal) -> String {
+pub fn place(location: &Location, journal: &Journal) -> String {
     let full = location.display_path();
     match location.connection {
         None => full,
-        Some(id) => {
-            let name = journal
-                .connection_by_id(id)
-                .map_or_else(|_| format!("#{}", id.0), |c| c.name);
-            format!("{name}:{full}")
-        }
+        Some(id) => format!("{}:{full}", name_of(journal, id)),
     }
+}
+
+/// Child of a location, joined the way the far side spells it.
+///
+/// Not `Path::join`: that yields `nas:inbox\a.mp4` on Windows, and a backslash
+/// in a protocol key is not the same key with a different separator — it is a
+/// different, usually corrupt, key. Same rule [`Location::display_path`] and
+/// the adapter's `remote_key` already encode.
+#[must_use]
+pub fn join_display(location: &str, child: &str) -> String {
+    match connection_prefix(location) {
+        None => Path::new(location).join(child).display().to_string(),
+        Some((name, path)) => match path.trim_end_matches('/') {
+            "" => format!("{name}:{child}"),
+            path => format!("{name}:{path}/{child}"),
+        },
+    }
+}
+
+/// Parent of a location, or `None` at a connection's root.
+///
+/// `Path::parent` is the wrong question for a remote twice over: it splits on
+/// this machine's separator, and on `nas:inbox` it answers `Some("nas:")` by
+/// treating the prefix as a directory component. The honest answer at a
+/// connection's root is that there is nowhere above it — the root is where the
+/// connection's world begins.
+#[must_use]
+pub fn parent_display(location: &str) -> Option<String> {
+    match connection_prefix(location) {
+        None => Path::new(location)
+            .parent()
+            .map(|parent| parent.display().to_string()),
+        Some((name, path)) => match path.trim_end_matches('/') {
+            "" => None,
+            path => Some(format!(
+                "{name}:{}",
+                path.rsplit_once('/').map_or("", |(above, _)| above)
+            )),
+        },
+    }
+}
+
+fn name_of(journal: &Journal, id: crate::ConnectionId) -> String {
+    journal
+        .connection_by_id(id)
+        .map_or_else(|_| format!("#{}", id.0), |connection| connection.name)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{NewConnection, Scheme};
     use std::collections::BTreeMap;
-    use tungstate_journal::{NewConnection, Scheme};
 
     fn journal_with_nas() -> Journal {
         let journal = Journal::open_in_memory().unwrap();
@@ -141,7 +185,7 @@ mod tests {
         let journal = journal_with_nas();
         let end = parse_end("nas:inbox", None, &journal).unwrap();
         assert!(end.is_remote());
-        assert_eq!(end.path, std::path::Path::new("inbox"));
+        assert_eq!(end.path, Path::new("inbox"));
     }
 
     #[test]
@@ -152,7 +196,7 @@ mod tests {
         for candidate in [r"C:\Users\x", "D:/data", r"c:\tmp"] {
             let end = parse_end(candidate, None, &journal).unwrap();
             assert!(!end.is_remote(), "`{candidate}` should be local");
-            assert_eq!(end.path, std::path::Path::new(candidate));
+            assert_eq!(end.path, Path::new(candidate));
         }
     }
 
@@ -179,7 +223,7 @@ mod tests {
         let journal = journal_with_nas();
         let end = parse_end("odd:name", Some("nas"), &journal).unwrap();
         assert!(end.is_remote());
-        assert_eq!(end.path, std::path::Path::new("odd:name"));
+        assert_eq!(end.path, Path::new("odd:name"));
     }
 
     #[test]
@@ -195,7 +239,7 @@ mod tests {
         let journal = journal_with_nas();
         let id = journal.connection_by_name("nas").unwrap().id;
 
-        let remote = tungstate_journal::Location {
+        let remote = Location {
             connection: Some(id),
             root: "inbox".into(),
             path: "a.mp4".into(),
@@ -207,11 +251,8 @@ mod tests {
         // A local one is the opposite: it must read the way this machine
         // spells a path, backslashes and all, so it is built rather than
         // written out.
-        let local = tungstate_journal::Location::new("/Users/x", "a.mp4");
-        let native = std::path::Path::new("/Users/x")
-            .join("a.mp4")
-            .display()
-            .to_string();
+        let local = Location::new("/Users/x", "a.mp4");
+        let native = Path::new("/Users/x").join("a.mp4").display().to_string();
         assert_eq!(place(&local, &journal), native);
     }
 
@@ -220,6 +261,46 @@ mod tests {
         let journal = journal_with_nas();
         let end = parse_end("nas:", None, &journal).unwrap();
         assert!(end.is_remote());
-        assert_eq!(end.path, std::path::Path::new(""));
+        assert_eq!(end.path, Path::new(""));
+    }
+
+    #[test]
+    fn walking_into_a_remote_uses_the_far_sides_separator() {
+        // The assertion is the forward slash, on Windows as much as anywhere:
+        // `Path::join` would put a backslash here and name a file no server
+        // has.
+        assert_eq!(join_display("nas:inbox", "a.mp4"), "nas:inbox/a.mp4");
+        assert_eq!(join_display("nas:", "inbox"), "nas:inbox");
+        assert_eq!(join_display("nas:inbox/", "2026"), "nas:inbox/2026");
+    }
+
+    #[test]
+    fn walking_into_a_local_path_uses_this_machines_separator() {
+        let native = Path::new("/Users/x").join("a.mp4").display().to_string();
+        assert_eq!(join_display("/Users/x", "a.mp4"), native);
+    }
+
+    #[test]
+    fn a_connection_root_has_nothing_above_it() {
+        // `Path::parent` answers `Some("nas:")` here, which reads as "one
+        // level up" and is not: it is the same place with the prefix mistaken
+        // for a directory.
+        assert_eq!(parent_display("nas:"), None);
+        assert_eq!(parent_display("nas:inbox"), Some("nas:".to_string()));
+        assert_eq!(
+            parent_display("nas:inbox/2026"),
+            Some("nas:inbox".to_string())
+        );
+    }
+
+    #[test]
+    fn a_local_parent_is_the_one_this_machine_would_give() {
+        assert_eq!(parent_display("/"), None);
+        assert_eq!(
+            parent_display("/Users/x/Videos"),
+            Path::new("/Users/x/Videos")
+                .parent()
+                .map(|p| p.display().to_string())
+        );
     }
 }

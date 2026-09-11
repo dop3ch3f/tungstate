@@ -4,16 +4,18 @@ import Pane from "./components/Pane.vue";
 import SyncModal, { type Payload } from "./components/SyncModal.vue";
 import TransfersView, { type Row } from "./components/TransfersView.vue";
 import ActivityView from "./components/ActivityView.vue";
+import ConnectionsView from "./components/ConnectionsView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
-import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk} from "./api";
+import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk, type Connection} from "./api";
 
-type Tab = "browse" | "transfers" | "activity";
+type Tab = "browse" | "transfers" | "connections" | "activity";
 
 const tab = ref<Tab>("browse");
 const onboarding = ref(false);
 const places = ref<Place[]>([]);
 const links = ref<Link[]>([]);
+const connections = ref<Connection[]>([]);
 const error = ref("");
 
 const left = useTemplateRef<InstanceType<typeof Pane>>("left");
@@ -123,13 +125,20 @@ onMounted(async () => {
 
   try {
     places.value = await api.places();
+    connections.value = await api.connections();
     const home = places.value.find((p) => p.label === "Home")?.path ?? "/";
-    const volume = places.value.find((p) => p.path.startsWith("/Volumes"))?.path;
+    // A connection first: it is the route that works whether or not the volume
+    // is mounted, and it is the only one Windows and Linux ever get. Asked of
+    // the connection list rather than sniffed out of a path, so nothing here
+    // has to guess what a string means.
+    const away = connections.value.length
+      ? `${connections.value[0].name}:`
+      : places.value.find((p) => p.path.startsWith("/Volumes"))?.path;
 
     // Where you were last beats any guess we could make.
     const last = await api.lastPanes();
     leftStart.value = last.left ?? places.value.find((p) => p.label === "Movies")?.path ?? home;
-    rightStart.value = last.right ?? volume ?? home;
+    rightStart.value = last.right ?? away ?? home;
 
     links.value = await api.links();
     const seen = await api.recent();
@@ -255,6 +264,23 @@ async function answerIdentical(remove: boolean) {
 }
 
 const running = computed(() => liveFile.value !== null);
+
+/// Both lists move together: a connection appears in every pane's "Go to…"
+/// the moment it exists, and disappears the moment it is forgotten.
+async function refreshConnections() {
+  try {
+    connections.value = await api.connections();
+    places.value = await api.places();
+  } catch (e) { error.value = String(e); }
+}
+
+/// Sending a pane somewhere from the Connections tab has to switch tabs too,
+/// or the navigation happens on a screen nobody is looking at.
+function browseAt(location: string) {
+  rightStart.value = location;
+  activeSide.value = "right";
+  tab.value = "browse";
+}
 </script>
 
 <template>
@@ -266,6 +292,7 @@ const running = computed(() => liveFile.value !== null);
         <button :aria-current="tab === 'transfers'" @click="tab = 'transfers'">
           Transfers<span v-if="running" class="badge">●</span>
         </button>
+        <button :aria-current="tab === 'connections'" @click="tab = 'connections'">Connections</button>
         <button :aria-current="tab === 'activity'" @click="tab = 'activity'">Activity</button>
       </nav>
       <span class="spacer"></span>
@@ -320,6 +347,11 @@ const running = computed(() => liveFile.value !== null);
                    :at-once="atOnce" :halting="halting"
                    @stop="stop" @stop-now="stopNow" @resume="resumeRun" @discard="discardRun" />
 
+    <ConnectionsView v-else-if="tab === 'connections'" :connections="connections"
+                     @changed="refreshConnections" @browse="browseAt" />
+
+    <!-- Last, and deliberately a bare `v-else`: it is the fallback, so a new
+         tab value without its own branch above renders Activity in silence. -->
     <ActivityView v-else />
 
     <SyncModal v-if="syncing" :legs="legs" :count="count" :total-bytes="selectionBytes"

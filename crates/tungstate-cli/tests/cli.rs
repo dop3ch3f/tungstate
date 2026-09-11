@@ -1,6 +1,8 @@
 //! End-to-end tests that run the built `tungstate` binary.
 
 use assert_cmd::Command;
+// `.not()` on a predicate, for asserting a marker is absent.
+use predicates::prelude::PredicateBooleanExt as _;
 
 fn tungstate() -> Command {
     Command::cargo_bin("tungstate").expect("binary `tungstate` should be built by cargo test")
@@ -91,6 +93,167 @@ fn a_connection_can_be_added_listed_tested_and_removed() {
         .assert()
         .success()
         .stdout(predicates::str::contains("no connections configured"));
+}
+
+#[test]
+fn connection_update_changes_only_what_was_named() {
+    let home = sandbox();
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "ftp"])
+        .args(["--host", "nas.local", "--port", "21", "--user", "me"])
+        .args(["--root", "/volume1", "--secret-stdin"])
+        .write_stdin("\n")
+        .assert()
+        .success();
+
+    sandboxed(&home)
+        .args(["connection", "update", "nas", "--root", "/volume2/media"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("updated connection `nas`"));
+
+    // The root moved and nothing else did. The flags that were not typed are
+    // the assertion here, not the one that was.
+    sandboxed(&home)
+        .args(["connection", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("root=/volume2/media"))
+        .stdout(predicates::str::contains("nas.local:21"))
+        .stdout(predicates::str::contains("as me"))
+        .stdout(predicates::str::contains("ftp"));
+
+    // A scheme change to something encrypted also drops the warning marker,
+    // which is how `list` says the password stops crossing the wire in clear.
+    sandboxed(&home)
+        .args(["connection", "update", "nas", "--scheme", "ftps"])
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["connection", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("ftps"))
+        .stdout(predicates::str::contains("root=/volume2/media"))
+        .stdout(predicates::str::contains("[UNENCRYPTED]").not());
+}
+
+#[test]
+fn connection_update_refuses_a_name_and_a_scheme_it_does_not_know() {
+    let home = sandbox();
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "fs", "--root", "/"])
+        .assert()
+        .success();
+
+    sandboxed(&home)
+        .args(["connection", "update", "nope", "--root", "/x"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("no connection named `nope`"));
+
+    sandboxed(&home)
+        .args(["connection", "update", "nas", "--scheme", "telepathy"])
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("must be fs, ftp or ftps"));
+}
+
+#[test]
+fn a_connection_a_link_uses_can_still_be_updated() {
+    // The asymmetry with `remove`, from the outside: a link holds a
+    // connection id, so editing where the connection points re-points the
+    // link too. That is what makes an edit safe and a delete not.
+    let home = sandbox();
+    let root = home.path().join("store");
+    let source = home.path().join("from");
+    std::fs::create_dir_all(root.join("inbox")).unwrap();
+    std::fs::create_dir_all(&source).unwrap();
+
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "fs", "--root"])
+        .arg(&root)
+        .assert()
+        .success();
+    sandboxed(&home)
+        .arg("link")
+        .arg("add")
+        .arg(&source)
+        .arg("nas:inbox")
+        .args(["--name", "drain", "--move"])
+        .assert()
+        .success();
+
+    let moved = home.path().join("store-moved");
+    std::fs::create_dir_all(moved.join("inbox")).unwrap();
+    sandboxed(&home)
+        .args(["connection", "update", "nas", "--root"])
+        .arg(&moved)
+        .assert()
+        .success();
+
+    // The link still names the same connection, and the connection now points
+    // somewhere else. `link list` resolving at all is the property.
+    sandboxed(&home)
+        .args(["link", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("nas:inbox"));
+}
+
+#[test]
+fn connection_password_reports_what_it_did_and_refuses_what_it_cannot_do() {
+    let home = sandbox();
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "ftp"])
+        .args(["--host", "nas.local", "--secret-stdin"])
+        .write_stdin("\n")
+        .assert()
+        .success();
+
+    sandboxed(&home)
+        .args(["connection", "password", "nas", "--secret-stdin"])
+        .write_stdin("hunter2\n")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("stored a new password for `nas`"));
+
+    sandboxed(&home)
+        .args(["connection", "password", "nas", "--secret-stdin"])
+        .write_stdin("\n")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "removed the stored password for `nas`",
+        ));
+
+    sandboxed(&home)
+        .args(["connection", "password", "nope", "--secret-stdin"])
+        .write_stdin("x\n")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("no connection named `nope`"));
+
+    // A password for a scheme that never sends one would sit in the keychain
+    // unread for ever, so it is refused rather than quietly accepted.
+    sandboxed(&home)
+        .args([
+            "connection",
+            "add",
+            "scratch",
+            "--scheme",
+            "fs",
+            "--root",
+            "/",
+        ])
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["connection", "password", "scratch", "--secret-stdin"])
+        .write_stdin("x\n")
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("does not authenticate"));
 }
 
 #[test]

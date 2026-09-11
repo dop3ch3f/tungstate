@@ -68,6 +68,39 @@ export interface Listing {
 
 export interface Place { label: string; path: string }
 
+/**
+ * A connection as the window shows it. Mirrors `ConnectionView` in main.rs.
+ *
+ * `encrypted` and `networked` arrive already decided. The rule lives in
+ * `Scheme::is_encrypted` in Rust, and re-deriving it from `scheme` here would
+ * be a second implementation of a warning that has to be right.
+ */
+export interface Connection {
+  name: string;
+  scheme: string;
+  host: string | null;
+  port: number | null;
+  username: string | null;
+  root: string;
+  options: Record<string, string>;
+  encrypted: boolean;
+  networked: boolean;
+}
+
+/** What the add/edit dialog sends. Mirrors `ConnectionForm` in main.rs. */
+export interface ConnectionForm {
+  name: string;
+  scheme: string;
+  host: string | null;
+  port: number | null;
+  username: string | null;
+  root: string;
+  options: Record<string, string>;
+}
+
+/** What a reachability check found. Mirrors `ProbeView` in main.rs. */
+export interface Probe { entries: number; root: string }
+
 export interface InterruptedRun {
   link: string;
   source: string;
@@ -131,6 +164,15 @@ export const api = {
   whereis: (target: string) => invoke<Op[]>("whereis", { target }),
   recent: () => invoke<Op[]>("recent"),
   quarantined: (link: string) => invoke<string[]>("quarantined", { link }),
+  connections: () => invoke<Connection[]>("list_connections"),
+  addConnection: (form: ConnectionForm, secret: string | null) =>
+    invoke<void>("add_connection", { form, secret }),
+  updateConnection: (name: string, form: ConnectionForm) =>
+    invoke<void>("update_connection", { name, form }),
+  setConnectionPassword: (name: string, secret: string) =>
+    invoke<void>("set_connection_password", { name, secret }),
+  testConnection: (name: string) => invoke<Probe>("test_connection", { name }),
+  removeConnection: (name: string) => invoke<void>("remove_connection", { name }),
   interrupted: () => invoke<InterruptedRun[]>("interrupted"),
   resumeInterrupted: (link: string) => invoke<void>("resume_interrupted", { link }),
   discardInterrupted: (link: string) => invoke<number>("discard_interrupted", { link }),

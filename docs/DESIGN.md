@@ -469,6 +469,9 @@ tungstate whereis <path|hash>                 where is this file now, across all
 tungstate blame <dir>                         per file: how and when did it arrive here
 tungstate link add <from> <to> [--drain|--ingest] [--remove-source] [--verify readback]
 tungstate link start|pause|resume|status <name>   durable transfer control, progress, space reclaimed
+tungstate connection add|list|test|remove <name>  places a link end can live, other than this machine
+tungstate connection update <name> [--host ...]   change one; the name itself cannot change
+tungstate connection password <name>              replace the stored password (the recovery path for a refused sign-in)
 tungstate quarantine [list|release|resolve]
 tungstate doctor                              check watcher limits, FS capabilities, policy validity
 tungstate policy [validate|fmt|explain]
@@ -478,6 +481,38 @@ tungstate service [install|uninstall]
 Every command takes `--json` for scripting. `adopt` is the killer onboarding feature: point it at a messy folder and it proposes a policy inferred from the existing structure and the file mix, then shows what would move.
 
 Desktop notifications (`notify-rust`) in `suggest` mode: "12 files in Downloads need sorting. `tungstate apply downloads` or open plan." Never notify in `enforce` mode except on quarantine or circuit-breaker trips. Drain links notify on: completed, paused-unreachable for more than an hour, failed file needing a decision. Nothing else; a notification per file is spam.
+
+### Connections are a first-class screen — **DECIDED (slice 4e)**
+
+The desktop app has a **Connections** tab alongside Browse, Transfers and
+Activity: add, edit, test, change password, forget. A connection then appears
+in each pane's "Go to…" list as `name:`, and a pane can browse it and drain
+into it whether or not the operating system has mounted anything. That is the
+point — the FTP route exists precisely for when the mount does not work, and
+until this screen existed it was reachable only from the command line.
+
+A pane's location is one composite string, `/Users/me/Videos` or
+`nas:inbox/2026`, read by the same parser the command line uses
+(`tungstate-journal::ends`). One grammar rather than two, because the address
+bar, the "Go to…" list, the saved pane state, a transfer leg and a link spec
+are all a single string already. A name of two or more characters before a
+colon is a connection; one character is a Windows drive letter. No drive letter
+is ever two characters, so the two cases cannot collide.
+
+**Rename is deliberately unsupported.** A connection's name is both the token
+people typed into their link specs and the account its password is filed under
+in the keychain, so renaming is two migrations wearing one hat — the journal
+rows and the platform credential store, which can fail independently. The
+journal's `ConnectionSettings` has no `name` field at all, so the API cannot
+express a rename and therefore cannot desynchronise the two. Remove and re-add
+is the supported path, and it is refused while a link still points at the
+connection, which is the prompt to fix the links first.
+
+Editing everything else *is* supported while links point at a connection, and
+that asymmetry is the reason connections exist as an indirection: a link holds
+a connection id, so moving the connection's host or root re-points every link
+at once. Deleting would leave those links pointing at nothing, which is what
+the foreign key refuses.
 
 ### `adopt` (policy inference, v0.4, design intent now)
 Scan the folder, cluster files by mime and by the directory they already sit in, and propose `[[rule]]` entries that would keep most files where they are. Report the fit ("proposed policy explains 94% of files, 312 would move") and let the user edit before applying. It never applies on its own. Inference is heuristic; the point is a good starting file, not a perfect one.
