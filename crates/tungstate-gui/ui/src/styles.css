@@ -248,6 +248,21 @@ button, .chrome { user-select: none; }
 }
 @media (prefers-reduced-motion: reduce) { .state.live::before { animation: none; opacity: 1; } }
 
+/* Activity ------------------------------------------------------------- */
+
+/* Its own name rather than `.row`, which is the pane's file row and would
+   give this form a file row's height and hover. */
+.seek { display: flex; align-items: flex-end; gap: 9px; margin-bottom: 18px; }
+.seek .opt { margin-bottom: 0; flex: 1; max-width: 46ch; }
+.ledger .when { font-family: var(--mono); color: var(--dust); white-space: nowrap; }
+
+.empty {
+  display: grid; gap: 4px; justify-items: start;
+  padding: 22px; border: 1px dashed var(--seam);
+  border-radius: var(--r); color: var(--dust); max-width: 64ch;
+}
+.empty strong { color: var(--light); font-weight: 600; }
+
 /* Notices -------------------------------------------------------------- */
 
 .notice { border-radius: var(--r); padding: 9px 12px; margin: 12px 0; font-size: 12.5px; }
