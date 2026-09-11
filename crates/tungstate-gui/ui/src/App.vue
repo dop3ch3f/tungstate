@@ -6,7 +6,7 @@ import TransfersView, { type Row } from "./components/TransfersView.vue";
 import ActivityView from "./components/ActivityView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
-import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun} from "./api";
+import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began} from "./api";
 
 type Tab = "browse" | "transfers" | "activity";
 
@@ -65,6 +65,9 @@ const stopping = ref(false);
 const conflict = ref<ConflictAsk | null>(null);
 const applyAll = ref(false);
 const interrupted = ref<InterruptedRun[]>([]);
+// From the engine, not from which button was pressed: a resumed run has no
+// button behind it, and only the engine knows what the far side agreed to.
+const shape = ref<Began | null>(null);
 const busy = ref("");
 
 /// Work the last process left behind. Re-read whenever a run ends, so
@@ -75,7 +78,7 @@ async function refreshInterrupted() {
 
 async function resumeRun(link: string) {
   busy.value = link;
-  rows.value = []; summary.value = null; runError.value = ""; discarded.value = "";
+  rows.value = []; summary.value = null; runError.value = ""; discarded.value = ""; shape.value = null;
   try { await api.resumeInterrupted(link); }
   catch (e) { runError.value = String(e); }
   finally { busy.value = ""; }
@@ -135,6 +138,7 @@ onMounted(async () => {
 
 async function attach() {
   unlisten.push(
+    await on.began((e) => { shape.value = e; }),
     // The whole plan arrives before the first file, so the list shows what is
     // waiting rather than growing one row at a time as things happen.
     await on.planned((files) => {
@@ -199,6 +203,7 @@ async function go(payload: Payload) {
   rows.value = [];
   summary.value = null;
   runError.value = "";
+  shape.value = null;
   tab.value = "transfers";
   try {
     await api.startTransfer({ legs: legs.value, ...payload });
@@ -206,7 +211,7 @@ async function go(payload: Payload) {
 }
 
 async function runSaved(name: string) {
-  rows.value = []; summary.value = null; runError.value = "";
+  rows.value = []; summary.value = null; runError.value = ""; shape.value = null;
   tab.value = "transfers";
   try { await api.run(name); } catch (e) { runError.value = String(e); }
 }
@@ -284,7 +289,7 @@ const running = computed(() => liveFile.value !== null);
 
     <TransfersView v-else-if="tab === 'transfers'" :rows="rows" :summary="summary"
                    :error="runError" :live="running" :stopping="stopping"
-                   :interrupted="interrupted" :busy="busy" :note="discarded"
+                   :interrupted="interrupted" :busy="busy" :note="discarded" :shape="shape"
                    @stop="stop" @resume="resumeRun" @discard="discardRun" />
 
     <ActivityView v-else />

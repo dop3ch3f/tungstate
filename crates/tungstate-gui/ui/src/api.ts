@@ -42,6 +42,8 @@ export interface Summary {
   failures: Failure[];
 }
 
+/** What the engine decided this run is, before the first file moves. */
+export interface Began { removes_originals: boolean; at_once: number }
 export interface PlannedFile { path: string; size: number }
 export interface Advanced { path: string; done: number; total: number }
 export interface Started { path: string; size: number }
@@ -130,6 +132,7 @@ export const api = {
 };
 
 export const on = {
+  began: (f: (e: Began) => void) => listen<Began>("transfer://began", (e) => f(e.payload)),
   planned: (f: (e: PlannedFile[]) => void) =>
     listen<PlannedFile[]>("transfer://planned", (e) => f(e.payload)),
   advanced: (f: (e: Advanced) => void) =>

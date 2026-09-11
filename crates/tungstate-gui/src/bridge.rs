@@ -11,7 +11,17 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tungstate_journal::ConflictAction;
-use tungstate_transfer::{Conflict, ConflictResolver, FileOutcome, Progress, SkipReason};
+use tungstate_transfer::{Conflict, ConflictResolver, FileOutcome, Progress, RunShape, SkipReason};
+
+/// What the run turned out to be, before any of it happens.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct BeganEvent {
+    /// False for a copy, and the window words everything differently for it.
+    pub removes_originals: bool,
+    /// Files in flight. Shown, because "is it going one at a time?" was a
+    /// question the window previously gave no way to answer.
+    pub at_once: usize,
+}
 
 /// One file the run intends to deal with, in the order it will take them.
 #[derive(Debug, Clone, Serialize)]
@@ -65,6 +75,16 @@ impl EventProgress {
 }
 
 impl Progress for EventProgress {
+    fn began(&mut self, shape: RunShape) {
+        let _ = self.app.emit(
+            "transfer://began",
+            BeganEvent {
+                removes_originals: shape.removes_originals,
+                at_once: shape.at_once,
+            },
+        );
+    }
+
     fn planned(&mut self, files: &[tungstate_transfer::Planned]) {
         let _ = self.app.emit(
             "transfer://planned",
