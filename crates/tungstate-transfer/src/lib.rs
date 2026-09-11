@@ -15,14 +15,16 @@
 //! destination is both verified and journaled.
 
 mod conflict;
+mod governor;
 mod walk;
 
 pub use conflict::{Conflict, ConflictResolver, Decision, FixedResolver, InteractiveResolver};
+pub use governor::{Governor, Limits};
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
 use tungstate_backend::{Backend, BackendError};
@@ -179,7 +181,11 @@ pub struct Planned {
 }
 
 /// Told about each file as it is dealt with, so a caller can show progress.
-pub trait Progress {
+///
+/// `Send` because a run reports from its worker threads. As with
+/// [`ConflictResolver`], the run holds one behind a lock, so lines never
+/// interleave and an implementation does not have to be thread-safe itself.
+pub trait Progress: Send {
     /// The whole plan, once, before the first file.
     ///
     /// Defaulted because not every caller wants it, and because this arrived
@@ -372,11 +378,36 @@ pub struct Transfer<'a> {
     source: &'a dyn Backend,
     destination: &'a dyn Backend,
     journal: &'a Journal,
-    resolver: &'a mut dyn ConflictResolver,
-    progress: &'a mut dyn Progress,
+    // Behind locks so several files can be in flight while a conflict is
+    // still asked once at a time and progress lines never interleave. An
+    // implementation of either trait does not have to be thread-safe itself;
+    // it only has to be `Send`, which is why those bounds exist.
+    resolver: Mutex<&'a mut dyn ConflictResolver>,
+    progress: Mutex<&'a mut dyn Progress>,
+    // Every destination this run will write to: the whole plan, claimed
+    // before any worker starts, plus each name a rename has taken since.
+    //
+    // Probing the backend for a free name is not enough once files are in
+    // flight. `holiday.mp4` clashes and is renamed to `holiday-2.mp4` at the
+    // same moment another worker is transferring a source file genuinely
+    // called `holiday-2.mp4` to exactly that name — both find the slot empty
+    // and one silently overwrites the other. Sequentially each always sees
+    // the other, so this is a hazard concurrency creates.
+    claimed: Mutex<std::collections::BTreeSet<PathBuf>>,
     // Checked between files, never mid-file: stopping partway through a copy
     // would leave a partial, and the next run would redo it anyway.
     cancel: Option<Arc<AtomicBool>>,
+    /// An explicit ceiling, when the user has one in mind. Raises the limit a
+    /// run will climb to; never removes the handshake gate or the back-off.
+    parallel: Option<usize>,
+}
+
+/// A poisoned lock means another worker panicked. The data behind it is still
+/// sound, and refusing every later file would turn one bug into a dead run.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 impl<'a> Transfer<'a> {
@@ -395,9 +426,11 @@ impl<'a> Transfer<'a> {
             source,
             destination,
             journal,
-            resolver,
-            progress,
+            resolver: Mutex::new(resolver),
+            progress: Mutex::new(progress),
+            claimed: Mutex::new(std::collections::BTreeSet::new()),
             cancel: None,
+            parallel: None,
         }
     }
 
@@ -409,6 +442,97 @@ impl<'a> Transfer<'a> {
     pub fn cancellable(mut self, flag: Arc<AtomicBool>) -> Self {
         self.cancel = Some(flag);
         self
+    }
+
+    /// Raise the ceiling this run will climb to.
+    ///
+    /// The floor, the handshake before each promotion and the back-off on
+    /// objection all still apply: asking for eight does not make a server
+    /// give eight, it only means tungstate will keep asking until it is told
+    /// no.
+    #[must_use]
+    pub fn parallel(mut self, files_at_once: usize) -> Self {
+        self.parallel = Some(files_at_once);
+        self
+    }
+
+    /// One worker: take a file, deal with it, fold the result in, repeat.
+    ///
+    /// `index` is how a run shrinks. Threads cannot be un-spawned, so a worker
+    /// whose index has fallen outside the limit finishes what it holds and
+    /// leaves rather than taking another file.
+    fn work(
+        &self,
+        index: usize,
+        queue: &Mutex<std::collections::VecDeque<walk::File>>,
+        shared: &Mutex<Summary>,
+        governor: &Governor,
+        anchor: &tungstate_backend::RootToken,
+    ) {
+        loop {
+            if index >= governor.limit() {
+                tracing::debug!(index, "standing down; the far side wants fewer");
+                return;
+            }
+            if self.cancelled() {
+                tracing::info!("stopping at the user's request");
+                lock(shared).cancelled = true;
+                return;
+            }
+
+            // Checked per file rather than once: a NAS can drop out at any
+            // point, and every file after that would otherwise be written to
+            // whatever now sits at that path, then have its original deleted.
+            match self.destination.root_token() {
+                Ok(token) if token == *anchor => {}
+                _ => {
+                    tracing::error!("destination is no longer the storage we started with");
+                    lock(shared).destination_lost = true;
+                    return;
+                }
+            }
+
+            let Some(file) = lock(queue).pop_front() else {
+                return;
+            };
+
+            // One unreadable file must not abandon the other three thousand.
+            // The failure is journaled, reported, and the drain carries on;
+            // `failures` is what the caller shows at the end.
+            let outcome = match self.transfer_one(&file) {
+                Ok(outcome) => outcome,
+                Err(error) => {
+                    // The far side saying "not so many at once" is not this
+                    // file's fault, and the answer is fewer workers rather
+                    // than fewer files.
+                    if governor::is_overload(&error) {
+                        governor.rebuff();
+                    }
+                    tracing::warn!(path = %file.path.display(), %error, "transfer failed");
+                    let mut summary = lock(shared);
+                    summary.failed += 1;
+                    summary.failures.push(Failure {
+                        path: file.path.clone(),
+                        reason: explain(&error),
+                    });
+                    FileOutcome::Failed
+                }
+            };
+            lock(&self.progress).finished(&file.path, outcome);
+
+            let mut summary = lock(shared);
+            match outcome {
+                FileOutcome::Transferred => {
+                    summary.transferred += 1;
+                    summary.bytes += file.size;
+                }
+                FileOutcome::AlreadyPresent => summary.already_present += 1,
+                FileOutcome::Skipped(_) => summary.skipped += 1,
+                FileOutcome::Quarantined => summary.quarantined += 1,
+                // Already counted above; the source was left untouched.
+                FileOutcome::Failed => {}
+            }
+        }
     }
 
     fn cancelled(&self) -> bool {
@@ -455,20 +579,49 @@ impl<'a> Transfer<'a> {
         self.carry(files)
     }
 
+    /// How many transfers this destination can take at once.
+    ///
+    /// A property of the place, not a setting: a mounted volume has no
+    /// per-client connection limit to exceed and a protocol does.
+    fn limits(&self) -> Limits {
+        let networked = self
+            .link
+            .destination
+            .connection
+            .and_then(|id| self.journal.connection_by_id(id).ok())
+            .is_some_and(|connection| connection.scheme.is_networked());
+
+        let limits = if networked {
+            Limits::networked()
+        } else {
+            Limits::local()
+        };
+        match self.parallel {
+            Some(requested) => limits.overridden(requested),
+            None => limits,
+        }
+    }
+
     fn carry(&mut self, mut files: Vec<walk::File>) -> Result<Summary> {
         // Pin what the destination is before anything moves, so a volume
         // swapped underneath us is detectable rather than silently written to.
         let anchor = self.destination.root_token()?;
 
-        let mut summary = Summary {
-            recovered: self.recover()?,
-            ..Summary::default()
-        };
+        let recovered = self.recover()?;
 
         walk::sort(&mut files, self.link.order);
 
+        // Claim every destination the plan will occupy, so a rename cannot
+        // choose a name that a file still waiting is going to need.
+        {
+            let mut claimed = lock(&self.claimed);
+            for file in &files {
+                claimed.insert(file.path.clone());
+            }
+        }
+
         // Everything, in the order it will happen, before anything happens.
-        self.progress.planned(
+        lock(&self.progress).planned(
             &files
                 .iter()
                 .map(|f| Planned {
@@ -478,53 +631,37 @@ impl<'a> Transfer<'a> {
                 .collect::<Vec<_>>(),
         );
 
-        for file in files {
-            if self.cancelled() {
-                tracing::info!("stopping at the user's request");
-                summary.cancelled = true;
+        // Find the limit before the first file, by handshake. Climbing during
+        // the run would mean a real transfer is the thing that discovers the
+        // ceiling; asking first means a refusal costs a rejected connection.
+        let governor = Governor::new(self.limits());
+        loop {
+            let before = governor.limit();
+            if governor.try_promote(self.destination) == before {
                 break;
             }
-
-            // Checked per file rather than once: a NAS can drop out at any
-            // point, and every file after that would otherwise be written to
-            // whatever now sits at that path, then have its original deleted.
-            match self.destination.root_token() {
-                Ok(token) if token == anchor => {}
-                _ => {
-                    tracing::error!("destination is no longer the storage we started with");
-                    summary.destination_lost = true;
-                    break;
-                }
-            }
-            // One unreadable file must not abandon the other three thousand.
-            // The failure is journaled, reported, and the drain carries on;
-            // `failures` is what the caller shows at the end.
-            let outcome = match self.transfer_one(&file) {
-                Ok(outcome) => outcome,
-                Err(error) => {
-                    tracing::warn!(path = %file.path.display(), %error, "transfer failed");
-                    summary.failed += 1;
-                    summary.failures.push(Failure {
-                        path: file.path.clone(),
-                        reason: explain(&error),
-                    });
-                    FileOutcome::Failed
-                }
-            };
-            self.progress.finished(&file.path, outcome);
-
-            match outcome {
-                FileOutcome::Transferred => {
-                    summary.transferred += 1;
-                    summary.bytes += file.size;
-                }
-                FileOutcome::AlreadyPresent => summary.already_present += 1,
-                FileOutcome::Skipped(_) => summary.skipped += 1,
-                FileOutcome::Quarantined => summary.quarantined += 1,
-                // Already counted above; the source was left untouched.
-                FileOutcome::Failed => {}
-            }
         }
+        let workers = governor.limit().min(files.len().max(1));
+        tracing::info!(workers, files = files.len(), "starting");
+
+        let queue = Mutex::new(std::collections::VecDeque::from(files));
+        let shared = Mutex::new(Summary {
+            recovered,
+            ..Summary::default()
+        });
+
+        // A shared reborrow: every worker needs `&Transfer`, and `carry` holds
+        // `&mut`. This is what the locks on `resolver` and `progress` bought —
+        // the per-file work needs nothing mutable from here.
+        let me: &Self = self;
+        std::thread::scope(|scope| {
+            for index in 0..workers {
+                let (queue, shared, governor, anchor) = (&queue, &shared, &governor, &anchor);
+                scope.spawn(move || me.work(index, queue, shared, governor, anchor));
+            }
+        });
+
+        let mut summary = lock(&shared).clone();
 
         // Pruning a half-drained tree would remove directories the remaining
         // files still need, so a cancelled run leaves the structure alone.
@@ -545,7 +682,7 @@ impl<'a> Transfer<'a> {
     /// A partial file is deleted rather than resumed: slice 3 resumes per file,
     /// not per byte, and a partial whose length cannot be trusted is worse than
     /// no partial at all.
-    fn recover(&mut self) -> Result<u64> {
+    fn recover(&self) -> Result<u64> {
         let interrupted = self.journal.incomplete_for_link(self.link.id)?;
 
         for op in &interrupted {
@@ -574,8 +711,8 @@ impl<'a> Transfer<'a> {
     /// that are this destination's name plus the exact suffix shape. Assumes
     /// no second process is mid-write to the same destination path, which is
     /// already true — a link is run one at a time.
-    fn transfer_one(&mut self, file: &walk::File) -> Result<FileOutcome> {
-        self.progress.starting(&file.path, file.size);
+    fn transfer_one(&self, file: &walk::File) -> Result<FileOutcome> {
+        lock(&self.progress).starting(&file.path, file.size);
 
         if self.within_cooldown(file) {
             tracing::debug!(path = %file.path.display(), "still being written; leaving for next run");
@@ -629,9 +766,9 @@ impl<'a> Transfer<'a> {
         }
     }
 
-    fn resolve_conflict(&mut self, file: &walk::File, destination: &Path) -> Result<FileOutcome> {
+    fn resolve_conflict(&self, file: &walk::File, destination: &Path) -> Result<FileOutcome> {
         let existing = self.destination.stat(destination)?;
-        let action = self.resolver.resolve(&Conflict {
+        let action = lock(&self.resolver).resolve(&Conflict {
             path: file.path.clone(),
             incoming_size: file.size,
             existing_size: existing.len,
@@ -641,7 +778,7 @@ impl<'a> Transfer<'a> {
             ConflictAction::Skip => Ok(FileOutcome::Skipped(SkipReason::Conflict)),
 
             ConflictAction::Rename => {
-                let renamed = disambiguate(destination, self.destination);
+                let renamed = self.disambiguate(destination);
                 self.copy_to(file, &renamed)?;
                 Ok(FileOutcome::Transferred)
             }
@@ -680,7 +817,7 @@ impl<'a> Transfer<'a> {
 
     /// The core sequence. Journal, copy to a temp name, verify, commit, then and
     /// only then deal with the source.
-    fn copy_to(&mut self, file: &walk::File, destination: &Path) -> Result<()> {
+    fn copy_to(&self, file: &walk::File, destination: &Path) -> Result<()> {
         let op = self.journal.begin(&NewOp {
             kind: match self.link.source_policy {
                 SourcePolicy::Keep => OpKind::Copy,
@@ -722,7 +859,7 @@ impl<'a> Transfer<'a> {
     }
 
     fn copy_verify_commit(
-        &mut self,
+        &self,
         file: &walk::File,
         destination: &Path,
         op: tungstate_journal::OpId,
@@ -773,7 +910,7 @@ impl<'a> Transfer<'a> {
     /// doing its own temp-and-rename, as `OpenDAL`'s FTP service does, never
     /// exposes the real name at all. The engine cannot tell, so it assumes
     /// the worst and recovery cleans up for both.
-    fn write_in_place(&mut self, file: &walk::File, destination: &Path) -> Result<String> {
+    fn write_in_place(&self, file: &walk::File, destination: &Path) -> Result<String> {
         let (hash, written) = self.stream(&file.path, destination)?;
 
         if let Err(error) = self.verify(file, destination, &hash, written) {
@@ -788,7 +925,7 @@ impl<'a> Transfer<'a> {
     ///
     /// One pass over the source produces both the copy and the hash; reading it
     /// twice would double the cost of the most expensive part of a drain.
-    fn stream(&mut self, source: &Path, destination: &Path) -> Result<(String, u64)> {
+    fn stream(&self, source: &Path, destination: &Path) -> Result<(String, u64)> {
         let total = self.source.stat(source).map_or(0, |m| m.len);
         let mut reader = self.source.open_read(source)?;
         let mut writer = self.destination.create_write(destination)?;
@@ -819,13 +956,13 @@ impl<'a> Transfer<'a> {
             // four thousand times would spend longer painting than copying.
             if reported.elapsed() >= PROGRESS_INTERVAL {
                 reported = Instant::now();
-                self.progress.advanced(source, written, total);
+                lock(&self.progress).advanced(source, written, total);
             }
         }
 
         // Once at the end regardless of the throttle, so a bar lands on full
         // rather than stopping at whatever the last tick happened to catch.
-        self.progress.advanced(source, written, written);
+        lock(&self.progress).advanced(source, written, written);
 
         // finish() consumes the writer, so it cannot be used afterwards, and it
         // fsyncs. Without that the bytes would only be in the page cache and a
@@ -1095,25 +1232,37 @@ enum Placement {
 }
 
 /// Find an unused name beside `destination`, as `holiday-2.mp4`.
-fn disambiguate(destination: &Path, backend: &dyn Backend) -> PathBuf {
-    let stem = destination
-        .file_stem()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into_owned();
-    let extension = destination
-        .extension()
-        .map(|e| format!(".{}", e.to_string_lossy()))
-        .unwrap_or_default();
+///
+/// A method rather than a function because the claim has to be atomic. Asking
+/// the backend whether a name is free is not enough when several files are in
+/// flight: two workers can both find `holiday-2.mp4` unused and both take it,
+/// and the loser's bytes are overwritten by the winner. The lock is held
+/// across probe-and-claim so only one of them can ever leave with the name.
+impl Transfer<'_> {
+    fn disambiguate(&self, destination: &Path) -> PathBuf {
+        let stem = destination
+            .file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into_owned();
+        let extension = destination
+            .extension()
+            .map(|e| format!(".{}", e.to_string_lossy()))
+            .unwrap_or_default();
 
-    for suffix in 2..10_000 {
-        let candidate = destination.with_file_name(format!("{stem}-{suffix}{extension}"));
-        if backend.stat(&candidate).is_err() {
-            return candidate;
+        let mut claimed = lock(&self.claimed);
+        for suffix in 2..10_000 {
+            let candidate = destination.with_file_name(format!("{stem}-{suffix}{extension}"));
+            if !claimed.contains(&candidate) && self.destination.stat(&candidate).is_err() {
+                claimed.insert(candidate.clone());
+                return candidate;
+            }
         }
+        // Vanishingly unlikely; fall back to something unique rather than looping.
+        let fallback = destination.with_file_name(format!("{stem}-{}{extension}", now_suffix()));
+        claimed.insert(fallback.clone());
+        fallback
     }
-    // Vanishingly unlikely; fall back to something unique rather than looping.
-    destination.with_file_name(format!("{stem}-{}{extension}", now_suffix()))
 }
 
 fn now_suffix() -> u128 {

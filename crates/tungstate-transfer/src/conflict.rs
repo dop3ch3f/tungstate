@@ -26,7 +26,11 @@ pub enum Decision {
 }
 
 /// Chooses what happens to a conflicting file.
-pub trait ConflictResolver {
+/// `Send` because a run may resolve conflicts from a worker thread. The run
+/// still holds one resolver behind a lock, so an interactive prompt is asked
+/// once at a time however many files are in flight — being asked two questions
+/// at once is worse than waiting.
+pub trait ConflictResolver: Send {
     /// Decide. Called once per conflict, unless a previous answer applied to all.
     fn resolve(&mut self, conflict: &Conflict) -> ConflictAction;
 }
@@ -113,7 +117,7 @@ fn parse_answer(raw: &str, fallback: ConflictAction) -> Decision {
     }
 }
 
-impl<R: BufRead, W: Write> ConflictResolver for InteractiveResolver<R, W> {
+impl<R: BufRead + Send, W: Write + Send> ConflictResolver for InteractiveResolver<R, W> {
     fn resolve(&mut self, conflict: &Conflict) -> ConflictAction {
         if let Some(action) = self.sticky {
             return action;

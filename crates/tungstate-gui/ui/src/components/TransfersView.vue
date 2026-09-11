@@ -53,7 +53,7 @@ const word: Record<string, string> = {
     <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px">
       <h1>Transfers</h1>
       <button v-if="props.live" class="btn danger" :disabled="props.stopping" @click="emit('stop')">
-        {{ props.stopping ? "Finishing this file" : "Stop after this file" }}
+        {{ props.stopping ? "Finishing what is in flight" : "Stop after these files" }}
       </button>
     </div>
 

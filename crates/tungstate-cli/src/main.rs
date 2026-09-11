@@ -140,6 +140,14 @@ enum LinkAction {
         /// Override the conflict action for this run.
         #[arg(long)]
         on_conflict: Option<String>,
+        /// Most files to move at once.
+        ///
+        /// Normally decided by asking the destination how many connections it
+        /// will accept. Raising this raises the ceiling that is climbed
+        /// towards; it does not skip the asking, and it does not stop
+        /// tungstate backing off if the far side objects.
+        #[arg(long)]
+        parallel: Option<usize>,
     },
 }
 
@@ -448,7 +456,8 @@ fn link(action: LinkAction) -> std::process::ExitCode {
             name,
             yes,
             on_conflict,
-        } => run_link(&journal, &name, yes, on_conflict.as_deref()),
+            parallel,
+        } => run_link(&journal, &name, yes, on_conflict.as_deref(), parallel),
     }
 }
 
@@ -601,6 +610,7 @@ fn run_link(
     name: &str,
     yes: bool,
     on_conflict: Option<&str>,
+    parallel: Option<usize>,
 ) -> std::process::ExitCode {
     let link = match journal.link_by_name(name) {
         Ok(link) => link,
@@ -642,15 +652,18 @@ fn run_link(
     };
 
     let mut progress = CliProgress::new();
-    let outcome = Transfer::new(
+    let mut transfer = Transfer::new(
         &link,
         source.as_ref(),
         destination.as_ref(),
         journal,
         resolver,
         &mut progress,
-    )
-    .run();
+    );
+    if let Some(at_once) = parallel {
+        transfer = transfer.parallel(at_once);
+    }
+    let outcome = transfer.run();
 
     match outcome {
         Ok(summary) => {

@@ -656,12 +656,16 @@ fn a_failure_carries_a_reason_worth_reading() {
 #[test]
 fn a_cancelled_run_stops_cleanly_and_keeps_what_it_finished() {
     use std::sync::Arc;
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::atomic::AtomicBool;
 
+    // More files than workers, deliberately. With several in flight,
+    // "stop after this file" means "stop after the files in flight" — the
+    // count is no longer one, and the guarantee that matters is not a count:
+    // nothing half-done, and everything unstarted left exactly as it was.
     let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::Discovered);
-    rig.write_source("a.mp4", b"first");
-    rig.write_source("b.mp4", b"second");
-    rig.write_source("c.mp4", b"third");
+    for i in 0..24 {
+        rig.write_source(&format!("f{i:02}.mp4"), b"contents");
+    }
 
     let flag = Arc::new(AtomicBool::new(false));
     let mut stopper = StopAfterFirst {
@@ -681,13 +685,32 @@ fn a_cancelled_run_stops_cleanly_and_keeps_what_it_finished() {
     .run()
     .unwrap();
 
-    assert!(summary.cancelled);
-    assert_eq!(summary.transferred, 1, "the in-flight file still completes");
-    // Whatever it finished is committed; the rest are untouched, not half-done.
-    assert_eq!(summary.transferred + summary.skipped, 1);
-    let remaining = std::fs::read_dir(rig.source_dir.path()).unwrap().count();
-    assert_eq!(remaining, 2, "unstarted files must be left alone");
-    let _ = flag.load(Ordering::Relaxed);
+    assert!(
+        summary.cancelled,
+        "the run must report that it stopped early"
+    );
+    assert!(
+        summary.transferred < 24,
+        "cancelling must actually stop something, got {}",
+        summary.transferred
+    );
+
+    // Every file is either moved or still exactly where it was. Nothing is
+    // in between, which is the only promise cancellation makes.
+    let left = std::fs::read_dir(rig.source_dir.path()).unwrap().count();
+    assert_eq!(
+        usize::try_from(summary.transferred).unwrap_or(usize::MAX) + left,
+        24,
+        "{} moved and {left} left does not account for 24",
+        summary.transferred
+    );
+
+    let partials: Vec<_> = std::fs::read_dir(rig.dest_dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|n| n.contains("tungstate"))
+        .collect();
+    assert!(partials.is_empty(), "left partials behind: {partials:?}");
 }
 
 struct StopAfterFirst {
@@ -1857,4 +1880,227 @@ fn a_file_reports_its_progress_and_lands_exactly_on_its_total() {
         "expected throttling, got {} reports",
         recorder.advances.len()
     );
+}
+
+// ---------------------------------------------------------------------------
+// Several files at once.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_parallel_run_moves_the_same_bytes_as_a_sequential_one() {
+    // The only thing that would make concurrency unacceptable is a different
+    // answer, so this asserts sameness rather than speed.
+    let expected: Vec<(String, Vec<u8>)> = (0..40)
+        .map(|i| {
+            let name = format!("f{i:02}.bin");
+            let body: Vec<u8> = (0..(600 + i * 37)).map(|n: u32| (n % 251) as u8).collect();
+            (name, body)
+        })
+        .collect();
+
+    let mut outcomes = Vec::new();
+    for parallel in [1, 4] {
+        let rig = Rig::with(
+            SourcePolicy::Delete,
+            VerifyLevel::Readback,
+            Order::LargestFirst,
+        );
+        for (name, body) in &expected {
+            rig.write_source(name, body);
+        }
+
+        let mut resolver = FixedResolver(ConflictAction::Quarantine);
+        let mut progress = SilentProgress;
+        let summary = Transfer::new(
+            &rig.link,
+            &rig.source,
+            &rig.destination,
+            &rig.journal,
+            &mut resolver,
+            &mut progress,
+        )
+        .parallel(parallel)
+        .run()
+        .unwrap();
+
+        for (name, body) in &expected {
+            assert_eq!(
+                &std::fs::read(rig.dest(name)).unwrap(),
+                body,
+                "{name} at {parallel}"
+            );
+            assert!(
+                !rig.src(name).exists(),
+                "{name} not reclaimed at {parallel}"
+            );
+        }
+        outcomes.push((summary.transferred, summary.bytes, summary.failed));
+    }
+
+    assert_eq!(
+        outcomes[0], outcomes[1],
+        "sequential and parallel must agree"
+    );
+    assert_eq!(outcomes[0].0, 40);
+}
+
+/// Panics if asked two questions at once, which is what an unguarded
+/// resolver would allow.
+struct OneAtATime {
+    inside: std::sync::Arc<AtomicBool>,
+    asked: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl ConflictResolver for OneAtATime {
+    fn resolve(&mut self, _conflict: &Conflict) -> ConflictAction {
+        assert!(
+            !self.inside.swap(true, Ordering::SeqCst),
+            "two conflicts were asked at the same time"
+        );
+        // Long enough that an unguarded second caller would overlap.
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.inside.store(false, Ordering::SeqCst);
+        ConflictAction::Rename
+    }
+}
+
+#[test]
+fn conflicts_are_asked_one_at_a_time_however_many_files_are_in_flight() {
+    // Being asked two questions at once is worse than waiting for the first.
+    let rig = Rig::new(SourcePolicy::Delete);
+    for i in 0..8 {
+        let name = format!("clash{i}.mp4");
+        rig.write_source(&name, b"mine");
+        rig.write_dest(&name, b"theirs, different");
+    }
+
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut resolver = OneAtATime {
+        inside: std::sync::Arc::new(AtomicBool::new(false)),
+        asked: std::sync::Arc::clone(&asked),
+    };
+    let mut progress = SilentProgress;
+    Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .parallel(4)
+    .run()
+    .unwrap();
+
+    assert_eq!(asked.load(Ordering::SeqCst), 8);
+}
+
+#[test]
+fn a_renamed_file_never_lands_on_a_name_another_file_is_about_to_use() {
+    // The reachable race, and it is concurrency-only. `holiday.mp4` clashes,
+    // so it is renamed to `holiday-2.mp4` — while another worker is already
+    // transferring a source file genuinely called `holiday-2.mp4` to exactly
+    // that name. Sequentially one always sees the other; in parallel both
+    // probe an empty slot and the loser's bytes are overwritten.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_dest("holiday.mp4", b"already here, and different");
+    rig.write_source("holiday.mp4", b"the renamed one");
+    rig.write_source("holiday-2.mp4", b"a real file of that name");
+
+    let mut resolver = FixedResolver(ConflictAction::Rename);
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .parallel(4)
+    .run()
+    .unwrap();
+
+    assert_eq!(summary.transferred, 2);
+
+    let mut found = std::collections::BTreeSet::new();
+    for entry in std::fs::read_dir(rig.dest_dir.path()).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_file() {
+            found.insert(std::fs::read_to_string(&path).unwrap_or_default());
+        }
+    }
+    for body in [
+        "already here, and different",
+        "the renamed one",
+        "a real file of that name",
+    ] {
+        assert!(
+            found.contains(body),
+            "`{body}` was overwritten; the destination holds {found:?}"
+        );
+    }
+}
+
+#[test]
+fn a_local_destination_is_not_asked_how_many_it_can_take() {
+    // There is no per-client connection limit on a filesystem, so spending
+    // handshakes to discover one would be pure waste.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("a.mp4", b"x");
+
+    let counted = CountingBackend {
+        inner: Box::new(LocalBackend::new(rig.dest_dir.path().to_path_buf())),
+        slot_enquiries: std::sync::atomic::AtomicUsize::new(0),
+    };
+    rig.run_over(&counted).unwrap();
+
+    assert_eq!(
+        counted.slot_enquiries.load(Ordering::SeqCst),
+        0,
+        "a local destination should never be probed for slots"
+    );
+}
+
+/// Counts how often anything asks whether another connection is available.
+struct CountingBackend {
+    inner: Box<dyn Backend>,
+    slot_enquiries: std::sync::atomic::AtomicUsize,
+}
+
+impl Backend for CountingBackend {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.inner.capabilities()
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        self.inner.root_token()
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        if path.to_string_lossy().starts_with(".tungstate-slot-") {
+            self.slot_enquiries.fetch_add(1, Ordering::SeqCst);
+        }
+        self.inner.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.inner.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.inner.open_read(path)
+    }
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
+        self.inner.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.create_dir_all(path)
+    }
 }

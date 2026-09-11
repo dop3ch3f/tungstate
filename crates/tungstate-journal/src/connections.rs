@@ -90,6 +90,18 @@ impl Scheme {
         }
     }
 
+    /// Whether reaching this place costs a network connection.
+    ///
+    /// What decides how many transfers may run at once: a filesystem has no
+    /// per-client connection limit to exceed, and a protocol does.
+    #[must_use]
+    pub fn is_networked(self) -> bool {
+        match self {
+            Self::Fs => false,
+            Self::Ftp | Self::Ftps => true,
+        }
+    }
+
     /// The port used when the connection does not name one.
     #[must_use]
     pub fn default_port(self) -> Option<u16> {
