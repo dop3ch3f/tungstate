@@ -2105,6 +2105,77 @@ impl Backend for CountingBackend {
     }
 }
 
+/// Records what the run said it was, before it did any of it.
+#[derive(Default)]
+struct Shape {
+    seen: Option<RunShape>,
+}
+
+impl Progress for Shape {
+    fn began(&mut self, shape: RunShape) {
+        self.seen = Some(shape);
+    }
+    fn starting(&mut self, _path: &Path, _size: u64) {}
+    fn finished(&mut self, _path: &Path, _outcome: FileOutcome) {}
+}
+
+#[test]
+fn a_run_says_what_it_is_before_it_does_it() {
+    // Both facts reached the window as guesses before this: "freed from this
+    // machine" was printed for a copy, and there was no way at all to see
+    // whether a run had ramped.
+    for (policy, removes) in [
+        (SourcePolicy::Keep, false),
+        (SourcePolicy::Delete, true),
+        (SourcePolicy::Trash, true),
+    ] {
+        let rig = Rig::new(policy);
+        for i in 0..8 {
+            rig.write_source(&format!("f{i}.bin"), b"contents");
+        }
+
+        let mut progress = Shape::default();
+        let mut resolver = FixedResolver(ConflictAction::Quarantine);
+        Transfer::new(
+            &rig.link,
+            &rig.source,
+            &rig.destination,
+            &rig.journal,
+            &mut resolver,
+            &mut progress,
+        )
+        .run()
+        .unwrap();
+
+        let shape = progress.seen.expect("a run reports its shape");
+        assert_eq!(shape.removes_originals, removes, "for {policy:?}");
+        assert_eq!(shape.at_once, 4, "a local destination takes four");
+    }
+}
+
+#[test]
+fn a_run_of_one_file_says_one_at_a_time() {
+    // `at_once` is what the window shows, so it has to be the number of
+    // workers actually spawned rather than the limit they were drawn from.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("only.bin", b"contents");
+
+    let mut progress = Shape::default();
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+
+    assert_eq!(progress.seen.unwrap().at_once, 1);
+}
+
 /// Records the greatest number of files in flight at any one moment.
 struct Peak {
     live: std::sync::Arc<std::sync::atomic::AtomicUsize>,

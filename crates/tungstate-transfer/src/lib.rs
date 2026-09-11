@@ -180,12 +180,33 @@ pub struct Planned {
     pub size: u64,
 }
 
+/// What a run turned out to be, once the far side has been asked.
+///
+/// Both facts are decided inside the engine and neither is guessable from
+/// outside: a caller knows which button was pressed, not what the destination
+/// agreed to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RunShape {
+    /// Whether the originals will be removed. A copy reported as "freed from
+    /// this machine" reads as data loss to someone watching it happen.
+    pub removes_originals: bool,
+    /// How many files will be in flight, after the handshake settled.
+    pub at_once: usize,
+}
+
 /// Told about each file as it is dealt with, so a caller can show progress.
 ///
 /// `Send` because a run reports from its worker threads. As with
 /// [`ConflictResolver`], the run holds one behind a lock, so lines never
 /// interleave and an implementation does not have to be thread-safe itself.
 pub trait Progress: Send {
+    /// What this run is, before any of it happens.
+    ///
+    /// Separate from `planned` because it answers a different question — not
+    /// *which* files, but what will become of them and how fast. Emitted once
+    /// per link, so an exchange reports twice.
+    fn began(&mut self, _shape: RunShape) {}
+
     /// The whole plan, once, before the first file.
     ///
     /// Defaulted because not every caller wants it, and because this arrived
@@ -620,17 +641,6 @@ impl<'a> Transfer<'a> {
             }
         }
 
-        // Everything, in the order it will happen, before anything happens.
-        lock(&self.progress).planned(
-            &files
-                .iter()
-                .map(|f| Planned {
-                    path: f.path.clone(),
-                    size: f.size,
-                })
-                .collect::<Vec<_>>(),
-        );
-
         // Find the limit before the first file, by handshake. Climbing during
         // the run would mean a real transfer is the thing that discovers the
         // ceiling; asking first means a refusal costs a rejected connection.
@@ -643,6 +653,24 @@ impl<'a> Transfer<'a> {
         }
         let workers = governor.limit().min(files.len().max(1));
         tracing::info!(workers, files = files.len(), "starting");
+
+        // Ahead of the plan so the caller can word the plan correctly. The
+        // handshake above costs one stat, which is why this is not first.
+        lock(&self.progress).began(RunShape {
+            removes_originals: self.link.source_policy != SourcePolicy::Keep,
+            at_once: workers,
+        });
+
+        // Everything, in the order it will happen, before anything happens.
+        lock(&self.progress).planned(
+            &files
+                .iter()
+                .map(|f| Planned {
+                    path: f.path.clone(),
+                    size: f.size,
+                })
+                .collect::<Vec<_>>(),
+        );
 
         let queue = Mutex::new(std::collections::VecDeque::from(files));
         let shared = Mutex::new(Summary {

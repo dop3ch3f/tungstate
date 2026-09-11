@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from "vue";
-import { bytes, type InterruptedRun, type Summary } from "../api";
+import { bytes, type Began, type InterruptedRun, type Summary } from "../api";
 
 export interface Row {
   path: string;
@@ -20,6 +20,7 @@ const props = defineProps<{
   interrupted: InterruptedRun[];
   busy: string;
   note: string;
+  shape: Began | null;
 }>();
 const emit = defineEmits<{ stop: []; resume: [link: string]; discard: [link: string] }>();
 
@@ -36,6 +37,16 @@ const movedBytes = computed(() =>
   props.rows.reduce((n, r) => n + (r.state === "waiting" ? 0 : r.state === "live" ? r.done : r.size), 0),
 );
 const progress = computed(() => (totalBytes.value ? (movedBytes.value / totalBytes.value) * 100 : 0));
+
+// A copy frees nothing and loses nothing, so every sentence that says
+// otherwise has to change. Unknown until the engine says — a resumed run is
+// started by a button that does not know which it was.
+const takes = computed(() => props.shape?.removes_originals !== false);
+const moved = computed(() => (takes.value ? "moved" : "copied"));
+const tally = computed(() => {
+  if (!takes.value) return props.summary?.cancelled ? "copied before stopping" : "copied across";
+  return props.summary?.cancelled ? "freed before stopping" : "freed from this machine";
+});
 
 const word: Record<string, string> = {
   waiting: "waiting",
@@ -65,7 +76,7 @@ const word: Record<string, string> = {
     <div v-if="props.error" class="notice bad">
       <b>That transfer could not start.</b>
       <div style="font-family: var(--mono); margin-top: 6px">{{ props.error }}</div>
-      <div class="note" style="margin-top: 6px">Nothing was moved, and every original is where it was.</div>
+      <div class="note" style="margin-top: 6px">Nothing was {{ moved }}, and every original is where it was.</div>
     </div>
 
     <!-- Work that outlived the process. Offered, never acted on: resuming
@@ -103,24 +114,32 @@ const word: Record<string, string> = {
       <div class="readout">
         <div>
           <div class="mass">{{ bytes(reclaimed) }}</div>
-          <div class="unit">{{ props.summary?.cancelled ? "freed before stopping" : "freed from this machine" }}</div>
+          <div class="unit">{{ tally }}</div>
         </div>
-        <div class="count">{{ settled }} of {{ props.rows.length }} files</div>
+        <div class="count">
+          {{ settled }} of {{ props.rows.length }} files
+          <!-- The engine decides this by asking the destination, so it is the
+               only place the answer exists. Shown because "is it going one at
+               a time?" was otherwise unanswerable from the window. -->
+          <div v-if="props.shape" class="note">
+            {{ props.shape.at_once === 1 ? "one at a time" : props.shape.at_once + " at a time" }}
+          </div>
+        </div>
       </div>
       <div class="bar"><div :style="{ width: progress + '%' }"></div></div>
 
       <div v-if="props.summary?.destination_lost" class="notice bad">
         <b>Stopped: the destination is no longer reachable.</b>
         It may have been disconnected, or something else is now at that location.
-        Nothing further was moved and every remaining original is untouched here.
+        Nothing further was {{ moved }} and every remaining original is untouched here.
         Reconnect it and run this again.
       </div>
 
       <div v-if="props.summary" class="notice" :class="props.summary.failed ? 'bad' : 'good'">
         {{ props.summary.cancelled ? "Stopped early." : props.summary.destination_lost ? "Stopped." : "Finished." }}
-        {{ props.summary.transferred }} moved,
+        {{ props.summary.transferred }} {{ moved }},
         {{ props.summary.already_present }} already there,
-        {{ props.summary.skipped }} left here,
+        {{ props.summary.skipped }} {{ takes ? "left here" : "not copied" }},
         {{ props.summary.quarantined }} set aside,
         {{ props.summary.failed }} failed.
         <template v-if="props.summary.recovered">
@@ -129,7 +148,7 @@ const word: Record<string, string> = {
       </div>
 
       <div v-if="props.summary?.failures.length" class="notice bad">
-        These stayed on this machine, untouched:
+        {{ takes ? "These stayed on this machine, untouched:" : "These were not copied; the originals are untouched:" }}
         <div v-for="f in props.summary.failures" :key="f.path" style="margin-top:5px">
           <span style="font-family: var(--mono)">{{ f.path }}</span> — {{ f.reason }}
         </div>
