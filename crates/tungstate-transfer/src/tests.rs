@@ -2104,3 +2104,55 @@ impl Backend for CountingBackend {
         self.inner.create_dir_all(path)
     }
 }
+
+/// Records the greatest number of files in flight at any one moment.
+struct Peak {
+    live: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    peak: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+}
+
+impl Progress for Peak {
+    fn starting(&mut self, _path: &Path, _size: u64) {
+        let now = self.live.fetch_add(1, Ordering::SeqCst) + 1;
+        self.peak.fetch_max(now, Ordering::SeqCst);
+        // Long enough that genuinely parallel workers overlap here.
+        std::thread::sleep(std::time::Duration::from_millis(30));
+    }
+    fn finished(&mut self, _path: &Path, _outcome: FileOutcome) {
+        self.live.fetch_sub(1, Ordering::SeqCst);
+    }
+}
+
+#[test]
+fn a_local_destination_really_does_move_several_at_once() {
+    // Asserted because the existing parallel test only proved that one worker
+    // and four agree on the answer, never that four were ever used.
+    let rig = Rig::new(SourcePolicy::Delete);
+    for i in 0..16 {
+        rig.write_source(&format!("f{i:02}.bin"), b"contents");
+    }
+
+    let peak = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut progress = Peak {
+        live: std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0)),
+        peak: std::sync::Arc::clone(&peak),
+    };
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+
+    let reached = peak.load(Ordering::SeqCst);
+    println!("peak concurrent files: {reached}");
+    assert_eq!(
+        reached, 4,
+        "a local destination should use all four workers, peaked at {reached}"
+    );
+}
