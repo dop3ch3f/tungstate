@@ -1,7 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Tungstate",
-  "version": "0.0.1",
   "identifier": "dev.tungstate.desktop",
   "build": {
     "frontendDist": "ui/dist",
