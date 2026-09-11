@@ -22,11 +22,11 @@ use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
-use tungstate_backend::Backend as _;
-use tungstate_backend::local::LocalBackend;
 use tungstate_journal::{
-    ConflictAction, Journal, Link, Locator, NewLink, Op, OpStatus, Order, SourcePolicy, VerifyLevel,
+    ConflictAction, Endpoint, Journal, Link, Locator, NewLink, Op, OpStatus, Order, SourcePolicy,
+    VerifyLevel,
 };
+use tungstate_secret::{KeyringStore, SecretStore};
 use tungstate_transfer::{Summary, Transfer};
 
 use bridge::{ConflictChannel, EventProgress, Reply, WindowResolver};
@@ -52,12 +52,14 @@ struct LinkView {
     cooldown_secs: u64,
 }
 
-impl From<&Link> for LinkView {
-    fn from(link: &Link) -> Self {
+impl LinkView {
+    /// Needs the journal because a remote end is stored as an id, and the name
+    /// is what the window has to show. Slice 4d puts connections on screen.
+    fn of(link: &Link, journal: &Journal) -> Self {
         Self {
             name: link.name.clone(),
-            source: link.source_root.display().to_string(),
-            destination: link.destination_root.display().to_string(),
+            source: describe_end(&link.source, journal),
+            destination: describe_end(&link.destination, journal),
             source_policy: link.source_policy.as_str().to_string(),
             verify: link.verify.as_str().to_string(),
             order: link.order.as_str().to_string(),
@@ -65,6 +67,47 @@ impl From<&Link> for LinkView {
             cooldown_secs: link.cooldown.as_secs(),
         }
     }
+}
+
+/// How a link end is written on screen: a path, or `connection:path`.
+fn describe_end(end: &Endpoint, journal: &Journal) -> String {
+    match end.connection {
+        None => end.path.display().to_string(),
+        Some(id) => {
+            let name = journal
+                .connection_by_id(id)
+                .map_or_else(|_| format!("#{}", id.0), |c| c.name);
+            format!("{name}:{}", end.path.display())
+        }
+    }
+}
+
+/// Where one end of a recorded operation was, written the way the user would.
+fn place(location: &tungstate_journal::Location, journal: &Journal) -> String {
+    let full = location.full().display().to_string();
+    match location.connection {
+        None => full,
+        Some(id) => {
+            let name = journal
+                .connection_by_id(id)
+                .map_or_else(|_| format!("#{}", id.0), |c| c.name);
+            format!("{name}:{full}")
+        }
+    }
+}
+
+/// Where passwords are kept. One store for the life of the window.
+fn secrets() -> impl SecretStore {
+    KeyringStore::new()
+}
+
+/// One end of a link as a backend, through the factory rather than by
+/// assuming the local filesystem.
+fn backend_for(
+    end: &Endpoint,
+    journal: &Journal,
+) -> std::result::Result<Box<dyn tungstate_backend::Backend>, String> {
+    tungstate_backend_opendal::open(end, journal, &secrets()).map_err(describe)
 }
 
 /// One journal entry as the window shows it.
@@ -82,8 +125,11 @@ struct OpView {
     started_at: i64,
 }
 
-impl From<&Op> for OpView {
-    fn from(op: &Op) -> Self {
+impl OpView {
+    /// Needs the journal for the same reason [`LinkView::of`] does: a remote
+    /// end is stored as an id, and "inbox/a.mp4" is not an answer to "where
+    /// did this file go?".
+    fn of(op: &Op, journal: &Journal) -> Self {
         Self {
             id: op.id.0,
             status: match op.status {
@@ -94,11 +140,8 @@ impl From<&Op> for OpView {
             }
             .to_string(),
             kind: format!("{:?}", op.kind).to_lowercase(),
-            source: op.source.as_ref().map(|l| l.full().display().to_string()),
-            destination: op
-                .destination
-                .as_ref()
-                .map(|l| l.full().display().to_string()),
+            source: op.source.as_ref().map(|l| place(l, journal)),
+            destination: op.destination.as_ref().map(|l| place(l, journal)),
             size: op.size,
             hash: op.hash.clone(),
             link: op.link.clone(),
@@ -173,7 +216,12 @@ fn list_links(state: State<'_, App>) -> Result<Vec<LinkView>, String> {
     state
         .journal
         .links()
-        .map(|links| links.iter().map(LinkView::from).collect())
+        .map(|links| {
+            links
+                .iter()
+                .map(|link| LinkView::of(link, &state.journal))
+                .collect()
+        })
         .map_err(describe)
 }
 
@@ -198,6 +246,8 @@ fn create_link(form: NewLinkForm, state: State<'_, App>) -> Result<(), String> {
     if source == destination {
         return Err("source and destination are the same folder".to_string());
     }
+    // Both ends are local here, so plain path containment is the right test.
+    // The two-connection case lives in `plan_transfer`, which slice 4d widens.
     if destination.starts_with(&source) {
         return Err(
             "the destination is inside the source, which would drain into itself".to_string(),
@@ -208,8 +258,8 @@ fn create_link(form: NewLinkForm, state: State<'_, App>) -> Result<(), String> {
         .journal
         .create_link(&NewLink {
             name: form.name,
-            source_root: source,
-            destination_root: destination,
+            source: Endpoint::local(source),
+            destination: Endpoint::local(destination),
             source_policy,
             verify,
             order,
@@ -332,11 +382,15 @@ fn directories_home() -> Option<PathBuf> {
 
 /// List a directory for one side of the browser.
 #[tauri::command]
-fn browse(path: String) -> Result<Listing, String> {
+fn browse(path: String, state: State<'_, App>) -> Result<Listing, String> {
     let root = PathBuf::from(&path);
-    // A backend rooted at the directory being shown, so the same path rules that
-    // protect a transfer also apply to browsing. Constructing one does no I/O.
-    let backend = LocalBackend::new(root.clone());
+    // A backend rooted at the directory being shown, so the same path rules
+    // that protect a transfer also apply to browsing. Through the factory
+    // rather than `LocalBackend::new`, so slice 4d can point a pane at a
+    // connection without touching this function.
+    let backend =
+        tungstate_backend_opendal::open(&Endpoint::local(root.clone()), &state.journal, &secrets())
+            .map_err(describe)?;
 
     let mut entries: Vec<EntryView> = backend
         .read_dir(std::path::Path::new(""))
@@ -401,8 +455,8 @@ struct TransferRequest {
 
 /// The settings a validated transfer request resolves to.
 struct Plan {
-    source: PathBuf,
-    destination: PathBuf,
+    source: Endpoint,
+    destination: Endpoint,
     source_policy: SourcePolicy,
     verify: VerifyLevel,
     on_conflict: ConflictAction,
@@ -426,18 +480,28 @@ fn plan_transfer(request: &TransferRequest, leg: &Leg) -> std::result::Result<Pl
     if leg.names.is_empty() {
         return Err("nothing is selected".to_string());
     }
-    if source == destination {
-        return Err("those are the same folder".to_string());
-    }
-    if destination.starts_with(&source) {
-        return Err(
-            "the destination is inside the source, which would copy into itself".to_string(),
-        );
-    }
-    if source.starts_with(&destination) {
-        return Err(
-            "the source is inside the destination, which would copy into itself".to_string(),
-        );
+
+    let source = Endpoint::local(source);
+    let destination = Endpoint::local(destination);
+
+    // Scoped to one place on purpose. Path containment says nothing across two
+    // different connections: `inbox` on the NAS is not inside `inbox` here, and
+    // refusing that pair would block the ordinary drain. Both ends are local in
+    // this slice; writing the guard this way is what stops slice 4d forgetting.
+    if source.connection == destination.connection {
+        if source.path == destination.path {
+            return Err("those are the same folder".to_string());
+        }
+        if destination.path.starts_with(&source.path) {
+            return Err(
+                "the destination is inside the source, which would copy into itself".to_string(),
+            );
+        }
+        if source.path.starts_with(&destination.path) {
+            return Err(
+                "the source is inside the destination, which would copy into itself".to_string(),
+            );
+        }
     }
 
     Ok(Plan {
@@ -475,7 +539,10 @@ struct ProspectView {
 }
 
 #[tauri::command]
-fn preview_transfer(request: TransferRequest) -> Result<PreviewView, String> {
+fn preview_transfer(
+    request: TransferRequest,
+    state: State<'_, App>,
+) -> Result<PreviewView, String> {
     let mut view = PreviewView {
         fresh: 0,
         same_size: 0,
@@ -495,8 +562,8 @@ fn preview_transfer(request: TransferRequest) -> Result<PreviewView, String> {
         let link = Link {
             id: tungstate_journal::LinkId(0),
             name: String::from("preview"),
-            source_root: plan.source.clone(),
-            destination_root: plan.destination.clone(),
+            source: plan.source.clone(),
+            destination: plan.destination.clone(),
             source_policy: plan.source_policy,
             verify: plan.verify,
             order: Order::LargestFirst,
@@ -505,11 +572,12 @@ fn preview_transfer(request: TransferRequest) -> Result<PreviewView, String> {
             saved: false,
         };
 
-        let source = LocalBackend::new(plan.source);
-        let destination = LocalBackend::new(plan.destination);
+        let source = backend_for(&plan.source, &state.journal)?;
+        let destination = backend_for(&plan.destination, &state.journal)?;
         let names: Vec<PathBuf> = leg.names.iter().map(PathBuf::from).collect();
-        let preview = tungstate_transfer::preview(&link, &source, &destination, Some(&names))
-            .map_err(describe)?;
+        let preview =
+            tungstate_transfer::preview(&link, source.as_ref(), destination.as_ref(), Some(&names))
+                .map_err(describe)?;
 
         view.fresh += preview.fresh;
         view.same_size += preview.same_size;
@@ -589,8 +657,8 @@ fn start_transfer(request: TransferRequest, app: AppHandle) -> Result<String, St
             .journal
             .create_link(&NewLink {
                 name: name.clone(),
-                source_root: plan.source.clone(),
-                destination_root: plan.destination.clone(),
+                source: plan.source.clone(),
+                destination: plan.destination.clone(),
                 source_policy: plan.source_policy,
                 verify: plan.verify,
                 order: Order::LargestFirst,
@@ -624,7 +692,11 @@ fn history(path: String, state: State<'_, App>) -> Result<Vec<OpView>, String> {
     state
         .journal
         .history(std::path::Path::new(&path))
-        .map(|ops| ops.iter().map(OpView::from).collect())
+        .map(|ops| {
+            ops.iter()
+                .map(|op| OpView::of(op, &state.journal))
+                .collect()
+        })
         .map_err(describe)
 }
 
@@ -640,7 +712,11 @@ fn whereis(target: String, state: State<'_, App>) -> Result<Vec<OpView>, String>
     state
         .journal
         .whereis(&locator)
-        .map(|ops| ops.iter().map(OpView::from).collect())
+        .map(|ops| {
+            ops.iter()
+                .map(|op| OpView::of(op, &state.journal))
+                .collect()
+        })
         .map_err(describe)
 }
 
@@ -649,7 +725,11 @@ fn recent(state: State<'_, App>) -> Result<Vec<OpView>, String> {
     state
         .journal
         .recent(200)
-        .map(|ops| ops.iter().map(OpView::from).collect())
+        .map(|ops| {
+            ops.iter()
+                .map(|op| OpView::of(op, &state.journal))
+                .collect()
+        })
         .map_err(describe)
 }
 
@@ -657,7 +737,7 @@ fn recent(state: State<'_, App>) -> Result<Vec<OpView>, String> {
 #[tauri::command]
 fn quarantined(link: String, state: State<'_, App>) -> Result<Vec<String>, String> {
     let link = state.journal.link_by_name(&link).map_err(describe)?;
-    let root = link.destination_root.join(".tungstate-quarantine");
+    let root = link.destination.path.join(".tungstate-quarantine");
     if !root.exists() {
         return Ok(Vec::new());
     }
@@ -758,14 +838,22 @@ fn spawn_run(
         let mut failure = None;
 
         for (index, link) in queue.iter().enumerate() {
-            let source = LocalBackend::new(link.source_root.clone());
-            let destination = LocalBackend::new(link.destination_root.clone());
+            let ends = backend_for(&link.source, &state.journal).and_then(|source| {
+                backend_for(&link.destination, &state.journal).map(|dest| (source, dest))
+            });
+            let (source, destination) = match ends {
+                Ok(pair) => pair,
+                Err(message) => {
+                    failure = Some(message);
+                    break;
+                }
+            };
             let chosen = selections.get(index).cloned().unwrap_or_default();
 
             let mut transfer = Transfer::new(
                 link,
-                &source,
-                &destination,
+                source.as_ref(),
+                destination.as_ref(),
                 &state.journal,
                 &mut resolver,
                 &mut progress,

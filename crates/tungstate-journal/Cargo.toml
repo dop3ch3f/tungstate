@@ -10,6 +10,9 @@ rust-version.workspace = true
 rusqlite = { workspace = true }
 directories = { workspace = true }
 thiserror = { workspace = true }
+# A connection's per-scheme options are one JSON column, so the schema does not
+# grow a column every time a backend gains a knob.
+serde_json = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }

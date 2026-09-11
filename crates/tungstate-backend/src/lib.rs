@@ -38,6 +38,31 @@ pub enum BackendError {
     #[error("refusing to follow symlink `{0}`")]
     SymlinkNotFollowed(PathBuf),
 
+    /// The remote refused the credentials it was given, or was given none.
+    ///
+    /// Separate from [`BackendError::Remote`] because it is the one remote
+    /// failure a user can fix without reading a protocol error: the answer is
+    /// always "re-enter the password for this connection".
+    #[error("`{endpoint}` refused the credentials it was given")]
+    Auth {
+        /// The connection that refused, named as the user named it.
+        endpoint: String,
+    },
+
+    /// A remote operation failed for a protocol-specific reason.
+    // Carries the endpoint as a string rather than a path: "io error at
+    // `inbox/a.mp4`" is unactionable when three connections have an `inbox`.
+    #[error("`{operation}` failed on `{endpoint}`")]
+    Remote {
+        /// The connection it happened on, named as the user named it.
+        endpoint: String,
+        /// Which operation was being attempted.
+        operation: &'static str,
+        /// The underlying protocol failure.
+        #[source]
+        source: Box<dyn std::error::Error + Send + Sync>,
+    },
+
     /// An underlying I/O failure, tagged with the path that caused it.
     // The path matters: "permission denied" partway through a 4000-file drain is
     // unactionable without knowing which file refused.

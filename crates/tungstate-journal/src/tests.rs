@@ -238,8 +238,8 @@ fn concurrent_writers_all_land() {
 fn a_link() -> NewLink {
     NewLink {
         name: "laptop-to-nas".to_string(),
-        source_root: "/Users/x/Videos".into(),
-        destination_root: "/Volumes/nas/inbox".into(),
+        source: Endpoint::local("/Users/x/Videos"),
+        destination: Endpoint::local("/Volumes/nas/inbox"),
         source_policy: SourcePolicy::Delete,
         verify: VerifyLevel::Hash,
         order: Order::LargestFirst,
@@ -261,7 +261,11 @@ fn a_link_round_trips_and_is_found_by_name() {
     assert_eq!(link.order, Order::LargestFirst);
     assert_eq!(link.on_conflict, ConflictAction::Quarantine);
     assert_eq!(link.cooldown.as_secs(), 30);
-    assert_eq!(link.destination_root, Path::new("/Volumes/nas/inbox"));
+    assert_eq!(link.destination.path, Path::new("/Volumes/nas/inbox"));
+    assert_eq!(
+        link.destination.connection, None,
+        "an unqualified end is local"
+    );
 }
 
 #[test]
@@ -323,8 +327,11 @@ fn temp_names_are_derived_from_the_operation_id() {
 }
 
 #[test]
-fn migrating_an_existing_v1_journal_preserves_its_rows() {
-    // The upgrade path a user with an existing journal will actually take.
+fn reopening_a_current_journal_preserves_its_rows() {
+    // Renamed: this opens twice with current code, so it proves the migrations
+    // are idempotent, not that an upgrade works. The genuine upgrade path is
+    // `a_v3_journal_upgrades_to_v4_with_every_row_intact` below, which builds a
+    // v3-shaped file with raw SQL because no v3 binary is around to build one.
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("journal.db");
 
@@ -353,4 +360,290 @@ fn recent_returns_newest_first_and_respects_the_limit() {
         vec![ids[4], ids[3], ids[2]],
         "newest first"
     );
+}
+
+/// A v3-shaped database, built with raw SQL because no v3 binary exists to
+/// build one. Copied verbatim from migrations 1–3 and then frozen: if a later
+/// migration edits history, this stops matching and the test says so.
+fn write_v3_journal(path: &Path) {
+    let conn = rusqlite::Connection::open(path).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE ops (
+             id          INTEGER PRIMARY KEY,
+             kind        TEXT    NOT NULL,
+             status      TEXT    NOT NULL,
+             src_root    TEXT,
+             src_path    TEXT,
+             dst_root    TEXT,
+             dst_path    TEXT,
+             size        INTEGER,
+             hash        TEXT,
+             link        TEXT,
+             note        TEXT,
+             started_at  INTEGER NOT NULL,
+             finished_at INTEGER
+         );
+         CREATE INDEX ops_src_path ON ops (src_path);
+         CREATE INDEX ops_dst_path ON ops (dst_path);
+         CREATE INDEX ops_hash     ON ops (hash) WHERE hash IS NOT NULL;
+         CREATE INDEX ops_status   ON ops (status) WHERE status = 'intended';
+         CREATE INDEX ops_started  ON ops (started_at);
+
+         CREATE TABLE links (
+             id             INTEGER PRIMARY KEY,
+             name           TEXT    NOT NULL UNIQUE,
+             source_root    TEXT    NOT NULL,
+             dest_root      TEXT    NOT NULL,
+             source_policy  TEXT    NOT NULL,
+             verify         TEXT    NOT NULL,
+             ordering       TEXT    NOT NULL,
+             on_conflict    TEXT    NOT NULL,
+             cooldown_secs  INTEGER NOT NULL,
+             created_at     INTEGER NOT NULL
+         );
+         ALTER TABLE ops ADD COLUMN link_id INTEGER REFERENCES links (id);
+         CREATE INDEX ops_link ON ops (link_id, status);
+
+         ALTER TABLE links ADD COLUMN saved INTEGER NOT NULL DEFAULT 1;
+
+         INSERT INTO links (
+             id, name, source_root, dest_root, source_policy, verify,
+             ordering, on_conflict, cooldown_secs, created_at, saved
+         ) VALUES (
+             1, 'laptop-to-nas', '/Users/x/Videos', '/Volumes/nas/inbox',
+             'delete', 'hash', 'largest-first', 'quarantine', 30, 1700000000000, 1
+         );
+         INSERT INTO ops (
+             id, kind, status, src_root, src_path, dst_root, dst_path,
+             size, hash, link, link_id, started_at, finished_at
+         ) VALUES (
+             1, 'move', 'committed', '/Users/x/Videos', 'holiday.mp4',
+             '/Volumes/nas/inbox', 'holiday.mp4', 4200, 'deadbeef',
+             'laptop-to-nas', 1, 1700000000000, 1700000001000
+         );",
+    )
+    .unwrap();
+    conn.pragma_update(None, "user_version", 3).unwrap();
+}
+
+#[test]
+fn a_v3_journal_upgrades_to_v4_with_every_row_intact() {
+    // The upgrade a user with an existing journal will actually take. The v4
+    // columns are additive and NULL, which is what makes "every link written
+    // before connections existed still means the local filesystem" true.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.db");
+    write_v3_journal(&path);
+
+    let journal = Journal::open(&path).unwrap();
+
+    let links = journal.links().unwrap();
+    assert_eq!(links.len(), 1, "the existing link must survive");
+    assert_eq!(links[0].name, "laptop-to-nas");
+    assert_eq!(links[0].source.path, Path::new("/Users/x/Videos"));
+    assert_eq!(links[0].source.connection, None, "NULL means local");
+    assert_eq!(links[0].destination.connection, None);
+    assert_eq!(links[0].source_policy, SourcePolicy::Delete);
+
+    let ops = journal.history(Path::new("holiday.mp4")).unwrap();
+    assert_eq!(ops.len(), 1, "the existing op must survive");
+    assert_eq!(ops[0].hash.as_deref(), Some("deadbeef"));
+    assert_eq!(ops[0].source.as_ref().unwrap().connection, None);
+    assert_eq!(ops[0].destination.as_ref().unwrap().connection, None);
+
+    // And the full-path query still resolves, which is the branch v4 had to
+    // narrow rather than extend.
+    let found = journal
+        .whereis(&Locator::Path(Path::new("/Volumes/nas/inbox/holiday.mp4")))
+        .unwrap();
+    assert_eq!(found.len(), 1);
+
+    // Connections are now available on the upgraded file.
+    assert!(journal.connections().unwrap().is_empty());
+}
+
+#[test]
+fn a_journal_from_the_future_is_refused_rather_than_misread() {
+    // Reversal of earlier policy, deliberate. A newer file can hold a link end
+    // that is relative to a connection this build knows nothing about, and
+    // reading that as a local path would drain into the wrong place.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.db");
+    {
+        let journal = Journal::open(&path).unwrap();
+        journal.begin(&drain_op()).unwrap();
+    }
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.pragma_update(None, "user_version", 99).unwrap();
+    }
+
+    match Journal::open(&path) {
+        Err(JournalError::TooNew { found, known }) => {
+            assert_eq!(found, 99);
+            assert!(
+                known >= 4,
+                "this build should know at least v4, got {known}"
+            );
+        }
+        other => panic!("expected TooNew, got {other:?}"),
+    }
+}
+
+fn a_connection() -> NewConnection {
+    NewConnection {
+        name: "nas".to_string(),
+        scheme: Scheme::Ftp,
+        host: Some("nas.local".to_string()),
+        port: Some(21),
+        username: Some("me".to_string()),
+        root: "/volume1/media".to_string(),
+        options: std::collections::BTreeMap::from([("passive".to_string(), "true".to_string())]),
+    }
+}
+
+#[test]
+fn a_connection_round_trips_with_every_field_intact() {
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_connection(&a_connection()).unwrap();
+
+    let found = journal.connection_by_name("nas").unwrap();
+    assert_eq!(found.id, id);
+    assert_eq!(found.scheme, Scheme::Ftp);
+    assert_eq!(found.host.as_deref(), Some("nas.local"));
+    assert_eq!(found.port, Some(21));
+    assert_eq!(found.username.as_deref(), Some("me"));
+    assert_eq!(found.root, "/volume1/media");
+    assert_eq!(
+        found.options.get("passive").map(String::as_str),
+        Some("true")
+    );
+    assert_eq!(journal.connection_by_id(id).unwrap(), found);
+    assert_eq!(journal.connections().unwrap(), vec![found]);
+}
+
+#[test]
+fn connection_names_are_unique() {
+    let journal = Journal::open_in_memory().unwrap();
+    journal.create_connection(&a_connection()).unwrap();
+
+    let again = journal.create_connection(&a_connection());
+    assert!(matches!(again, Err(JournalError::DuplicateConnection(name)) if name == "nas"));
+}
+
+#[test]
+fn an_unknown_connection_name_is_an_error() {
+    let journal = Journal::open_in_memory().unwrap();
+    assert!(matches!(
+        journal.connection_by_name("nope"),
+        Err(JournalError::UnknownConnection(_))
+    ));
+    assert!(matches!(
+        journal.delete_connection("nope"),
+        Err(JournalError::UnknownConnection(_))
+    ));
+}
+
+#[test]
+fn a_connection_a_link_still_points_at_cannot_be_deleted() {
+    // Enforced by the foreign key rather than by a check in Rust, so it holds
+    // against any caller, including one that forgets to look.
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_connection(&a_connection()).unwrap();
+    journal
+        .create_link(&NewLink {
+            destination: Endpoint::remote(id, "inbox"),
+            ..a_link()
+        })
+        .unwrap();
+
+    assert!(matches!(
+        journal.delete_connection("nas"),
+        Err(JournalError::ConnectionInUse(name)) if name == "nas"
+    ));
+    assert_eq!(journal.connections().unwrap().len(), 1);
+}
+
+#[test]
+fn an_unreferenced_connection_can_be_deleted() {
+    let journal = Journal::open_in_memory().unwrap();
+    journal.create_connection(&a_connection()).unwrap();
+
+    journal.delete_connection("nas").unwrap();
+    assert!(journal.connections().unwrap().is_empty());
+}
+
+#[test]
+fn a_link_remembers_which_place_each_end_is() {
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_connection(&a_connection()).unwrap();
+    journal
+        .create_link(&NewLink {
+            destination: Endpoint::remote(id, "inbox/2026"),
+            ..a_link()
+        })
+        .unwrap();
+
+    let link = journal.link_by_name("laptop-to-nas").unwrap();
+    assert_eq!(link.source.connection, None);
+    assert_eq!(link.destination.connection, Some(id));
+    assert_eq!(link.destination.path, Path::new("inbox/2026"));
+}
+
+#[test]
+fn a_full_path_query_does_not_match_a_remote_row_by_concatenation() {
+    // `root || '/' || path` is only a real path when the row is local. A
+    // remote row splices a connection-relative root onto a
+    // connection-relative path, and the result can collide with a genuine
+    // local file. Both queries scope that branch to `connection IS NULL`.
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_connection(&a_connection()).unwrap();
+
+    let local = journal.begin(&drain_op()).unwrap();
+    journal
+        .finish(
+            local,
+            &Outcome::Committed {
+                hash: Some("aaa".to_string()),
+            },
+        )
+        .unwrap();
+
+    // Same spelling as the local row, but on the far side of a connection.
+    let remote = journal
+        .begin(&NewOp {
+            source: Some(Location {
+                connection: Some(id),
+                root: "/Users/x/Videos".into(),
+                path: "holiday.mp4".into(),
+            }),
+            destination: None,
+            ..drain_op()
+        })
+        .unwrap();
+    journal
+        .finish(
+            remote,
+            &Outcome::Committed {
+                hash: Some("bbb".to_string()),
+            },
+        )
+        .unwrap();
+
+    let needle = Path::new("/Users/x/Videos/holiday.mp4");
+    let history = journal.history(needle).unwrap();
+    assert_eq!(
+        history.iter().map(|o| o.id).collect::<Vec<_>>(),
+        vec![local],
+        "only the local row denotes that full path"
+    );
+
+    let located = journal.whereis(&Locator::Path(needle)).unwrap();
+    assert_eq!(
+        located.iter().map(|o| o.id).collect::<Vec<_>>(),
+        vec![local]
+    );
+
+    // The relative spelling still finds both: that branch is not about roots.
+    assert_eq!(journal.history(Path::new("holiday.mp4")).unwrap().len(), 2);
 }

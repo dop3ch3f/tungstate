@@ -1,14 +1,18 @@
 //! The `tungstate` command line interface.
 
+mod connection;
+mod ends;
+
 use std::path::{Path, PathBuf};
 
-use clap::{Parser, Subcommand};
+use clap::{Args, Parser, Subcommand};
 use std::time::Duration;
 
-use tungstate_backend::local::LocalBackend;
+use tungstate_backend::Backend;
 use tungstate_journal::{
     ConflictAction, Journal, Locator, Op, OpStatus, Order, SourcePolicy, VerifyLevel,
 };
+use tungstate_secret::{KeyringStore, MemoryStore, SecretStore};
 use tungstate_transfer::{
     ConflictResolver, FileOutcome, FixedResolver, InteractiveResolver, Progress, SkipReason,
     Transfer,
@@ -40,6 +44,11 @@ enum Command {
         #[command(subcommand)]
         action: LinkAction,
     },
+    /// Manage connections to places other than this machine.
+    Connection {
+        #[command(subcommand)]
+        action: connection::ConnectionAction,
+    },
     /// Show everything that ever happened to a path.
     Log {
         /// The file or directory to report on.
@@ -61,39 +70,52 @@ enum FolderAction {
     },
 }
 
+/// The arguments to `link add`.
+///
+/// Its own struct rather than inline variant fields so the handler can take
+/// one value; clap renders it identically either way.
+#[derive(Args)]
+struct AddLink {
+    /// Where files come from: a path, or `connection:path`.
+    from: String,
+    /// Where files go: a path, or `connection:path`.
+    to: String,
+    /// Name the source's connection explicitly, leaving `from` a path.
+    #[arg(long)]
+    from_connection: Option<String>,
+    /// Name the destination's connection explicitly, leaving `to` a path.
+    #[arg(long)]
+    to_connection: Option<String>,
+    /// What this link is called on the command line.
+    #[arg(long)]
+    name: String,
+    /// Delete each original once its copy is verified. Reclaims space.
+    #[arg(long, conflicts_with = "copy")]
+    r#move: bool,
+    /// With --move, send originals to the trash instead of deleting them.
+    #[arg(long, requires = "move")]
+    trash: bool,
+    /// Leave every original in place; the link becomes a verified mirror.
+    #[arg(long)]
+    copy: bool,
+    /// How thoroughly to check each copy.
+    #[arg(long, default_value = "hash")]
+    verify: String,
+    /// The order files are taken in.
+    #[arg(long, default_value = "largest-first")]
+    order: String,
+    /// What an unattended run does with a conflicting file.
+    #[arg(long, default_value = "quarantine")]
+    on_conflict: String,
+    /// Seconds a file must have been untouched before it is moved.
+    #[arg(long, default_value_t = 30)]
+    cooldown: u64,
+}
+
 #[derive(Subcommand)]
 enum LinkAction {
     /// Create a transfer link from a source to a destination.
-    Add {
-        /// Where files come from.
-        from: PathBuf,
-        /// Where files go.
-        to: PathBuf,
-        /// What this link is called on the command line.
-        #[arg(long)]
-        name: String,
-        /// Delete each original once its copy is verified. Reclaims space.
-        #[arg(long, conflicts_with = "copy")]
-        r#move: bool,
-        /// With --move, send originals to the trash instead of deleting them.
-        #[arg(long, requires = "move")]
-        trash: bool,
-        /// Leave every original in place; the link becomes a verified mirror.
-        #[arg(long)]
-        copy: bool,
-        /// How thoroughly to check each copy.
-        #[arg(long, default_value = "hash")]
-        verify: String,
-        /// The order files are taken in.
-        #[arg(long, default_value = "largest-first")]
-        order: String,
-        /// What an unattended run does with a conflicting file.
-        #[arg(long, default_value = "quarantine")]
-        on_conflict: String,
-        /// Seconds a file must have been untouched before it is moved.
-        #[arg(long, default_value_t = 30)]
-        cooldown: u64,
-    },
+    Add(AddLink),
     /// Show what a run would do, without doing any of it.
     Preview {
         /// The link name.
@@ -131,6 +153,13 @@ fn main() -> std::process::ExitCode {
             }
         },
         Command::Link { action } => return link(action),
+        Command::Connection { action } => {
+            let journal = match open_journal() {
+                Ok(journal) => journal,
+                Err(error) => return fail(&error),
+            };
+            return connection::run(action, &journal, secret_store().as_ref());
+        }
 
         Command::Log { path } => return report(|journal| journal.history(&path)),
         Command::Whereis { target } => {
@@ -151,6 +180,31 @@ fn main() -> std::process::ExitCode {
     std::process::ExitCode::from(2)
 }
 
+/// Open the machine journal, honouring the test override.
+///
+/// `TUNGSTATE_JOURNAL` exists so the integration tests get their own database
+/// and stay parallel-safe. Without it every CLI test would write to the real
+/// one on the developer's machine.
+fn open_journal() -> tungstate_journal::Result<Journal> {
+    match std::env::var_os("TUNGSTATE_JOURNAL") {
+        Some(path) => Journal::open(Path::new(&path)),
+        None => Journal::open_default(),
+    }
+}
+
+/// Where passwords are kept, honouring the test override.
+///
+/// `TUNGSTATE_SECRETS=memory` is the sibling of `TUNGSTATE_JOURNAL`: a test
+/// must never reach the developer's real keychain, and on headless Linux CI
+/// there is no keychain to reach. Anything else, including unset, is the real
+/// credential store.
+fn secret_store() -> Box<dyn SecretStore> {
+    match std::env::var("TUNGSTATE_SECRETS").as_deref() {
+        Ok("memory") => Box::new(MemoryStore::new()),
+        _ => Box::new(KeyringStore::new()),
+    }
+}
+
 fn is_hash(target: &str) -> bool {
     target.len() == 64 && target.chars().all(|c| c.is_ascii_hexdigit())
 }
@@ -159,7 +213,7 @@ fn is_hash(target: &str) -> bool {
 fn report(
     query: impl FnOnce(&Journal) -> tungstate_journal::Result<Vec<Op>>,
 ) -> std::process::ExitCode {
-    let journal = match Journal::open_default() {
+    let journal = match open_journal() {
         Ok(journal) => journal,
         Err(error) => return fail(&error),
     };
@@ -170,7 +224,7 @@ fn report(
         }
         Ok(ops) => {
             for op in &ops {
-                println!("{}", render(op));
+                println!("{}", render(op, &journal));
             }
             std::process::ExitCode::SUCCESS
         }
@@ -178,7 +232,7 @@ fn report(
     }
 }
 
-fn fail(error: &dyn std::error::Error) -> std::process::ExitCode {
+pub(crate) fn fail(error: &dyn std::error::Error) -> std::process::ExitCode {
     eprintln!("error: {error}");
     // The chain is where the real cause lives; printing only the top line loses it.
     let mut source = error.source();
@@ -189,18 +243,17 @@ fn fail(error: &dyn std::error::Error) -> std::process::ExitCode {
     std::process::ExitCode::FAILURE
 }
 
-fn render(op: &Op) -> String {
+fn render(op: &Op, journal: &Journal) -> String {
     let status = match op.status {
         OpStatus::Intended => "interrupted",
         OpStatus::Committed => "ok",
         OpStatus::Failed => "failed",
         OpStatus::Skipped => "skipped",
     };
-    let source = op.source.as_ref().map(|l| l.full().display().to_string());
-    let destination = op
-        .destination
-        .as_ref()
-        .map(|l| l.full().display().to_string());
+    // Naming the connection matters here more than anywhere: "inbox/a.mp4" is
+    // not an answer to "where did this file go?".
+    let source = op.source.as_ref().map(|l| ends::place(l, journal));
+    let destination = op.destination.as_ref().map(|l| ends::place(l, journal));
 
     let movement = match (source, destination) {
         (Some(from), Some(to)) => format!("{from} -> {to}"),
@@ -217,86 +270,102 @@ fn render(op: &Op) -> String {
     format!("{:>4} {status:<11} {movement}{note}", op.id.0)
 }
 
+/// Create one link, resolving both ends first.
+fn add_link(journal: &Journal, args: &AddLink) -> std::process::ExitCode {
+    // No default. Guessing either fails to reclaim space or deletes something
+    // the user wanted kept, so make them say which.
+    let policy = match (args.r#move, args.trash, args.copy) {
+        (true, false, false) => SourcePolicy::Delete,
+        (true, true, false) => SourcePolicy::Trash,
+        (false, false, true) => SourcePolicy::Keep,
+        _ => {
+            eprintln!(
+                "error: choose exactly one of --move, --move --trash, or --copy\n  \
+                 --move        delete each original once verified (reclaims space)\n  \
+                 --move --trash send originals to the trash instead\n  \
+                 --copy        leave originals alone"
+            );
+            return std::process::ExitCode::from(2);
+        }
+    };
+
+    let Some(verify) = VerifyLevel::parse(&args.verify) else {
+        eprintln!("error: --verify must be size, hash, or readback");
+        return std::process::ExitCode::from(2);
+    };
+    let Some(order) = Order::parse(&args.order) else {
+        eprintln!(
+            "error: --order must be largest-first, smallest-first, oldest-first, or discovered"
+        );
+        return std::process::ExitCode::from(2);
+    };
+    let Some(on_conflict) = ConflictAction::parse(&args.on_conflict) else {
+        eprintln!("error: --on-conflict must be rename, skip, replace, or quarantine");
+        return std::process::ExitCode::from(2);
+    };
+
+    let source = match ends::parse_end(&args.from, args.from_connection.as_deref(), journal) {
+        Ok(end) => end,
+        Err(error) => return fail(&error),
+    };
+    let destination = match ends::parse_end(&args.to, args.to_connection.as_deref(), journal) {
+        Ok(end) => end,
+        Err(error) => return fail(&error),
+    };
+
+    // `trash::delete` drives this desktop's trash and knows nothing about a
+    // remote. Remote trash (`.tungstate-trash/`, DESIGN.md §4) is a later
+    // slice, so say so now rather than at the first file. The message names
+    // the two alternatives rather than guessing which one was meant.
+    if policy == SourcePolicy::Trash && source.is_remote() {
+        eprintln!(
+            "error: --move --trash needs a source on this machine, and `{}` is remote\n  \
+             --move   delete each original once verified\n  \
+             --copy   leave every original alone",
+            args.from
+        );
+        return std::process::ExitCode::from(2);
+    }
+
+    let created = journal.create_link(&tungstate_journal::NewLink {
+        name: args.name.clone(),
+        source,
+        destination,
+        source_policy: policy,
+        verify,
+        order,
+        on_conflict,
+        cooldown: Duration::from_secs(args.cooldown),
+        saved: true,
+    });
+
+    match created {
+        Ok(_) => {
+            let name = &args.name;
+            println!("created link `{name}`");
+            if verify != VerifyLevel::Readback && policy == SourcePolicy::Delete {
+                println!(
+                    "note: verification is `{}`. Use --verify readback for the strongest \
+                     check, at the cost of reading every file back.",
+                    verify.as_str()
+                );
+            }
+            println!("run it with: tungstate link run {name}");
+            std::process::ExitCode::SUCCESS
+        }
+        Err(error) => fail(&error),
+    }
+}
+
 /// Handle the `link` subcommands.
 fn link(action: LinkAction) -> std::process::ExitCode {
-    let journal = match Journal::open_default() {
+    let journal = match open_journal() {
         Ok(journal) => journal,
         Err(error) => return fail(&error),
     };
 
     match action {
-        LinkAction::Add {
-            from,
-            to,
-            name,
-            r#move,
-            trash,
-            copy,
-            verify,
-            order,
-            on_conflict,
-            cooldown,
-        } => {
-            // No default. Guessing either fails to reclaim space or deletes
-            // something the user wanted kept, so make them say which.
-            let policy = match (r#move, trash, copy) {
-                (true, false, false) => SourcePolicy::Delete,
-                (true, true, false) => SourcePolicy::Trash,
-                (false, false, true) => SourcePolicy::Keep,
-                _ => {
-                    eprintln!(
-                        "error: choose exactly one of --move, --move --trash, or --copy\n  \
-                         --move        delete each original once verified (reclaims space)\n  \
-                         --move --trash send originals to the trash instead\n  \
-                         --copy        leave originals alone"
-                    );
-                    return std::process::ExitCode::from(2);
-                }
-            };
-
-            let Some(verify) = VerifyLevel::parse(&verify) else {
-                eprintln!("error: --verify must be size, hash, or readback");
-                return std::process::ExitCode::from(2);
-            };
-            let Some(order) = Order::parse(&order) else {
-                eprintln!(
-                    "error: --order must be largest-first, smallest-first, oldest-first, or discovered"
-                );
-                return std::process::ExitCode::from(2);
-            };
-            let Some(on_conflict) = ConflictAction::parse(&on_conflict) else {
-                eprintln!("error: --on-conflict must be rename, skip, replace, or quarantine");
-                return std::process::ExitCode::from(2);
-            };
-
-            let created = journal.create_link(&tungstate_journal::NewLink {
-                name: name.clone(),
-                source_root: from,
-                destination_root: to,
-                source_policy: policy,
-                verify,
-                order,
-                on_conflict,
-                cooldown: Duration::from_secs(cooldown),
-                saved: true,
-            });
-
-            match created {
-                Ok(_) => {
-                    println!("created link `{name}`");
-                    if verify != VerifyLevel::Readback && policy == SourcePolicy::Delete {
-                        println!(
-                            "note: verification is `{}`. Use --verify readback for the strongest \
-                             check, at the cost of reading every file back.",
-                            verify.as_str()
-                        );
-                    }
-                    println!("run it with: tungstate link run {name}");
-                    std::process::ExitCode::SUCCESS
-                }
-                Err(error) => fail(&error),
-            }
-        }
+        LinkAction::Add(args) => add_link(&journal, &args),
 
         LinkAction::List => match journal.links() {
             Ok(links) if links.is_empty() => {
@@ -308,8 +377,8 @@ fn link(action: LinkAction) -> std::process::ExitCode {
                     println!(
                         "{}  {} -> {}  [{}, verify={}, {}]",
                         link.name,
-                        link.source_root.display(),
-                        link.destination_root.display(),
+                        ends::describe(&link.source, &journal),
+                        ends::describe(&link.destination, &journal),
                         link.source_policy.as_str(),
                         link.verify.as_str(),
                         link.order.as_str(),
@@ -335,18 +404,21 @@ fn preview_link(journal: &Journal, name: &str) -> std::process::ExitCode {
         Ok(link) => link,
         Err(error) => return fail(&error),
     };
-    let source = LocalBackend::new(link.source_root.clone());
-    let destination = LocalBackend::new(link.destination_root.clone());
-
-    let preview = match tungstate_transfer::preview(&link, &source, &destination, None) {
-        Ok(preview) => preview,
-        Err(error) => return fail(&error),
+    let (source, destination) = match ends_of(&link, journal) {
+        Ok(pair) => pair,
+        Err(error) => return fail(error.as_ref()),
     };
+
+    let preview =
+        match tungstate_transfer::preview(&link, source.as_ref(), destination.as_ref(), None) {
+            Ok(preview) => preview,
+            Err(error) => return fail(&error),
+        };
 
     println!(
         "{} -> {}\n",
-        link.source_root.display(),
-        link.destination_root.display()
+        ends::describe(&link.source, journal),
+        ends::describe(&link.destination, journal)
     );
 
     for item in &preview.items {
@@ -415,8 +487,10 @@ fn run_link(
         }
     };
 
-    let source = LocalBackend::new(link.source_root.clone());
-    let destination = LocalBackend::new(link.destination_root.clone());
+    let (source, destination) = match ends_of(&link, journal) {
+        Ok(pair) => pair,
+        Err(error) => return fail(error.as_ref()),
+    };
 
     // Prompt only when there is actually someone there. A backgrounded or piped
     // run falls back to the link's configured action so the drain never stalls
@@ -440,8 +514,8 @@ fn run_link(
     let mut progress = CliProgress;
     let outcome = Transfer::new(
         &link,
-        &source,
-        &destination,
+        source.as_ref(),
+        destination.as_ref(),
         journal,
         resolver,
         &mut progress,
@@ -450,14 +524,35 @@ fn run_link(
 
     match outcome {
         Ok(summary) => {
-            report_summary(&summary, &link);
+            report_summary(&summary, &ends::describe(&link.destination, journal));
             std::process::ExitCode::SUCCESS
         }
         Err(error) => fail(&error),
     }
 }
 
-fn report_summary(summary: &tungstate_transfer::Summary, link: &tungstate_journal::Link) {
+/// The two backends a run needs, in source-then-destination order.
+type Ends = (Box<dyn Backend>, Box<dyn Backend>);
+
+/// Anything the factory can fail with, flattened for the error printer.
+type BoxedError = Box<dyn std::error::Error>;
+
+/// Both ends of a link as backends, through the factory rather than by
+/// assuming the local filesystem.
+///
+/// Fallible where `LocalBackend::new` was not: reaching a remote can fail, and
+/// pretending otherwise would defer the failure to the first file.
+fn ends_of(link: &tungstate_journal::Link, journal: &Journal) -> Result<Ends, BoxedError> {
+    let secrets = secret_store();
+    let source = tungstate_backend_opendal::open(&link.source, journal, secrets.as_ref())?;
+    let destination =
+        tungstate_backend_opendal::open(&link.destination, journal, secrets.as_ref())?;
+    Ok((source, destination))
+}
+
+/// `destination` is the end written the way the user typed it, so a remote is
+/// named by its connection rather than by a path that means nothing on its own.
+fn report_summary(summary: &tungstate_transfer::Summary, destination: &str) {
     println!(
         "\n{} transferred ({}), {} already there, {} skipped, {} quarantined",
         summary.transferred,
@@ -468,10 +563,9 @@ fn report_summary(summary: &tungstate_transfer::Summary, link: &tungstate_journa
     );
     if summary.destination_lost {
         println!(
-            "\nSTOPPED: {} is no longer reachable, or is not the storage it was.\n\
+            "\nSTOPPED: {destination} is no longer reachable, or is not the storage it was.\n\
              Nothing further was moved and every remaining original is untouched.\n\
-             Reconnect it and run this again.",
-            link.destination_root.display()
+             Reconnect it and run this again."
         );
     }
     if summary.recovered > 0 {
@@ -490,12 +584,7 @@ fn report_summary(summary: &tungstate_transfer::Summary, link: &tungstate_journa
         }
     }
     if summary.quarantined > 0 {
-        println!(
-            "review quarantined files at {}",
-            link.destination_root
-                .join(".tungstate-quarantine")
-                .display()
-        );
+        println!("review quarantined files under {destination}/.tungstate-quarantine");
     }
 }
 

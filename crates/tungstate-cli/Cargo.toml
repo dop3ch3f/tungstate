@@ -13,16 +13,23 @@ path = "src/main.rs"
 [dependencies]
 tungstate-api = { path = "../tungstate-api" }
 tungstate-backend = { path = "../tungstate-backend" }
+tungstate-backend-opendal = { path = "../tungstate-backend-opendal" }
+tungstate-secret = { path = "../tungstate-secret" }
 tungstate-journal = { path = "../tungstate-journal" }
 tungstate-transfer = { path = "../tungstate-transfer" }
 clap = { workspace = true }
+thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+# Never a flag value: a password given as an argument lands in shell history
+# and in `ps` output for every other user on the machine.
+rpassword = { workspace = true }
 
 [dev-dependencies]
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 insta = { workspace = true }
+tempfile = { workspace = true }
 
 [lints]
 workspace = true

@@ -5,7 +5,7 @@ use std::time::Duration;
 use tungstate_backend::local::LocalBackend;
 use tungstate_backend::{Backend, WriteFinish};
 use tungstate_journal::{
-    ConflictAction, Journal, Link, LinkId, NewLink, Order, SourcePolicy, VerifyLevel,
+    ConflictAction, Endpoint, Journal, Link, LinkId, NewLink, Order, SourcePolicy, VerifyLevel,
 };
 
 use super::*;
@@ -35,8 +35,8 @@ impl Rig {
         let id = journal
             .create_link(&NewLink {
                 name: "test-link".to_string(),
-                source_root: source_dir.path().to_path_buf(),
-                destination_root: dest_dir.path().to_path_buf(),
+                source: Endpoint::local(source_dir.path()),
+                destination: Endpoint::local(dest_dir.path()),
                 source_policy: policy,
                 verify,
                 order,
@@ -95,6 +95,33 @@ impl Rig {
             &mut progress,
         )
         .run()
+    }
+
+    /// The rig's own destination directory, reached through `OpenDAL` instead of
+    /// through `std::fs`.
+    ///
+    /// A real connection row in the rig's own journal, so this exercises the
+    /// factory and the schema as well as the adapter.
+    fn opendal_destination(&self) -> Box<dyn Backend> {
+        let id = self
+            .journal
+            .create_connection(&tungstate_journal::NewConnection {
+                name: format!("dest-{}", self.link.id.0),
+                scheme: tungstate_journal::Scheme::Fs,
+                host: None,
+                port: None,
+                username: None,
+                root: self.dest_dir.path().to_string_lossy().into_owned(),
+                options: std::collections::BTreeMap::new(),
+            })
+            .unwrap();
+
+        tungstate_backend_opendal::open(
+            &Endpoint::remote(id, PathBuf::new()),
+            &self.journal,
+            &tungstate_secret::MemoryStore::new(),
+        )
+        .unwrap()
     }
 
     fn run_over(&self, destination: &dyn Backend) -> Result<Summary> {
@@ -157,8 +184,10 @@ fn no_temporary_files_survive_a_successful_run() {
 }
 
 /// Destination that writes rubbish, to prove verification actually gates deletion.
-#[derive(Debug)]
-struct CorruptingBackend(LocalBackend);
+///
+/// Wraps any backend, so the same proof runs over `LocalBackend` and over the
+/// `OpenDAL` adapter without being written twice.
+struct CorruptingBackend(Box<dyn Backend>);
 
 impl Backend for CorruptingBackend {
     fn capabilities(&self) -> tungstate_backend::Capabilities {
@@ -224,7 +253,9 @@ fn a_source_survives_when_verification_fails() {
     );
     rig.write_source("holiday.mp4", b"irreplaceable");
 
-    let corrupting = CorruptingBackend(LocalBackend::new(rig.dest_dir.path().to_path_buf()));
+    let corrupting = CorruptingBackend(Box::new(LocalBackend::new(
+        rig.dest_dir.path().to_path_buf(),
+    )));
     let summary = rig.run_over(&corrupting).unwrap();
 
     assert_eq!(
@@ -251,7 +282,9 @@ fn a_failed_transfer_leaves_no_partial_file() {
     );
     rig.write_source("holiday.mp4", b"irreplaceable");
 
-    let corrupting = CorruptingBackend(LocalBackend::new(rig.dest_dir.path().to_path_buf()));
+    let corrupting = CorruptingBackend(Box::new(LocalBackend::new(
+        rig.dest_dir.path().to_path_buf(),
+    )));
     let _ = rig.run_over(&corrupting);
 
     let leftovers: Vec<_> = std::fs::read_dir(rig.dest_dir.path())
@@ -277,12 +310,12 @@ fn an_interrupted_run_resumes_without_duplicating_or_losing() {
         .journal
         .begin(&tungstate_journal::NewOp {
             kind: tungstate_journal::OpKind::Move,
-            source: Some(tungstate_journal::Location::new(
-                rig.link.source_root.clone(),
+            source: Some(tungstate_journal::Location::within(
+                &rig.link.source,
                 "interrupted.mp4",
             )),
-            destination: Some(tungstate_journal::Location::new(
-                rig.link.destination_root.clone(),
+            destination: Some(tungstate_journal::Location::within(
+                &rig.link.destination,
                 "interrupted.mp4",
             )),
             size: Some(13),
@@ -583,7 +616,9 @@ fn one_bad_file_does_not_abandon_the_rest_of_the_drain() {
     rig.write_source("c.mp4", b"third");
 
     // Corrupts every write, so all three fail verification.
-    let corrupting = CorruptingBackend(LocalBackend::new(rig.dest_dir.path().to_path_buf()));
+    let corrupting = CorruptingBackend(Box::new(LocalBackend::new(
+        rig.dest_dir.path().to_path_buf(),
+    )));
     let summary = rig.run_over(&corrupting).unwrap();
 
     assert_eq!(summary.failed, 3, "every file should have been attempted");
@@ -605,7 +640,9 @@ fn a_failure_carries_a_reason_worth_reading() {
     );
     rig.write_source("a.mp4", b"first");
 
-    let corrupting = CorruptingBackend(LocalBackend::new(rig.dest_dir.path().to_path_buf()));
+    let corrupting = CorruptingBackend(Box::new(LocalBackend::new(
+        rig.dest_dir.path().to_path_buf(),
+    )));
     let summary = rig.run_over(&corrupting).unwrap();
 
     assert_eq!(summary.failures[0].path, Path::new("a.mp4"));
@@ -719,9 +756,11 @@ fn an_empty_selection_does_nothing() {
 
 /// A destination that reports different storage after the first file, which is
 /// what an unmounting NAS looks like from here.
-#[derive(Debug)]
+///
+/// Wraps any backend, so the same proof runs over `LocalBackend` and over the
+/// `OpenDAL` adapter.
 struct VanishingBackend {
-    inner: LocalBackend,
+    inner: Box<dyn Backend>,
     calls: std::sync::atomic::AtomicU64,
 }
 
@@ -777,7 +816,7 @@ fn a_destination_that_changes_underneath_us_stops_the_drain() {
     }
 
     let vanishing = VanishingBackend {
-        inner: LocalBackend::new(rig.dest_dir.path().to_path_buf()),
+        inner: Box::new(LocalBackend::new(rig.dest_dir.path().to_path_buf())),
         calls: std::sync::atomic::AtomicU64::new(0),
     };
     let summary = rig.run_over(&vanishing).unwrap();
@@ -916,4 +955,232 @@ fn a_preview_can_be_limited_to_a_selection() {
 
     assert_eq!(preview.items.len(), 1);
     assert_eq!(preview.items[0].path, Path::new("wanted.mp4"));
+}
+
+// ---------------------------------------------------------------------------
+// The same engine, with the destination reached through OpenDAL rather than
+// through `std::fs`. Same rig, same assertions; only the backend changes.
+//
+// Slice 4b ships no protocol, so these run on all three platforms with no
+// server and no network. When slice 4c adds FTP, the question "does the
+// adapter behave like `LocalBackend`?" is already answered here.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_whole_drain_works_through_the_opendal_adapter() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("holiday.mp4", b"a video");
+    rig.write_source("2024/trip.mp4", b"another video");
+
+    let summary = rig.run_over(rig.opendal_destination().as_ref()).unwrap();
+
+    assert_eq!(summary.transferred, 2);
+    assert_eq!(summary.bytes, 20);
+    assert_eq!(std::fs::read(rig.dest("holiday.mp4")).unwrap(), b"a video");
+    assert_eq!(
+        std::fs::read(rig.dest("2024/trip.mp4")).unwrap(),
+        b"another video"
+    );
+    assert!(!rig.src("holiday.mp4").exists(), "source must be reclaimed");
+    assert!(!rig.src("2024/trip.mp4").exists());
+}
+
+#[test]
+fn a_source_survives_a_failed_verification_through_the_adapter() {
+    // The single most important guarantee in the product, asserted again over
+    // the new seam. A remote that quietly mangles bytes must not cost a file.
+    let rig = Rig::with(
+        SourcePolicy::Delete,
+        VerifyLevel::Readback,
+        Order::LargestFirst,
+    );
+    rig.write_source("holiday.mp4", b"irreplaceable");
+
+    let corrupting = CorruptingBackend(rig.opendal_destination());
+    let summary = rig.run_over(&corrupting).unwrap();
+
+    assert_eq!(summary.failed, 1);
+    assert_eq!(summary.transferred, 0);
+    assert!(
+        rig.src("holiday.mp4").exists(),
+        "source deleted despite failed verification"
+    );
+    assert!(!rig.dest("holiday.mp4").exists());
+
+    let leftovers: Vec<_> = std::fs::read_dir(rig.dest_dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .collect();
+    assert!(leftovers.is_empty(), "partial left behind: {leftovers:?}");
+}
+
+#[test]
+fn an_interrupted_run_resumes_through_the_adapter() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    let destination = rig.opendal_destination();
+
+    rig.write_source("done.mp4", b"already transferred");
+    rig.run_over(destination.as_ref()).unwrap();
+    assert!(!rig.src("done.mp4").exists());
+
+    // Simulate a crash mid-file: an intended op with a partial on disk.
+    rig.write_source("interrupted.mp4", b"was in flight");
+    let op = rig
+        .journal
+        .begin(&tungstate_journal::NewOp {
+            kind: tungstate_journal::OpKind::Move,
+            source: Some(tungstate_journal::Location::within(
+                &rig.link.source,
+                "interrupted.mp4",
+            )),
+            destination: Some(tungstate_journal::Location::within(
+                &rig.link.destination,
+                "interrupted.mp4",
+            )),
+            size: Some(13),
+            link: Some(rig.link.name.clone()),
+            link_id: Some(rig.link.id),
+        })
+        .unwrap();
+    let partial = tungstate_journal::temp_name(Path::new("interrupted.mp4"), op);
+    rig.write_dest(&partial.to_string_lossy(), b"half a fi");
+
+    let summary = rig.run_over(destination.as_ref()).unwrap();
+
+    assert_eq!(summary.recovered, 1, "interrupted work must be recognised");
+    assert_eq!(
+        std::fs::read(rig.dest("interrupted.mp4")).unwrap(),
+        b"was in flight",
+        "the interrupted file must land complete"
+    );
+    assert!(
+        !rig.dest_dir.path().join(&partial).exists(),
+        "partial not cleaned up"
+    );
+    assert!(!rig.src("interrupted.mp4").exists());
+    assert!(rig.journal.incomplete().unwrap().is_empty());
+}
+
+#[test]
+fn an_identical_file_is_recognised_through_the_adapter() {
+    // Hashing both ends is the only way to know, so this is the test that
+    // proves reads through the adapter return the same bytes writes put there.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("holiday.mp4", b"same bytes");
+    rig.write_dest("holiday.mp4", b"same bytes");
+
+    let summary = rig.run_over(rig.opendal_destination().as_ref()).unwrap();
+
+    assert_eq!(summary.already_present, 1);
+    assert_eq!(summary.transferred, 0);
+    assert!(!rig.src("holiday.mp4").exists());
+}
+
+#[test]
+fn a_conflict_is_quarantined_through_the_adapter() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("holiday.mp4", b"mine");
+    rig.write_dest("holiday.mp4", b"theirs, different");
+
+    let summary = rig.run_over(rig.opendal_destination().as_ref()).unwrap();
+
+    assert_eq!(summary.quarantined, 1);
+    assert_eq!(
+        std::fs::read(rig.dest(".tungstate-quarantine/holiday.mp4")).unwrap(),
+        b"mine"
+    );
+    assert_eq!(
+        std::fs::read(rig.dest("holiday.mp4")).unwrap(),
+        b"theirs, different"
+    );
+}
+
+#[test]
+fn a_multi_chunk_file_drains_intact_through_the_adapter() {
+    // Larger than the engine's 1 MiB read, so the streaming loop and the
+    // adapter's chunked reads and writes are both genuinely exercised.
+    let rig = Rig::new(SourcePolicy::Delete);
+    let payload: Vec<u8> = (0..2_500_000_u32).map(|n| (n % 251) as u8).collect();
+    rig.write_source("big.bin", &payload);
+
+    let summary = rig.run_over(rig.opendal_destination().as_ref()).unwrap();
+
+    assert_eq!(summary.transferred, 1);
+    assert_eq!(summary.bytes, payload.len() as u64);
+    assert_eq!(std::fs::read(rig.dest("big.bin")).unwrap(), payload);
+}
+
+#[test]
+fn a_remote_source_refuses_to_trash_rather_than_deleting_the_wrong_thing() {
+    // `trash::delete` drives the local desktop's trash. Handed a path relative
+    // to a remote it would either fail obscurely or, worse, find a local file
+    // of that name. The engine refuses before it gets the chance.
+    let rig = Rig::new(SourcePolicy::Trash);
+    rig.write_source("holiday.mp4", b"irreplaceable");
+
+    let journal = &rig.journal;
+    let id = journal
+        .create_connection(&tungstate_journal::NewConnection {
+            name: "pretend-remote".to_string(),
+            scheme: tungstate_journal::Scheme::Fs,
+            host: None,
+            port: None,
+            username: None,
+            root: rig.source_dir.path().to_string_lossy().into_owned(),
+            options: std::collections::BTreeMap::new(),
+        })
+        .unwrap();
+
+    let link = Link {
+        source: Endpoint::remote(id, PathBuf::new()),
+        ..rig.link.clone()
+    };
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &link,
+        &rig.source,
+        &rig.destination,
+        journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+
+    assert_eq!(summary.failed, 1, "the refusal must be reported");
+    assert!(
+        rig.src("holiday.mp4").exists(),
+        "the original must still be there"
+    );
+    assert!(
+        summary.failures[0].reason.contains("no trash"),
+        "the reason must name the problem, got `{}`",
+        summary.failures[0].reason
+    );
+}
+
+#[test]
+fn a_connection_that_changes_underneath_us_stops_the_drain() {
+    // The catastrophic case again, over the seam. It is worth repeating here
+    // rather than trusting the local version: `OpendalBackend::root_token` had
+    // to avoid `Operator::stat("/")`, which OpenDAL answers from thin air
+    // without touching the store. Had it not, this test would pass four files
+    // to a destination that was no longer there and delete four originals.
+    let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::Discovered);
+    for name in ["a.mp4", "b.mp4", "c.mp4", "d.mp4"] {
+        rig.write_source(name, b"irreplaceable footage");
+    }
+
+    let vanishing = VanishingBackend {
+        inner: rig.opendal_destination(),
+        calls: std::sync::atomic::AtomicU64::new(0),
+    };
+    let summary = rig.run_over(&vanishing).unwrap();
+
+    assert!(summary.destination_lost, "the change must be noticed");
+    assert!(summary.transferred <= 1, "got {}", summary.transferred);
+
+    let left = std::fs::read_dir(rig.source_dir.path()).unwrap().count();
+    assert!(left >= 3, "originals must survive, {left} left");
 }

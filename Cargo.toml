@@ -18,6 +18,14 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 directories = "6"
 blake3 = "1.8"
 trash = "5.2"
+# Only the services this slice registers. `fs` is how the adapter is exercised
+# on all three platforms with no server; FTP arrives in 4c as one more flag.
+opendal = { version = "0.59", default-features = false, features = ["executors-tokio", "services-fs", "services-memory"] }
+# The adapter owns one runtime purely to drive OpenDAL's async API. Nothing
+# else in the workspace is async; see DESIGN.md §7.
+tokio = { version = "1", features = ["rt-multi-thread"] }
+keyring = "4.2"
+rpassword = "7.5"
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-dialog = "2"

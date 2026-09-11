@@ -57,6 +57,28 @@ const MIGRATIONS: &[&str] = &[
     // gets journaling and resume for free, but it must not clutter the list of
     // pairs the user deliberately saved.
     "ALTER TABLE links ADD COLUMN saved INTEGER NOT NULL DEFAULT 1;",
+    // v4: a link end stops being a bare path and becomes a place plus a path
+    // inside it. Additive throughout: NULL means the local filesystem, so every
+    // row written before this migration means exactly what it meant before.
+    //
+    // No secret column exists here by construction. A password lives in the
+    // machine's keychain keyed by connection name, never in this file.
+    "CREATE TABLE connections (
+         id         INTEGER PRIMARY KEY,
+         name       TEXT    NOT NULL UNIQUE,
+         scheme     TEXT    NOT NULL,
+         host       TEXT,
+         port       INTEGER,
+         username   TEXT,
+         root       TEXT    NOT NULL DEFAULT '',
+         options    TEXT    NOT NULL DEFAULT '{}',
+         created_at INTEGER NOT NULL
+     );
+
+     ALTER TABLE links ADD COLUMN source_connection INTEGER REFERENCES connections (id);
+     ALTER TABLE links ADD COLUMN dest_connection   INTEGER REFERENCES connections (id);
+     ALTER TABLE ops   ADD COLUMN src_connection    INTEGER REFERENCES connections (id);
+     ALTER TABLE ops   ADD COLUMN dst_connection    INTEGER REFERENCES connections (id);",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.
@@ -81,7 +103,8 @@ fn configure(conn: &Connection) -> Result<()> {
     conn.pragma_update(None, "synchronous", "NORMAL")
         .map_err(open_err)?;
 
-    // Enforce declared foreign keys, for the tables slices 6 and 7 will add.
+    // Enforce declared foreign keys. v4 relies on this: a connection with
+    // links pointing at it cannot be deleted out from under them.
     conn.pragma_update(None, "foreign_keys", true)
         .map_err(open_err)?;
 
@@ -92,6 +115,20 @@ fn migrate(conn: &Connection) -> Result<()> {
     let current: i64 = conn
         .pragma_query_value(None, "user_version", |row| row.get(0))
         .map_err(open_err)?;
+
+    // Reversal of earlier policy, deliberate. Until v4 a newer file was merely
+    // skipped, on the principle that an old binary should still be able to read
+    // one. That was safe while every stored path was a local absolute path. It
+    // is not any more: a v4 link end can be a path relative to a remote
+    // connection this build knows nothing about, and an old binary would read
+    // it as a local path and drain into the wrong place. Refuse instead.
+    let known = i64::try_from(MIGRATIONS.len()).unwrap_or(i64::MAX);
+    if current > known {
+        return Err(JournalError::TooNew {
+            found: current,
+            known,
+        });
+    }
 
     let applied = usize::try_from(current).unwrap_or(0);
     for (index, migration) in MIGRATIONS.iter().enumerate().skip(applied) {

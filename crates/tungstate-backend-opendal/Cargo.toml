@@ -1,5 +1,5 @@
 [package]
-name = "tungstate-transfer"
+name = "tungstate-backend-opendal"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -9,17 +9,15 @@ rust-version.workspace = true
 [dependencies]
 tungstate-backend = { path = "../tungstate-backend" }
 tungstate-journal = { path = "../tungstate-journal" }
-blake3 = { workspace = true }
+tungstate-secret = { path = "../tungstate-secret" }
+opendal = { workspace = true }
+tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-trash = { workspace = true }
 
 [dev-dependencies]
+proptest = { workspace = true }
 tempfile = { workspace = true }
-# The same suite, run a second time with the destination reached through
-# OpenDAL's `fs` service. That is the whole point of slice 4b's seam.
-tungstate-backend-opendal = { path = "../tungstate-backend-opendal" }
-tungstate-secret = { path = "../tungstate-secret" }
 
 [lints]
 workspace = true

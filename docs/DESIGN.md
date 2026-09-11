@@ -272,6 +272,14 @@ Requirements from the user: tiny, fast, and able to say where every file ended u
 - Storage: SQLite table with indexes on `hash`, `src`, `dst`, `ts`. "Tiny and fast" is satisfied by SQLite with WAL; a million ops is a few hundred MB and any lookup is an index hit. Do not build a custom log format until SQLite is proven too slow, which it will not be.
 - Scope: **one global journal per machine** so `whereis <hash>` works across folders and links (a drain from folder A to folder B is one story). Per-folder export for portability.
 
+### Schema versioning — **DECIDED (slice 4b): a newer file is refused, not skipped**
+
+Reversal of the original behaviour, which silently skipped migration when the file's `user_version` exceeded what the binary knew, so an old binary could still read a newer journal. That was safe while every stored link end was a local absolute path: an old binary reading `/Volumes/nas/inbox` got the right answer even without understanding the columns beside it.
+
+Schema v4 makes a link end *a connection plus a path relative to it*, with `NULL` meaning the local filesystem. An old binary reading a v4 row would see `inbox` and take it for a local relative path — and drain into it. `migrate` now returns `JournalError::TooNew { found, known }`.
+
+Consequence to live with: a downgrade is not supported once a journal has been opened by a newer build. Given that the journal is the record of where every file went, refusing to open beats guessing.
+
 ### Queries (the git-like UX)
 ```
 tungstate log <path|hash>        every op ever applied to this identity, oldest first
@@ -340,6 +348,22 @@ The planner consults `capabilities()` to decide between `rename` (atomic) and `c
 - **rclone as subprocess** (`rclone rcd` JSON-RPC): 70+ backends for free, battle-tested. Downside: external binary dependency, IPC latency, not "a single Rust binary."
 
 Recommendation: **OpenDAL behind your own trait**, with `local` implemented natively (you need inode/file-id, xattrs, hardlink, reflink, and `notify`, none of which OpenDAL gives you). Hand-roll a backend only when OpenDAL's semantics prove wrong for it.
+
+### SFTP is the exception — **DECIDED (slice 4b): hand-rolled on `russh` + `russh-sftp`**
+
+Investigated while building slice 4b, before writing any SFTP code. OpenDAL's SFTP service is:
+
+- **Unix-only.** It does not build on Windows, and tungstate promises three platforms.
+- **Refusing of password authentication.** Key-based only. A consumer NAS is very often password-only, and telling the user to set up key auth first is not a product.
+- **Delegating host-key checking to the system `ssh` client.** Tungstate wants trust-on-first-use against `~/.ssh/known_hosts` that it controls and can explain, not whatever the local `ssh` happens to be configured with.
+
+Three requirements, three contradictions, so this is the escape hatch the paragraph above sanctions. SFTP will be built directly on `russh` + `russh-sftp` behind the same `Backend` trait. Everything else stays on OpenDAL. Implementation is much later than slice 4b; only the decision is recorded here so nobody re-investigates it.
+
+### The async bridge — **DECIDED (slice 4b): spawn, never `block_on`**
+
+OpenDAL has been async-only since 0.54 (RFC-6189). Its `opendal::blocking::Operator` is a wrapper around `Handle::block_on`, which **panics when the calling thread is already inside a tokio runtime** — and the GUI's Tauri commands are exactly such a thread. `tungstate-backend-opendal` therefore owns a `LazyLock<tokio::runtime::Runtime>` and dispatches each call as `handle.spawn(future)` followed by a blocking receive on a `std::sync::mpsc` channel. `spawn` is legal from any thread; `block_on` is not. This is §7's "adapter at the boundary", and it keeps every other crate synchronous exactly as §7 decided.
+
+**Trap found in the same slice, recorded so nobody re-introduces it:** `Operator::stat("/")` is short-circuited by OpenDAL to a synthetic directory without touching the store at all. Using it for a reachability check would silently disable the safety rail in §4b ("notice the volume changed underneath us"). A backend rooted at a local directory must `stat` that directory itself; anything else must list.
 
 ### Two remote use-cases — **DECIDED: both in v1**
 1. **Govern in place:** the remote *is* the folder; tungstate reorganises within it. Needs: remote listing, remote rename (or copy+delete), tiered attribute fetching (range reads for sniffing), remote-native checksums.

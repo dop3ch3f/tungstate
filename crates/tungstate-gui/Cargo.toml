@@ -15,6 +15,8 @@ tauri-build = { workspace = true }
 
 [dependencies]
 tungstate-backend = { path = "../tungstate-backend" }
+tungstate-backend-opendal = { path = "../tungstate-backend-opendal" }
+tungstate-secret = { path = "../tungstate-secret" }
 tungstate-journal = { path = "../tungstate-journal" }
 tungstate-transfer = { path = "../tungstate-transfer" }
 directories = { workspace = true }

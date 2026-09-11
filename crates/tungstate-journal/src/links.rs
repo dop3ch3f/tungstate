@@ -8,6 +8,7 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+use crate::connections::{ConnectionId, Endpoint};
 use crate::{Journal, JournalError, Result, now_millis, path_str, query};
 
 /// Identifier for a configured link.
@@ -77,10 +78,10 @@ pub struct Link {
     pub id: LinkId,
     /// The name used on the command line.
     pub name: String,
-    /// Root of the backend files come from.
-    pub source_root: PathBuf,
-    /// Root of the backend files go to.
-    pub destination_root: PathBuf,
+    /// Where files come from: which place, and where inside it.
+    pub source: Endpoint,
+    /// Where files go: which place, and where inside it.
+    pub destination: Endpoint,
     /// What happens to originals.
     pub source_policy: SourcePolicy,
     /// How thoroughly transfers are checked.
@@ -100,10 +101,10 @@ pub struct Link {
 pub struct NewLink {
     /// The name it will be referred to by. Must be unique.
     pub name: String,
-    /// Root of the backend files come from.
-    pub source_root: PathBuf,
-    /// Root of the backend files go to.
-    pub destination_root: PathBuf,
+    /// Where files come from: which place, and where inside it.
+    pub source: Endpoint,
+    /// Where files go: which place, and where inside it.
+    pub destination: Endpoint,
     /// What happens to originals.
     pub source_policy: SourcePolicy,
     /// How thoroughly transfers are checked.
@@ -164,12 +165,13 @@ impl Journal {
         conn.execute(
             "INSERT INTO links (
                  name, source_root, dest_root, source_policy, verify,
-                 ordering, on_conflict, cooldown_secs, created_at, saved
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                 ordering, on_conflict, cooldown_secs, created_at, saved,
+                 source_connection, dest_connection
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
                 link.name,
-                path_str(&link.source_root),
-                path_str(&link.destination_root),
+                path_str(&link.source.path),
+                path_str(&link.destination.path),
                 link.source_policy.as_str(),
                 link.verify.as_str(),
                 link.order.as_str(),
@@ -177,6 +179,8 @@ impl Journal {
                 i64::try_from(link.cooldown.as_secs()).unwrap_or(i64::MAX),
                 now_millis(),
                 i64::from(link.saved),
+                link.source.connection.map(|c| c.0),
+                link.destination.connection.map(|c| c.0),
             ],
         )
         .map_err(|error| match error {
@@ -255,8 +259,18 @@ fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
     Ok(Link {
         id: LinkId(row.get("id")?),
         name: text("name")?,
-        source_root: PathBuf::from(text("source_root")?),
-        destination_root: PathBuf::from(text("dest_root")?),
+        source: Endpoint {
+            connection: row
+                .get::<_, Option<i64>>("source_connection")?
+                .map(ConnectionId),
+            path: PathBuf::from(text("source_root")?),
+        },
+        destination: Endpoint {
+            connection: row
+                .get::<_, Option<i64>>("dest_connection")?
+                .map(ConnectionId),
+            path: PathBuf::from(text("dest_root")?),
+        },
         // An unparseable value means a newer tungstate wrote it. Fall back to the
         // safest reading rather than refusing to load the link at all.
         source_policy: SourcePolicy::parse(&text("source_policy")?).unwrap_or(SourcePolicy::Keep),

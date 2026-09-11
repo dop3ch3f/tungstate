@@ -10,9 +10,14 @@
 //! make [`Journal::whereis`] open every database on the machine to answer one
 //! question.
 
+// `links` first: it defines the `string_enum!` macro, and `macro_rules!` is
+// only in scope for modules declared after it.
+#[macro_use]
 pub mod links;
+pub mod connections;
 mod schema;
 
+pub use connections::{Connection, ConnectionId, Endpoint, NewConnection, Scheme};
 pub use links::{
     ConflictAction, Link, LinkId, NewLink, Order, SourcePolicy, VerifyLevel, temp_name,
 };
@@ -21,7 +26,9 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use rusqlite::Connection;
+// Aliased: in this crate `Connection` now means a tungstate connection, and
+// having the two spellings collide would be a trap for every later reader.
+use rusqlite::Connection as SqliteConnection;
 
 /// Anything that can go wrong reading or writing the journal.
 #[derive(Debug, thiserror::Error)]
@@ -71,6 +78,34 @@ pub enum JournalError {
     /// A caller referred to an operation that is not in the journal.
     #[error("no operation with id {0}")]
     UnknownOp(i64),
+
+    /// A connection name is already taken.
+    #[error("a connection named `{0}` already exists")]
+    DuplicateConnection(String),
+
+    /// A caller referred to a connection that does not exist.
+    #[error("no connection named `{0}`")]
+    UnknownConnection(String),
+
+    /// A connection cannot be removed while a link still points at it.
+    #[error("`{0}` is still used by at least one link; remove those links first")]
+    ConnectionInUse(String),
+
+    /// The journal file was written by a newer tungstate than this one.
+    ///
+    /// Refused rather than skipped. Before v4 every stored link end was a local
+    /// absolute path, so an old binary reading a newer file was harmless. A v4
+    /// end can be a path relative to a connection this build knows nothing
+    /// about, and reading it as a local path would drain into the wrong place.
+    #[error(
+        "this journal was written by a newer tungstate (schema v{found}; this build knows v{known})"
+    )]
+    TooNew {
+        /// The `user_version` found in the file.
+        found: i64,
+        /// The highest `user_version` this build can produce.
+        known: i64,
+    },
 }
 
 /// Result alias so signatures read `Result<Op>` rather than spelling out the error.
@@ -160,6 +195,8 @@ impl OpStatus {
 /// One end of an operation: which storage location, and where inside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Location {
+    /// Which place this is. `None` is the local filesystem.
+    pub connection: Option<ConnectionId>,
     /// Backend root, so two folders with a `videos/` subdirectory stay distinct.
     pub root: PathBuf,
     /// Path relative to that root.
@@ -167,16 +204,30 @@ pub struct Location {
 }
 
 impl Location {
-    /// A location within `root`.
+    /// A location within `root` on the local filesystem.
     #[must_use]
     pub fn new(root: impl Into<PathBuf>, path: impl Into<PathBuf>) -> Self {
         Self {
+            connection: None,
             root: root.into(),
             path: path.into(),
         }
     }
 
+    /// A location within one end of a link, carrying that end's place.
+    #[must_use]
+    pub fn within(end: &Endpoint, path: impl Into<PathBuf>) -> Self {
+        Self {
+            connection: end.connection,
+            root: end.path.clone(),
+            path: path.into(),
+        }
+    }
+
     /// The full path this location denotes.
+    ///
+    /// For a remote this is a display string rather than something the local
+    /// filesystem could open; the connection is what says where it really is.
     #[must_use]
     pub fn full(&self) -> PathBuf {
         self.root.join(&self.path)
@@ -264,7 +315,7 @@ pub enum Locator<'a> {
 pub struct Journal {
     // rusqlite::Connection is Send but not Sync, and slice 4 writes from several
     // threads. SQLite serialises writers anyway, so the mutex costs nothing real.
-    conn: Mutex<Connection>,
+    conn: Mutex<SqliteConnection>,
 }
 
 impl Journal {
@@ -281,7 +332,7 @@ impl Journal {
                 source,
             })?;
         }
-        let conn = Connection::open(path).map_err(|source| JournalError::Open {
+        let conn = SqliteConnection::open(path).map_err(|source| JournalError::Open {
             path: path.to_path_buf(),
             source,
         })?;
@@ -305,7 +356,7 @@ impl Journal {
     /// # Errors
     /// [`JournalError::Open`] if SQLite cannot create the database.
     pub fn open_in_memory() -> Result<Self> {
-        let conn = Connection::open_in_memory().map_err(|source| JournalError::Open {
+        let conn = SqliteConnection::open_in_memory().map_err(|source| JournalError::Open {
             path: PathBuf::from(":memory:"),
             source,
         })?;
@@ -327,8 +378,9 @@ impl Journal {
         conn.execute(
             "INSERT INTO ops (
                  kind, status, src_root, src_path, dst_root, dst_path,
+                 src_connection, dst_connection,
                  size, link, link_id, started_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
             rusqlite::params![
                 op.kind.as_str(),
                 OpStatus::Intended.as_str(),
@@ -336,6 +388,11 @@ impl Journal {
                 op.source.as_ref().map(|l| path_str(&l.path)),
                 op.destination.as_ref().map(|l| path_str(&l.root)),
                 op.destination.as_ref().map(|l| path_str(&l.path)),
+                op.source.as_ref().and_then(|l| l.connection).map(|c| c.0),
+                op.destination
+                    .as_ref()
+                    .and_then(|l| l.connection)
+                    .map(|c| c.0),
                 op.size.map(size_to_sql),
                 op.link,
                 op.link_id.map(|id| id.0),
@@ -396,10 +453,15 @@ impl Journal {
     pub fn history(&self, path: &Path) -> Result<Vec<Op>> {
         let needle = path_str(path);
         self.select(
+            // The concatenation branches are scoped to local rows on purpose.
+            // `root || '/' || path` is only a real path when the row is local;
+            // for a remote it splices a connection-relative root onto a
+            // connection-relative path and can collide with a genuine local
+            // file of the same shape.
             "SELECT * FROM ops
              WHERE src_path = ?1 OR dst_path = ?1
-                OR (src_root || '/' || src_path) = ?1
-                OR (dst_root || '/' || dst_path) = ?1
+                OR (src_connection IS NULL AND (src_root || '/' || src_path) = ?1)
+                OR (dst_connection IS NULL AND (dst_root || '/' || dst_path) = ?1)
              ORDER BY id",
             rusqlite::params![needle],
             "reading the history of a path",
@@ -435,11 +497,14 @@ impl Journal {
             Locator::Path(path) => {
                 let needle = path_str(path);
                 self.select(
+                    // Same scoping as `history`; see the note there.
                     "SELECT * FROM ops
                      WHERE status = 'committed'
                        AND (src_path = ?1 OR dst_path = ?1
-                            OR (src_root || '/' || src_path) = ?1
-                            OR (dst_root || '/' || dst_path) = ?1)
+                            OR (src_connection IS NULL
+                                AND (src_root || '/' || src_path) = ?1)
+                            OR (dst_connection IS NULL
+                                AND (dst_root || '/' || dst_path) = ?1))
                      ORDER BY id DESC",
                     rusqlite::params![needle],
                     "locating by path",
@@ -467,7 +532,7 @@ impl Journal {
     /// A poisoned mutex means another thread panicked mid-write. The connection
     /// itself is still sound, and refusing every later write would turn one bug
     /// into a dead journal, so recover the guard rather than propagating.
-    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, Connection> {
+    pub(crate) fn lock(&self) -> std::sync::MutexGuard<'_, SqliteConnection> {
         self.conn
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -511,9 +576,17 @@ pub(crate) fn now_millis() -> i64 {
         .map_or(0, |d| i64::try_from(d.as_millis()).unwrap_or(i64::MAX))
 }
 
-fn location(root: Option<String>, path: Option<String>) -> Option<Location> {
+fn location(
+    root: Option<String>,
+    path: Option<String>,
+    connection: Option<i64>,
+) -> Option<Location> {
     match (root, path) {
-        (Some(root), Some(path)) => Some(Location::new(root, path)),
+        (Some(root), Some(path)) => Some(Location {
+            connection: connection.map(ConnectionId),
+            root: PathBuf::from(root),
+            path: PathBuf::from(path),
+        }),
         _ => None,
     }
 }
@@ -527,8 +600,16 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<Op> {
         // tungstate. Fall back rather than fail, so an old binary can still read.
         kind: OpKind::parse(&kind_raw).unwrap_or(OpKind::Copy),
         status: OpStatus::parse(&status_raw).unwrap_or(OpStatus::Failed),
-        source: location(row.get("src_root")?, row.get("src_path")?),
-        destination: location(row.get("dst_root")?, row.get("dst_path")?),
+        source: location(
+            row.get("src_root")?,
+            row.get("src_path")?,
+            row.get("src_connection")?,
+        ),
+        destination: location(
+            row.get("dst_root")?,
+            row.get("dst_path")?,
+            row.get("dst_connection")?,
+        ),
         // A negative size means a corrupt row; report it as unknown rather
         // than as zero, which would read as a real empty file.
         size: row

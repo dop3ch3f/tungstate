@@ -72,6 +72,13 @@ pub enum TransferError {
         detail: String,
     },
 
+    /// The source is remote, and there is no trash to send an original to.
+    #[error("`{path}` is on a remote, which has no trash; use --move or --copy")]
+    TrashUnsupported {
+        /// The file whose original could not be trashed.
+        path: PathBuf,
+    },
+
     /// The original could not be sent to the operating system's trash.
     #[error("could not trash `{path}`")]
     Trash {
@@ -601,12 +608,9 @@ impl<'a> Transfer<'a> {
                 SourcePolicy::Keep => OpKind::Copy,
                 SourcePolicy::Delete | SourcePolicy::Trash => OpKind::Move,
             },
-            source: Some(Location::new(
-                self.link.source_root.clone(),
-                file.path.clone(),
-            )),
-            destination: Some(Location::new(
-                self.link.destination_root.clone(),
+            source: Some(Location::within(&self.link.source, file.path.clone())),
+            destination: Some(Location::within(
+                &self.link.destination,
                 destination.to_path_buf(),
             )),
             size: Some(file.size),
@@ -768,7 +772,18 @@ impl Transfer<'_> {
                 Ok(())
             }
             SourcePolicy::Trash => {
-                let full = self.link.source_root.join(path);
+                // `trash::delete` drives the local desktop's trash and knows
+                // nothing about a remote. Refusing here rather than trusting
+                // the CLI's check means a link built any other way — the GUI, a
+                // future API — cannot delete the wrong local path by accident.
+                // Remote trash (`.tungstate-trash/`, DESIGN.md §4) is a later
+                // slice.
+                if self.link.source.is_remote() {
+                    return Err(TransferError::TrashUnsupported {
+                        path: path.to_path_buf(),
+                    });
+                }
+                let full = self.link.source.path.join(path);
                 trash::delete(&full).map_err(|source| TransferError::Trash { path: full, source })
             }
         }
@@ -777,12 +792,9 @@ impl Transfer<'_> {
     fn record_already_present(&self, file: &walk::File, destination: &Path) -> Result<()> {
         let op = self.journal.begin(&NewOp {
             kind: OpKind::Move,
-            source: Some(Location::new(
-                self.link.source_root.clone(),
-                file.path.clone(),
-            )),
-            destination: Some(Location::new(
-                self.link.destination_root.clone(),
+            source: Some(Location::within(&self.link.source, file.path.clone())),
+            destination: Some(Location::within(
+                &self.link.destination,
                 destination.to_path_buf(),
             )),
             size: Some(file.size),
