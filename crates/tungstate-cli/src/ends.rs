@@ -200,10 +200,19 @@ mod tests {
             root: "inbox".into(),
             path: "a.mp4".into(),
         };
+        // Always `/`, on every platform: that is the separator the far side
+        // uses, and a backslash here would be a name no server has heard of.
         assert_eq!(place(&remote, &journal), "nas:inbox/a.mp4");
 
+        // A local one is the opposite: it must read the way this machine
+        // spells a path, backslashes and all, so it is built rather than
+        // written out.
         let local = tungstate_journal::Location::new("/Users/x", "a.mp4");
-        assert_eq!(place(&local, &journal), "/Users/x/a.mp4");
+        let native = std::path::Path::new("/Users/x")
+            .join("a.mp4")
+            .display()
+            .to_string();
+        assert_eq!(place(&local, &journal), native);
     }
 
     #[test]
