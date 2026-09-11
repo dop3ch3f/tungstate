@@ -2,7 +2,10 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    # Slice branches too. A slice is only finished when it is green on all
+    # three platforms, and waiting for a pull request to find that out means
+    # finding out late.
+    branches: [main, "slice-**"]
   pull_request:
 
 jobs:
