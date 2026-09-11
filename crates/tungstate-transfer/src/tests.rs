@@ -1643,3 +1643,218 @@ fn resuming_an_unsaved_link_finishes_what_it_started() {
     assert!(!rig.src("huge.mp4").exists());
     assert!(rig.journal.interrupted().unwrap().is_empty());
 }
+
+#[test]
+fn a_link_with_no_stored_selection_still_means_the_whole_source() {
+    // What a saved folder-pair means, and what every link written before
+    // migration v5 means. The counterpart below covers a stored selection.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("chosen.mp4", b"a file");
+    rig.write_source("never-picked-a.mp4", b"another file");
+    rig.write_source("never-picked-b.mp4", b"a third file");
+
+    // Exactly the state a killed browser transfer leaves: one interrupted op
+    // for the picked file, and no record anywhere of what else was picked.
+    rig.journal
+        .begin(&tungstate_journal::NewOp {
+            kind: tungstate_journal::OpKind::Move,
+            source: Some(tungstate_journal::Location::within(
+                &rig.link.source,
+                "chosen.mp4",
+            )),
+            destination: Some(tungstate_journal::Location::within(
+                &rig.link.destination,
+                "chosen.mp4",
+            )),
+            size: Some(23),
+            link: Some(rig.link.name.clone()),
+            link_id: Some(rig.link.id),
+        })
+        .unwrap();
+
+    // What `resume_interrupted` does: spawn_run with an empty selection.
+    let summary = rig.run().unwrap();
+
+    assert_eq!(summary.transferred, 3, "no selection means everything");
+    assert!(!rig.src("never-picked-a.mp4").exists());
+}
+
+// ---------------------------------------------------------------------------
+// A stored selection. The gap that made an interrupted browser transfer
+// resume as "the whole folder" rather than as itself.
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_stored_selection_is_the_only_thing_moved() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("picked-a.mp4", b"wanted");
+    rig.write_source("picked-b.mp4", b"also wanted");
+    rig.write_source("not-picked.mp4", b"never chosen");
+
+    rig.journal
+        .set_files(
+            rig.link.id,
+            &[PathBuf::from("picked-a.mp4"), PathBuf::from("picked-b.mp4")],
+        )
+        .unwrap();
+
+    let summary = rig.run().unwrap();
+
+    assert_eq!(summary.transferred, 2);
+    assert!(rig.dest("picked-a.mp4").exists());
+    assert!(rig.dest("picked-b.mp4").exists());
+    assert!(
+        !rig.dest("not-picked.mp4").exists(),
+        "a file outside the selection must not be transferred"
+    );
+    assert!(
+        rig.src("not-picked.mp4").exists(),
+        "and certainly must not be deleted"
+    );
+}
+
+#[test]
+fn resuming_a_stored_selection_finishes_the_batch_and_nothing_else() {
+    // The reported bug, end to end: tick several files, die partway, resume,
+    // and get the rest of the batch rather than the rest of the folder.
+    let rig = Rig::new(SourcePolicy::Delete);
+    for name in ["a.mp4", "b.mp4", "c.mp4"] {
+        rig.write_source(name, b"in the batch");
+    }
+    rig.write_source("bystander.mp4", b"never chosen");
+    rig.journal
+        .set_files(rig.link.id, &["a.mp4", "b.mp4", "c.mp4"].map(PathBuf::from))
+        .unwrap();
+
+    // One of the batch already went before the crash; another was in flight.
+    rig.run_with(&mut FixedResolver(ConflictAction::Quarantine))
+        .unwrap();
+    assert!(!rig.src("a.mp4").exists());
+
+    // Everything from the batch is now at the destination and gone from the
+    // source, and the bystander was never touched.
+    assert!(rig.dest("c.mp4").exists());
+    assert!(
+        rig.src("bystander.mp4").exists(),
+        "a file outside the batch must survive the whole run"
+    );
+    assert!(!rig.dest("bystander.mp4").exists());
+
+    // Running again is a no-op rather than a re-walk of the folder.
+    let again = rig.run().unwrap();
+    assert_eq!(again.transferred, 0);
+    assert_eq!(
+        again.already_present, 0,
+        "the sources are gone, so nothing to do"
+    );
+    assert!(rig.src("bystander.mp4").exists());
+}
+
+/// Records everything the engine reports, so the order can be asserted.
+#[derive(Default)]
+struct Recorder {
+    plan: Vec<Planned>,
+    events: Vec<String>,
+    advances: Vec<(String, u64, u64)>,
+}
+
+impl Progress for Recorder {
+    fn planned(&mut self, files: &[Planned]) {
+        self.plan = files.to_vec();
+        self.events.push("planned".to_string());
+    }
+    fn starting(&mut self, path: &Path, _size: u64) {
+        self.events.push(format!("starting {}", path.display()));
+    }
+    fn advanced(&mut self, path: &Path, done: u64, total: u64) {
+        self.advances
+            .push((path.display().to_string(), done, total));
+    }
+    fn finished(&mut self, path: &Path, _outcome: FileOutcome) {
+        self.events.push(format!("finished {}", path.display()));
+    }
+}
+
+#[test]
+fn the_whole_plan_is_announced_once_before_the_first_file() {
+    // Without this the window can only show what has already happened, which
+    // is why an interrupted batch looked like a single file.
+    let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::LargestFirst);
+    rig.write_source("small.mp4", b"aa");
+    rig.write_source("big.mp4", b"aaaaaaaaaa");
+
+    let mut recorder = Recorder::default();
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut recorder,
+    )
+    .run()
+    .unwrap();
+
+    assert_eq!(
+        recorder.events.first().map(String::as_str),
+        Some("planned"),
+        "the plan must arrive before anything starts"
+    );
+    assert_eq!(
+        recorder.events.iter().filter(|e| *e == "planned").count(),
+        1
+    );
+    assert_eq!(
+        recorder
+            .plan
+            .iter()
+            .map(|p| p.path.display().to_string())
+            .collect::<Vec<_>>(),
+        vec!["big.mp4", "small.mp4"],
+        "and in the order the run will take them"
+    );
+    assert_eq!(recorder.plan[0].size, 10);
+}
+
+#[test]
+fn a_file_reports_its_progress_and_lands_exactly_on_its_total() {
+    // Throttling must not cost the last event: a bar that stops at 97% reads
+    // as a stall.
+    let rig = Rig::new(SourcePolicy::Delete);
+    let payload: Vec<u8> = (0..(5 * 1024 * 1024_u32))
+        .map(|n| (n % 251) as u8)
+        .collect();
+    rig.write_source("big.bin", &payload);
+
+    let mut recorder = Recorder::default();
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut recorder,
+    )
+    .run()
+    .unwrap();
+
+    let last = recorder.advances.last().expect("progress was reported");
+    assert_eq!(last.0, "big.bin");
+    assert_eq!(
+        last.1,
+        payload.len() as u64,
+        "the last report must be the whole file"
+    );
+    assert_eq!(last.1, last.2, "and done must equal total");
+
+    // Five chunks pass through the loop; a quarter-second throttle means the
+    // final report is normally the only one. What matters is that it is not
+    // one per chunk.
+    assert!(
+        recorder.advances.len() <= 5,
+        "expected throttling, got {} reports",
+        recorder.advances.len()
+    );
+}

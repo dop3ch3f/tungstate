@@ -135,13 +135,28 @@ onMounted(async () => {
 
 async function attach() {
   unlisten.push(
+    // The whole plan arrives before the first file, so the list shows what is
+    // waiting rather than growing one row at a time as things happen.
+    await on.planned((files) => {
+      rows.value = files.map((f) => ({
+        path: f.path, size: f.size, state: "waiting", detail: null, done: 0,
+      }));
+    }),
     await on.started((e) => {
       liveFile.value = e.path;
-      rows.value.unshift({ path: e.path, size: e.size, state: "live", detail: null });
+      const row = rows.value.find((r) => r.path === e.path);
+      if (row) { row.state = "live"; row.done = 0; }
+      // A file the plan did not mention: possible when a conflict lands it
+      // under another name. Better shown than dropped.
+      else rows.value.push({ path: e.path, size: e.size, state: "live", detail: null, done: 0 });
+    }),
+    await on.advanced((e) => {
+      const row = rows.value.find((r) => r.path === e.path);
+      if (row) { row.done = e.done; if (e.total) row.size = e.total; }
     }),
     await on.finished((e) => {
       const row = rows.value.find((r) => r.path === e.path && r.state === "live");
-      if (row) { row.state = e.outcome; row.detail = e.detail; }
+      if (row) { row.state = e.outcome; row.detail = e.detail; row.done = row.size; }
       if (liveFile.value === e.path) liveFile.value = null;
     }),
     await on.conflict((e) => { conflict.value = e; }),

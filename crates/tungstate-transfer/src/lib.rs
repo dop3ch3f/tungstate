@@ -23,7 +23,7 @@ use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use tungstate_backend::{Backend, BackendError};
 use tungstate_journal::{
@@ -37,6 +37,12 @@ const QUARANTINE_DIR: &str = ".tungstate-quarantine";
 /// Bytes moved per read. Large enough that syscall overhead disappears against
 /// a network round trip, small enough to stay out of the way in memory.
 const CHUNK: usize = 1024 * 1024;
+
+/// How often a file in flight reports its progress.
+///
+/// Four times a second: fast enough that a bar looks alive, slow enough that
+/// a long file costs a few hundred events rather than a few thousand.
+const PROGRESS_INTERVAL: Duration = Duration::from_millis(250);
 
 /// Anything that can stop a transfer.
 #[derive(Debug, thiserror::Error)]
@@ -163,10 +169,36 @@ pub struct Summary {
     pub destination_lost: bool,
 }
 
+/// One file the run intends to deal with, in the order it will be taken.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Planned {
+    /// Path relative to the source root.
+    pub path: PathBuf,
+    /// Size in bytes.
+    pub size: u64,
+}
+
 /// Told about each file as it is dealt with, so a caller can show progress.
 pub trait Progress {
+    /// The whole plan, once, before the first file.
+    ///
+    /// Defaulted because not every caller wants it, and because this arrived
+    /// after the trait had implementations. The moment matters: it is the only
+    /// point at which the full list and its order exist, so it is the only
+    /// chance to show what is *next* rather than what has already happened.
+    fn planned(&mut self, _files: &[Planned]) {}
+
     /// A file is about to be transferred.
     fn starting(&mut self, path: &Path, size: u64);
+
+    /// Bytes have moved for the file in flight.
+    ///
+    /// Throttled by the engine, not by the caller: a 4 GB file passes through
+    /// the streaming loop four thousand times, and the thing that knows how
+    /// often that is worth mentioning is the thing doing the work. Always
+    /// emitted once with `done == total`, so a bar can finish exactly.
+    fn advanced(&mut self, _path: &Path, _done: u64, _total: u64) {}
+
     /// A file has been dealt with.
     fn finished(&mut self, path: &Path, outcome: FileOutcome);
 }
@@ -302,10 +334,17 @@ pub fn preview(
 }
 
 /// Expand a chosen set into the files it covers.
+///
+/// A path that cannot be read is skipped rather than failing the run. On a
+/// resumed transfer that is the normal case: the files already moved are gone
+/// from the source, and their absence is the drain working, not a fault.
 fn gather(source: &dyn Backend, chosen: &[PathBuf]) -> Result<Vec<walk::File>> {
     let mut files = Vec::new();
     for path in chosen {
-        let meta = source.stat(path)?;
+        let Ok(meta) = source.stat(path) else {
+            tracing::debug!(path = %path.display(), "already gone from the source");
+            continue;
+        };
         if meta.is_dir {
             files.extend(walk::files_under(source, path)?);
         } else if !meta.is_symlink {
@@ -389,7 +428,17 @@ impl<'a> Transfer<'a> {
     /// way that should stop the run. Per-file conflicts are resolved rather than
     /// returned.
     pub fn run(&mut self) -> Result<Summary> {
-        let files = walk::files(self.source)?;
+        // The link's own record of what it was asked to move. Consulted here
+        // rather than passed in by every caller, because "remember to hand
+        // the right selection to the right run" is exactly what went wrong:
+        // a resumed browser transfer was handed nothing and walked the whole
+        // source root, past everything the user had actually chosen.
+        let chosen = self.journal.files_for(self.link.id)?;
+        let files = if chosen.is_empty() {
+            walk::files(self.source)?
+        } else {
+            gather(self.source, &chosen)?
+        };
         self.carry(files)
     }
 
@@ -402,19 +451,7 @@ impl<'a> Transfer<'a> {
     /// # Errors
     /// As [`Transfer::run`].
     pub fn run_selection(&mut self, chosen: &[PathBuf]) -> Result<Summary> {
-        let mut files = Vec::new();
-        for path in chosen {
-            let meta = self.source.stat(path)?;
-            if meta.is_dir {
-                files.extend(walk::files_under(self.source, path)?);
-            } else if !meta.is_symlink {
-                files.push(walk::File {
-                    path: path.clone(),
-                    size: meta.len,
-                    modified: meta.modified,
-                });
-            }
-        }
+        let files = gather(self.source, chosen)?;
         self.carry(files)
     }
 
@@ -429,6 +466,17 @@ impl<'a> Transfer<'a> {
         };
 
         walk::sort(&mut files, self.link.order);
+
+        // Everything, in the order it will happen, before anything happens.
+        self.progress.planned(
+            &files
+                .iter()
+                .map(|f| Planned {
+                    path: f.path.clone(),
+                    size: f.size,
+                })
+                .collect::<Vec<_>>(),
+        );
 
         for file in files {
             if self.cancelled() {
@@ -674,7 +722,7 @@ impl<'a> Transfer<'a> {
     }
 
     fn copy_verify_commit(
-        &self,
+        &mut self,
         file: &walk::File,
         destination: &Path,
         op: tungstate_journal::OpId,
@@ -725,7 +773,7 @@ impl<'a> Transfer<'a> {
     /// doing its own temp-and-rename, as `OpenDAL`'s FTP service does, never
     /// exposes the real name at all. The engine cannot tell, so it assumes
     /// the worst and recovery cleans up for both.
-    fn write_in_place(&self, file: &walk::File, destination: &Path) -> Result<String> {
+    fn write_in_place(&mut self, file: &walk::File, destination: &Path) -> Result<String> {
         let (hash, written) = self.stream(&file.path, destination)?;
 
         if let Err(error) = self.verify(file, destination, &hash, written) {
@@ -740,9 +788,11 @@ impl<'a> Transfer<'a> {
     ///
     /// One pass over the source produces both the copy and the hash; reading it
     /// twice would double the cost of the most expensive part of a drain.
-    fn stream(&self, source: &Path, destination: &Path) -> Result<(String, u64)> {
+    fn stream(&mut self, source: &Path, destination: &Path) -> Result<(String, u64)> {
+        let total = self.source.stat(source).map_or(0, |m| m.len);
         let mut reader = self.source.open_read(source)?;
         let mut writer = self.destination.create_write(destination)?;
+        let mut reported = Instant::now();
         let mut hasher = blake3::Hasher::new();
         let mut buffer = vec![0_u8; CHUNK];
         let mut written = 0_u64;
@@ -763,7 +813,19 @@ impl<'a> Transfer<'a> {
                     source: e,
                 })?;
             written += read as u64;
+
+            // Throttled here rather than in the caller. A 4 GB file passes
+            // through this loop four thousand times, and a window that redrew
+            // four thousand times would spend longer painting than copying.
+            if reported.elapsed() >= PROGRESS_INTERVAL {
+                reported = Instant::now();
+                self.progress.advanced(source, written, total);
+            }
         }
+
+        // Once at the end regardless of the throttle, so a bar lands on full
+        // rather than stopping at whatever the last tick happened to catch.
+        self.progress.advanced(source, written, written);
 
         // finish() consumes the writer, so it cannot be used afterwards, and it
         // fsyncs. Without that the bytes would only be in the page cache and a

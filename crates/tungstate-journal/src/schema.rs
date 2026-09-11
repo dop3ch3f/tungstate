@@ -79,6 +79,21 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE links ADD COLUMN dest_connection   INTEGER REFERENCES connections (id);
      ALTER TABLE ops   ADD COLUMN src_connection    INTEGER REFERENCES connections (id);
      ALTER TABLE ops   ADD COLUMN dst_connection    INTEGER REFERENCES connections (id);",
+    // v5: what a link was actually asked to move.
+    //
+    // Until now a selection existed only as a Vec passed to a worker thread,
+    // so it died with the process. That made an interrupted browser transfer
+    // unresumable as itself: with nothing to consult, a resumed run walked the
+    // whole source root and carried on past what the user had chosen.
+    //
+    // No rows for a link means the whole root, which is what a saved
+    // folder-pair means and what every link written before this already meant.
+    // Additive, so nothing needs backfilling.
+    "CREATE TABLE link_files (
+         link_id INTEGER NOT NULL REFERENCES links (id) ON DELETE CASCADE,
+         path    TEXT    NOT NULL,
+         PRIMARY KEY (link_id, path)
+     ) WITHOUT ROWID;",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

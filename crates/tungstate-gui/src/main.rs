@@ -677,16 +677,25 @@ fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<Stri
                 saved,
             })
             .map_err(describe)?;
+
+        // Written down, not carried in memory. A selection that only exists
+        // in a worker thread dies with the process, and a resumed run with
+        // nothing to consult walks the whole source root instead of the batch.
+        let created = state.journal.link_by_name(&name).map_err(describe)?;
+        let chosen: Vec<PathBuf> = request.legs[index]
+            .names
+            .iter()
+            .map(PathBuf::from)
+            .collect();
+        state
+            .journal
+            .set_files(created.id, &chosen)
+            .map_err(describe)?;
+
         names.push(name);
     }
 
-    let selections: Vec<Vec<PathBuf>> = request
-        .legs
-        .iter()
-        .map(|leg| leg.names.iter().map(PathBuf::from).collect())
-        .collect();
-
-    spawn_run(&app, names, selections)?;
+    spawn_run(&app, names)?;
     Ok(names_summary(&request))
 }
 
@@ -812,7 +821,7 @@ fn interrupted(state: State<'_, App>) -> Result<Vec<InterruptedView>, String> {
 /// case that would otherwise be unreachable: `list_links` hides unsaved links.
 #[tauri::command]
 fn resume_interrupted(link: String, app: AppHandle) -> Result<(), String> {
-    spawn_run(&app, vec![link], vec![Vec::new()])
+    spawn_run(&app, vec![link])
 }
 
 /// Abandon an interrupted run and reclaim what it left at the destination.
@@ -849,7 +858,7 @@ fn resolve_conflict(
 
 #[tauri::command]
 fn run_link(name: String, app: AppHandle) -> Result<(), String> {
-    spawn_run(&app, vec![name], vec![Vec::new()])
+    spawn_run(&app, vec![name])
 }
 
 /// Run each leg in turn on one worker thread, reporting a single combined result.
@@ -857,11 +866,7 @@ fn run_link(name: String, app: AppHandle) -> Result<(), String> {
 /// Sequential rather than parallel: two legs of an exchange can touch the same
 /// names, and running them at once would race. Each leg is its own link, so each
 /// is journaled and resumable on its own terms.
-fn spawn_run(
-    app: &AppHandle,
-    links: Vec<String>,
-    selections: Vec<Vec<PathBuf>>,
-) -> Result<(), String> {
+fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<(), String> {
     let state = app.state::<App>();
 
     // compare_exchange rather than load-then-store: two rapid clicks on Run
@@ -907,7 +912,7 @@ fn spawn_run(
         let mut total = Summary::default();
         let mut failure = None;
 
-        for (index, link) in queue.iter().enumerate() {
+        for link in &queue {
             let ends = backend_for(&link.source, &state.journal).and_then(|source| {
                 backend_for(&link.destination, &state.journal).map(|dest| (source, dest))
             });
@@ -918,8 +923,6 @@ fn spawn_run(
                     break;
                 }
             };
-            let chosen = selections.get(index).cloned().unwrap_or_default();
-
             let mut transfer = Transfer::new(
                 link,
                 source.as_ref(),
@@ -930,13 +933,7 @@ fn spawn_run(
             )
             .cancellable(Arc::clone(&cancel));
 
-            let outcome = if chosen.is_empty() {
-                transfer.run()
-            } else {
-                transfer.run_selection(&chosen)
-            };
-
-            match outcome {
+            match transfer.run() {
                 Ok(summary) => {
                     let stop = summary.cancelled || summary.destination_lost;
                     accumulate(&mut total, summary);

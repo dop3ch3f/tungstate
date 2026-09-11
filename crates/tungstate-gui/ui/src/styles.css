@@ -230,6 +230,16 @@ button, .chrome { user-select: none; }
 .ledger .detail { color: var(--dust-dim); font-size: 11.5px; }
 
 .state { white-space: nowrap; }
+.state.waiting { color: var(--dust-dim); }
+
+/* The per-file bar, kept small: the readout above is the headline, this is
+   only there so a long file does not look stalled. */
+.filebar {
+  display: inline-block; vertical-align: middle; width: 84px; height: 3px;
+  margin-left: 9px; border-radius: 2px; background: var(--seam); overflow: hidden;
+}
+.filebar > span { display: block; height: 100%; background: var(--fluoresce); transition: width 0.2s linear; }
+.pct { margin-left: 8px; font-family: var(--mono); font-size: 11px; color: var(--dust-dim); }
 .state.live { color: var(--fluoresce); }
 .state.transferred, .state.ok { color: var(--verified); }
 .state.skipped, .state.quarantined { color: var(--held); }

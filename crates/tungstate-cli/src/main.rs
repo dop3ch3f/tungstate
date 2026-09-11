@@ -641,7 +641,7 @@ fn run_link(
         &mut fixed
     };
 
-    let mut progress = CliProgress;
+    let mut progress = CliProgress::new();
     let outcome = Transfer::new(
         &link,
         source.as_ref(),
@@ -734,15 +734,89 @@ fn human_bytes(bytes: u64) -> String {
     }
 }
 
-struct CliProgress;
+/// Progress on one line per file, rewritten in place while it copies.
+#[derive(Default)]
+struct CliProgress {
+    /// The file in flight, so a progress line can name it.
+    current: Option<(String, u64)>,
+    /// Longest line drawn for this file, so the next one can cover it.
+    width: usize,
+    /// Rewriting in place only makes sense for a person watching. Piped to a
+    /// file, carriage returns turn a log into one unreadable line.
+    interactive: bool,
+}
 
-impl Progress for CliProgress {
-    fn starting(&mut self, path: &Path, size: u64) {
-        print!("  {} ({})... ", path.display(), human_bytes(size));
-        let _ = std::io::Write::flush(&mut std::io::stdout());
+impl CliProgress {
+    fn new() -> Self {
+        Self {
+            interactive: std::io::IsTerminal::is_terminal(&std::io::stdout()),
+            ..Self::default()
+        }
     }
 
-    fn finished(&mut self, _path: &Path, outcome: FileOutcome) {
+    /// Draw `line` over whatever was there, padded to cover it.
+    fn redraw(&mut self, line: &str) {
+        let pad = self.width.saturating_sub(line.len());
+        print!("\r{line}{:pad$}", "");
+        self.width = line.len();
+        let _ = std::io::Write::flush(&mut std::io::stdout());
+    }
+}
+
+impl Progress for CliProgress {
+    fn planned(&mut self, files: &[tungstate_transfer::Planned]) {
+        let total: u64 = files.iter().map(|f| f.size).sum();
+        println!("{} file(s), {} to move:", files.len(), human_bytes(total));
+        for file in files.iter().take(10) {
+            println!(
+                "  {:<52} {:>10}",
+                file.path.display(),
+                human_bytes(file.size)
+            );
+        }
+        if files.len() > 10 {
+            println!("  and {} more", files.len() - 10);
+        }
+        println!();
+    }
+
+    fn starting(&mut self, path: &Path, size: u64) {
+        self.current = Some((path.display().to_string(), size));
+        self.width = 0;
+        let line = format!("  {} ({})... ", path.display(), human_bytes(size));
+        if self.interactive {
+            self.redraw(&line);
+        } else {
+            print!("{line}");
+            let _ = std::io::Write::flush(&mut std::io::stdout());
+        }
+    }
+
+    fn advanced(&mut self, _path: &Path, done: u64, total: u64) {
+        // Nothing to watch on a file that finishes inside one report.
+        if !self.interactive || total < 8 * 1024 * 1024 || done == total {
+            return;
+        }
+        let Some((name, _)) = self.current.clone() else {
+            return;
+        };
+        let line = format!(
+            "  {name} ({} of {})... ",
+            human_bytes(done),
+            human_bytes(total)
+        );
+        self.redraw(&line);
+    }
+
+    fn finished(&mut self, path: &Path, outcome: FileOutcome) {
+        // Restore the settled line before the verdict, so a file that showed
+        // "2.1 GiB of 3.8 GiB" while copying does not keep saying it.
+        if self.interactive
+            && let Some((name, size)) = self.current.take()
+        {
+            let _ = path;
+            self.redraw(&format!("  {name} ({})... ", human_bytes(size)));
+        }
         println!(
             "{}",
             match outcome {

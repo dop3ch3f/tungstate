@@ -2,7 +2,14 @@
 import { computed } from "vue";
 import { bytes, type InterruptedRun, type Summary } from "../api";
 
-export interface Row { path: string; size: number; state: string; detail: string | null }
+export interface Row {
+  path: string;
+  size: number;
+  state: string;
+  detail: string | null;
+  /// Bytes transferred so far, for the file in flight.
+  done: number;
+}
 
 const props = defineProps<{
   rows: Row[];
@@ -19,10 +26,19 @@ const emit = defineEmits<{ stop: []; resume: [link: string]; discard: [link: str
 const reclaimed = computed(() =>
   props.rows.filter((r) => r.state === "transferred").reduce((n, r) => n + r.size, 0),
 );
-const done = computed(() => props.rows.filter((r) => r.state !== "live").length);
-const progress = computed(() => (props.rows.length ? (done.value / props.rows.length) * 100 : 0));
+const settled = computed(() =>
+  props.rows.filter((r) => r.state !== "live" && r.state !== "waiting").length,
+);
+// Bytes rather than file count: fifteen small files and one enormous one
+// would otherwise sit at 94% for most of the run.
+const totalBytes = computed(() => props.rows.reduce((n, r) => n + r.size, 0));
+const movedBytes = computed(() =>
+  props.rows.reduce((n, r) => n + (r.state === "waiting" ? 0 : r.state === "live" ? r.done : r.size), 0),
+);
+const progress = computed(() => (totalBytes.value ? (movedBytes.value / totalBytes.value) * 100 : 0));
 
 const word: Record<string, string> = {
+  waiting: "waiting",
   live: "copying",
   transferred: "verified",
   "already-present": "already there",
@@ -89,7 +105,7 @@ const word: Record<string, string> = {
           <div class="mass">{{ bytes(reclaimed) }}</div>
           <div class="unit">{{ props.summary?.cancelled ? "freed before stopping" : "freed from this machine" }}</div>
         </div>
-        <div class="count">{{ done }} of {{ props.rows.length }} files</div>
+        <div class="count">{{ settled }} of {{ props.rows.length }} files</div>
       </div>
       <div class="bar"><div :style="{ width: progress + '%' }"></div></div>
 
@@ -128,7 +144,17 @@ const word: Record<string, string> = {
               <div v-if="row.detail" class="detail">{{ row.detail }}</div>
             </td>
             <td class="num">{{ bytes(row.size) }}</td>
-            <td class="state" :class="row.state">{{ word[row.state] ?? row.state }}</td>
+            <td class="state" :class="row.state">
+              {{ word[row.state] ?? row.state }}
+              <!-- Only the file in flight gets a bar; a row that is waiting or
+                   finished says so in a word and needs no decoration. -->
+              <span v-if="row.state === 'live' && row.size" class="filebar">
+                <span :style="{ width: Math.min(100, (row.done / row.size) * 100) + '%' }"></span>
+              </span>
+              <span v-if="row.state === 'live' && row.size" class="pct">
+                {{ bytes(row.done) }} of {{ bytes(row.size) }}
+              </span>
+            </td>
           </tr>
         </tbody>
       </table>

@@ -675,3 +675,81 @@ fn a_remote_location_reads_with_the_separator_the_far_side_uses() {
         Path::new("/Users/x").join("a.mp4").display().to_string()
     );
 }
+
+#[test]
+fn a_selection_round_trips_and_replaces_rather_than_accumulates() {
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal.create_link(&a_link()).unwrap();
+
+    assert!(
+        journal.files_for(id).unwrap().is_empty(),
+        "no selection means the whole source root"
+    );
+
+    journal
+        .set_files(id, &[PathBuf::from("a.mp4"), PathBuf::from("b.mp4")])
+        .unwrap();
+    assert_eq!(
+        journal.files_for(id).unwrap(),
+        vec![PathBuf::from("a.mp4"), PathBuf::from("b.mp4")]
+    );
+
+    // Setting again replaces; it does not append.
+    journal.set_files(id, &[PathBuf::from("c.mp4")]).unwrap();
+    assert_eq!(journal.files_for(id).unwrap(), vec![PathBuf::from("c.mp4")]);
+
+    // And the same path twice is one queue entry, not two copies of the file.
+    journal
+        .set_files(id, &[PathBuf::from("d.mp4"), PathBuf::from("d.mp4")])
+        .unwrap();
+    assert_eq!(journal.files_for(id).unwrap(), vec![PathBuf::from("d.mp4")]);
+
+    journal.set_files(id, &[]).unwrap();
+    assert!(journal.files_for(id).unwrap().is_empty());
+}
+
+#[test]
+fn a_selection_belongs_to_its_own_link() {
+    let journal = Journal::open_in_memory().unwrap();
+    let mine = journal.create_link(&a_link()).unwrap();
+    let theirs = journal
+        .create_link(&NewLink {
+            name: "other".to_string(),
+            ..a_link()
+        })
+        .unwrap();
+
+    journal
+        .set_files(mine, &[PathBuf::from("mine.mp4")])
+        .unwrap();
+    assert_eq!(journal.files_for(mine).unwrap().len(), 1);
+    assert!(journal.files_for(theirs).unwrap().is_empty());
+}
+
+#[test]
+fn a_v4_journal_upgrades_to_v5_and_its_links_mean_the_whole_source() {
+    // The upgrade a user of v0.1.0-alpha.1 will take. Their links predate
+    // selections, and an empty selection is exactly what they already meant.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.db");
+    write_v3_journal(&path);
+    {
+        // v4 on top of the v3 fixture, as the released build would have left it.
+        let journal = Journal::open(&path).unwrap();
+        assert_eq!(journal.links().unwrap().len(), 1);
+    }
+
+    let journal = Journal::open(&path).unwrap();
+    let links = journal.links().unwrap();
+    assert_eq!(links.len(), 1, "the existing link must survive");
+    assert!(
+        journal.files_for(links[0].id).unwrap().is_empty(),
+        "and mean the whole source root, as it always did"
+    );
+
+    // The new table is usable on the upgraded file.
+    journal
+        .set_files(links[0].id, &[PathBuf::from("a.mp4")])
+        .unwrap();
+    assert_eq!(journal.files_for(links[0].id).unwrap().len(), 1);
+}

@@ -42,6 +42,8 @@ export interface Summary {
   failures: Failure[];
 }
 
+export interface PlannedFile { path: string; size: number }
+export interface Advanced { path: string; done: number; total: number }
 export interface Started { path: string; size: number }
 export interface Finished { path: string; outcome: string; detail: string | null }
 export interface ConflictAsk { path: string; incoming_size: number; existing_size: number }
@@ -128,6 +130,10 @@ export const api = {
 };
 
 export const on = {
+  planned: (f: (e: PlannedFile[]) => void) =>
+    listen<PlannedFile[]>("transfer://planned", (e) => f(e.payload)),
+  advanced: (f: (e: Advanced) => void) =>
+    listen<Advanced>("transfer://advanced", (e) => f(e.payload)),
   started: (f: (e: Started) => void) => listen<Started>("transfer://started", (e) => f(e.payload)),
   finished: (f: (e: Finished) => void) => listen<Finished>("transfer://finished", (e) => f(e.payload)),
   conflict: (f: (e: ConflictAsk) => void) => listen<ConflictAsk>("transfer://conflict", (e) => f(e.payload)),

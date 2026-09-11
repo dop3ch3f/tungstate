@@ -259,6 +259,59 @@ impl Journal {
         Ok(links)
     }
 
+    /// Record what a link was asked to move, replacing anything already there.
+    ///
+    /// Paths are relative to the link's source. An empty list clears the
+    /// selection, which restores the "whole source root" meaning rather than
+    /// meaning "move nothing" — there is no way to express the latter and no
+    /// use for one.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be written.
+    pub fn set_files(&self, link: LinkId, paths: &[PathBuf]) -> Result<()> {
+        let mut conn = self.lock();
+        let tx = conn
+            .transaction()
+            .map_err(query("recording a link's selection"))?;
+        tx.execute(
+            "DELETE FROM link_files WHERE link_id = ?1",
+            rusqlite::params![link.0],
+        )
+        .map_err(query("clearing a link's selection"))?;
+        {
+            let mut insert = tx
+                // The primary key makes a repeated path a no-op rather than a
+                // second copy of the same file in the queue.
+                .prepare("INSERT OR IGNORE INTO link_files (link_id, path) VALUES (?1, ?2)")
+                .map_err(query("recording a link's selection"))?;
+            for path in paths {
+                insert
+                    .execute(rusqlite::params![link.0, path_str(path)])
+                    .map_err(query("recording a link's selection"))?;
+            }
+        }
+        tx.commit().map_err(query("recording a link's selection"))
+    }
+
+    /// What a link was asked to move. Empty means the whole source root.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn files_for(&self, link: LinkId) -> Result<Vec<PathBuf>> {
+        let conn = self.lock();
+        let mut stmt = conn
+            .prepare("SELECT path FROM link_files WHERE link_id = ?1 ORDER BY path")
+            .map_err(query("reading a link's selection"))?;
+        let paths = stmt
+            .query_map(rusqlite::params![link.0], |row| {
+                row.get::<_, String>(0).map(PathBuf::from)
+            })
+            .map_err(query("reading a link's selection"))?
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(query("reading a link's selection"))?;
+        Ok(paths)
+    }
+
     /// Look a link up by id.
     ///
     /// # Errors

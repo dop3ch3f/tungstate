@@ -13,6 +13,21 @@ use tauri::{AppHandle, Emitter};
 use tungstate_journal::ConflictAction;
 use tungstate_transfer::{Conflict, ConflictResolver, FileOutcome, Progress, SkipReason};
 
+/// One file the run intends to deal with, in the order it will take them.
+#[derive(Debug, Clone, Serialize)]
+pub struct PlannedEvent {
+    pub path: String,
+    pub size: u64,
+}
+
+/// Bytes moved for the file in flight. Throttled by the engine.
+#[derive(Debug, Clone, Serialize)]
+pub struct AdvancedEvent {
+    pub path: String,
+    pub done: u64,
+    pub total: u64,
+}
+
 /// A file starting to transfer.
 #[derive(Debug, Clone, Serialize)]
 pub struct StartedEvent {
@@ -50,6 +65,30 @@ impl EventProgress {
 }
 
 impl Progress for EventProgress {
+    fn planned(&mut self, files: &[tungstate_transfer::Planned]) {
+        let _ = self.app.emit(
+            "transfer://planned",
+            files
+                .iter()
+                .map(|f| PlannedEvent {
+                    path: f.path.display().to_string(),
+                    size: f.size,
+                })
+                .collect::<Vec<_>>(),
+        );
+    }
+
+    fn advanced(&mut self, path: &Path, done: u64, total: u64) {
+        let _ = self.app.emit(
+            "transfer://advanced",
+            AdvancedEvent {
+                path: path.display().to_string(),
+                done,
+                total,
+            },
+        );
+    }
+
     fn starting(&mut self, path: &Path, size: u64) {
         // A failed emit means the window has gone. The engine keeps working;
         // losing a progress line is not a reason to abandon a drain.
