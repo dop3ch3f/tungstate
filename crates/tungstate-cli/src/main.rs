@@ -1,7 +1,6 @@
 //! The `tungstate` command line interface.
 
 mod connection;
-mod ends;
 
 use std::path::{Path, PathBuf};
 
@@ -9,8 +8,11 @@ use clap::{Args, Parser, Subcommand};
 use std::time::Duration;
 
 use tungstate_backend::Backend;
+// `ends` lives in the journal crate: it owns `Endpoint` and `Connection`,
+// `parse_end` needs a `Journal` anyway, and the window is now a third caller
+// of the same rules.
 use tungstate_journal::{
-    ConflictAction, Journal, Locator, Op, OpStatus, Order, SourcePolicy, VerifyLevel,
+    ConflictAction, Journal, Locator, Op, OpStatus, Order, SourcePolicy, VerifyLevel, ends,
 };
 use tungstate_secret::{EnvOverride, KeyringStore, MemoryStore, SecretStore};
 use tungstate_transfer::{

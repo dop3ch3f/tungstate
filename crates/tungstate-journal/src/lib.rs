@@ -15,9 +15,15 @@
 #[macro_use]
 pub mod links;
 pub mod connections;
+pub mod ends;
 mod schema;
 
-pub use connections::{Connection, ConnectionId, Endpoint, NewConnection, Scheme};
+pub use connections::{
+    Connection, ConnectionId, ConnectionSettings, Endpoint, NewConnection, Scheme,
+};
+pub use ends::{
+    EndError, connection_prefix, describe, join_display, parent_display, parse_end, place,
+};
 pub use links::{
     ConflictAction, Link, LinkId, NewLink, Order, SourcePolicy, VerifyLevel, temp_name,
 };

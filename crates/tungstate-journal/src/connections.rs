@@ -163,6 +163,42 @@ pub struct NewConnection {
     pub options: BTreeMap<String, String>,
 }
 
+/// Everything about a connection that can change after it is created.
+///
+/// The name is the key, not a field: it is what people typed into their link
+/// specs, and it derives the keychain account, so renaming is two migrations
+/// wearing one hat. Encoding that in the type is the point — this API cannot
+/// desynchronise the keychain from the journal because it cannot express a
+/// rename.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConnectionSettings {
+    /// Which protocol this speaks.
+    pub scheme: Scheme,
+    /// Hostname, for the schemes that have one.
+    pub host: Option<String>,
+    /// Port, where it differs from the protocol default.
+    pub port: Option<u16>,
+    /// Who we connect as, for the schemes that authenticate.
+    pub username: Option<String>,
+    /// The directory on the far side that every path is relative to.
+    pub root: String,
+    /// Per-scheme extras, passed through to the backend factory.
+    pub options: BTreeMap<String, String>,
+}
+
+impl From<&Connection> for ConnectionSettings {
+    fn from(connection: &Connection) -> Self {
+        Self {
+            scheme: connection.scheme,
+            host: connection.host.clone(),
+            port: connection.port,
+            username: connection.username.clone(),
+            root: connection.root.clone(),
+            options: connection.options.clone(),
+        }
+    }
+}
+
 /// One end of a link: which place, and where inside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Endpoint {
@@ -279,6 +315,72 @@ impl Journal {
                 source: other,
             },
         })
+    }
+
+    /// Replace everything about a connection that can change.
+    ///
+    /// A full replace of the mutable columns rather than a partial patch: a
+    /// form submits every field anyway, and partial-update semantics over
+    /// `Option<Option<T>>` is a well-known way to make "clear this field"
+    /// unreachable. The CLI layers its `--flag`-shaped partial UX on top.
+    ///
+    /// Allowed while links point at it, where deleting is refused: a link
+    /// references a connection by id, so editing where the connection goes
+    /// re-points every link at once, which is the whole reason to have the
+    /// indirection.
+    ///
+    /// # Errors
+    /// [`JournalError::UnknownConnection`] if there is no such row, or
+    /// [`JournalError::Query`] if the update fails.
+    pub fn update_connection(&self, name: &str, settings: &ConnectionSettings) -> Result<()> {
+        let conn = self.lock();
+        let changed = conn
+            .execute(
+                "UPDATE connections
+                    SET scheme = ?2, host = ?3, port = ?4,
+                        username = ?5, root = ?6, options = ?7
+                  WHERE name = ?1",
+                rusqlite::params![
+                    name,
+                    settings.scheme.as_str(),
+                    settings.host,
+                    settings.port.map(i64::from),
+                    settings.username,
+                    settings.root,
+                    encode_options(&settings.options),
+                ],
+            )
+            .map_err(query("updating a connection"))?;
+        if changed == 0 {
+            return Err(JournalError::UnknownConnection(name.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Names of the links pointing at a connection, so a refused delete can
+    /// say which.
+    ///
+    /// [`Journal::delete_connection`] leans on the foreign key, which knows
+    /// that something references the row but not what. "Remove these two
+    /// links first" is actionable where "it is in use" is a guessing game.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn links_using(&self, id: ConnectionId) -> Result<Vec<String>> {
+        let conn = self.lock();
+        let mut stmt = conn
+            .prepare(
+                "SELECT name FROM links
+                  WHERE source_connection = ?1 OR dest_connection = ?1
+                  ORDER BY name",
+            )
+            .map_err(query("listing the links using a connection"))?;
+        let names = stmt
+            .query_map(rusqlite::params![id.0], |row| row.get(0))
+            .map_err(query("listing the links using a connection"))?
+            .collect::<std::result::Result<Vec<String>, _>>()
+            .map_err(query("listing the links using a connection"))?;
+        Ok(names)
     }
 
     /// Every configured connection, in creation order.

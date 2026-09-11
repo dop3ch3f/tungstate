@@ -15,18 +15,22 @@
 
 mod bridge;
 
-use std::path::PathBuf;
+use std::collections::BTreeMap;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager, State};
+// `ends` is the shared reading of a composite location string. It lives in the
+// journal crate because that crate owns `Endpoint` and `Connection`, and
+// because the command line was already using every line of it.
 use tungstate_journal::{
-    ConflictAction, Endpoint, Journal, Link, Locator, NewLink, Op, OpStatus, Order, SourcePolicy,
-    VerifyLevel,
+    ConflictAction, Connection, ConnectionSettings, Endpoint, Journal, JournalError, Link, Locator,
+    NewConnection, NewLink, Op, OpStatus, Order, Scheme, SourcePolicy, VerifyLevel, ends,
 };
-use tungstate_secret::{EnvOverride, KeyringStore, SecretStore};
+use tungstate_secret::{EnvOverride, KeyringStore, SecretStore, connection_key};
 use tungstate_transfer::{IdenticalAction, Stop, Summary, Transfer};
 
 use bridge::{Answer, ConflictChannel, EventProgress, Reply, WindowResolver};
@@ -54,44 +58,17 @@ struct LinkView {
 
 impl LinkView {
     /// Needs the journal because a remote end is stored as an id, and the name
-    /// is what the window has to show. Slice 4d puts connections on screen.
+    /// is what the window has to show.
     fn of(link: &Link, journal: &Journal) -> Self {
         Self {
             name: link.name.clone(),
-            source: describe_end(&link.source, journal),
-            destination: describe_end(&link.destination, journal),
+            source: ends::describe(&link.source, journal),
+            destination: ends::describe(&link.destination, journal),
             source_policy: link.source_policy.as_str().to_string(),
             verify: link.verify.as_str().to_string(),
             order: link.order.as_str().to_string(),
             on_conflict: link.on_conflict.as_str().to_string(),
             cooldown_secs: link.cooldown.as_secs(),
-        }
-    }
-}
-
-/// How a link end is written on screen: a path, or `connection:path`.
-fn describe_end(end: &Endpoint, journal: &Journal) -> String {
-    match end.connection {
-        None => end.path.display().to_string(),
-        Some(id) => {
-            let name = journal
-                .connection_by_id(id)
-                .map_or_else(|_| format!("#{}", id.0), |c| c.name);
-            format!("{name}:{}", end.path.display())
-        }
-    }
-}
-
-/// Where one end of a recorded operation was, written the way the user would.
-fn place(location: &tungstate_journal::Location, journal: &Journal) -> String {
-    let full = location.display_path();
-    match location.connection {
-        None => full,
-        Some(id) => {
-            let name = journal
-                .connection_by_id(id)
-                .map_or_else(|_| format!("#{}", id.0), |c| c.name);
-            format!("{name}:{full}")
         }
     }
 }
@@ -140,8 +117,8 @@ impl OpView {
             }
             .to_string(),
             kind: format!("{:?}", op.kind).to_lowercase(),
-            source: op.source.as_ref().map(|l| place(l, journal)),
-            destination: op.destination.as_ref().map(|l| place(l, journal)),
+            source: op.source.as_ref().map(|l| ends::place(l, journal)),
+            destination: op.destination.as_ref().map(|l| ends::place(l, journal)),
             size: op.size,
             hash: op.hash.clone(),
             link: op.link.clone(),
@@ -235,31 +212,36 @@ fn create_link(form: NewLinkForm, state: State<'_, App>) -> Result<(), String> {
     let on_conflict =
         ConflictAction::parse(&form.on_conflict).ok_or("that conflict action is not one I know")?;
 
-    let source = PathBuf::from(&form.source);
-    let destination = PathBuf::from(&form.destination);
+    let route = resolve_route(&form.source, &form.destination, &state.journal)?;
+    refuse_impossible(&route, source_policy, on_conflict)?;
 
-    // Catching this here rather than at the first file means the mistake is
-    // visible while the form is still on screen.
-    if !source.is_dir() {
-        return Err(format!("{} is not a folder", source.display()));
+    // Through the backend rather than `Path::is_dir`: for a remote the
+    // question is whether the far side has a directory there, and this
+    // machine's filesystem has no opinion on that. Catching it here rather
+    // than at the first file means the mistake is visible while the form is
+    // still on screen.
+    let source_backend = backend_for(&route.source, &state.journal)?;
+    if !source_backend.stat(Path::new("")).map_err(describe)?.is_dir {
+        return Err(format!("{} is not a folder", form.source));
     }
-    if source == destination {
-        return Err("source and destination are the same folder".to_string());
-    }
-    // Both ends are local here, so plain path containment is the right test.
-    // The two-connection case lives in `plan_transfer`, which slice 4d widens.
-    if destination.starts_with(&source) {
-        return Err(
-            "the destination is inside the source, which would drain into itself".to_string(),
-        );
+
+    if route.source.connection == route.destination.connection {
+        if route.source.path == route.destination.path {
+            return Err("source and destination are the same folder".to_string());
+        }
+        if route.destination.path.starts_with(&route.source.path) {
+            return Err(
+                "the destination is inside the source, which would drain into itself".to_string(),
+            );
+        }
     }
 
     state
         .journal
         .create_link(&NewLink {
             name: form.name,
-            source: Endpoint::local(source),
-            destination: Endpoint::local(destination),
+            source: route.source,
+            destination: route.destination,
             source_policy,
             verify,
             order,
@@ -269,6 +251,231 @@ fn create_link(form: NewLinkForm, state: State<'_, App>) -> Result<(), String> {
         })
         .map(|_| ())
         .map_err(describe)
+}
+
+/// A connection as the window shows it.
+///
+/// `Connection` is not `Serialize` — the journal crate has no serde dependency
+/// and does not want one — so this is the same `*View` pattern `LinkView` and
+/// `OpView` use.
+///
+/// `encrypted` and `networked` are derived here rather than in TypeScript. The
+/// answer comes from `Scheme::is_encrypted`, which is the one place in the
+/// program that knows, and a second implementation in the front end would be a
+/// second thing to get wrong about a warning that matters.
+#[derive(Debug, Serialize)]
+struct ConnectionView {
+    name: String,
+    scheme: String,
+    host: Option<String>,
+    port: Option<u16>,
+    username: Option<String>,
+    root: String,
+    options: BTreeMap<String, String>,
+    encrypted: bool,
+    networked: bool,
+}
+
+impl From<Connection> for ConnectionView {
+    fn from(connection: Connection) -> Self {
+        Self {
+            name: connection.name,
+            scheme: connection.scheme.as_str().to_string(),
+            host: connection.host,
+            port: connection.port,
+            username: connection.username,
+            root: connection.root,
+            options: connection.options,
+            encrypted: connection.scheme.is_encrypted(),
+            networked: connection.scheme.is_networked(),
+        }
+    }
+}
+
+/// What the window sends to add or edit a connection.
+///
+/// `name` is present on an edit and ignored there: the command takes the name
+/// it is editing separately, because a rename would have to move the keychain
+/// entry too and [`ConnectionSettings`] deliberately cannot express one.
+#[derive(Debug, Deserialize)]
+struct ConnectionForm {
+    name: String,
+    scheme: String,
+    host: Option<String>,
+    port: Option<u16>,
+    username: Option<String>,
+    root: String,
+    options: BTreeMap<String, String>,
+}
+
+impl ConnectionForm {
+    fn settings(&self) -> std::result::Result<ConnectionSettings, String> {
+        Ok(ConnectionSettings {
+            scheme: Scheme::parse(&self.scheme).ok_or("the protocol must be fs, ftp or ftps")?,
+            // A blank field in a form is an empty string, not a missing value,
+            // and an empty hostname is a hostname nothing can connect to.
+            host: blank_to_none(self.host.as_deref()),
+            port: self.port,
+            username: blank_to_none(self.username.as_deref()),
+            root: self.root.clone(),
+            options: self.options.clone(),
+        })
+    }
+}
+
+fn blank_to_none(value: Option<&str>) -> Option<String> {
+    value
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(ToString::to_string)
+}
+
+/// What a reachability check found, for the row to report.
+#[derive(Debug, Serialize)]
+struct ProbeView {
+    entries: usize,
+    /// Which directory those entries were in. "reachable, 18 entries" is
+    /// useless when the 18 are the server's own `/bin` because the root was
+    /// left at its default, so the count never travels without it.
+    root: String,
+}
+
+#[tauri::command]
+fn list_connections(state: State<'_, App>) -> Result<Vec<ConnectionView>, String> {
+    state
+        .journal
+        .connections()
+        .map(|connections| connections.into_iter().map(Into::into).collect())
+        .map_err(describe)
+}
+
+/// Add a connection, and store its password if the protocol has one.
+///
+/// The secret crosses the Tauri IPC as a plain `String`. That boundary is
+/// in-process on localhost with the CSP locked to `'self'`, and a form has no
+/// alternative to offer. It is never put in a `tracing` field, and the Vue side
+/// clears its ref after submitting.
+#[tauri::command]
+fn add_connection(
+    form: ConnectionForm,
+    secret: Option<String>,
+    state: State<'_, App>,
+) -> Result<(), String> {
+    let settings = form.settings()?;
+    state
+        .journal
+        .create_connection(&NewConnection {
+            name: form.name.clone(),
+            scheme: settings.scheme,
+            host: settings.host,
+            port: settings.port,
+            username: settings.username,
+            root: settings.root,
+            options: settings.options,
+        })
+        .map_err(describe)?;
+
+    // The row is already written, so a keychain failure says plainly what did
+    // and did not happen rather than leaving the user to guess.
+    if settings.scheme.authenticates()
+        && let Some(secret) = secret.filter(|s| !s.is_empty())
+        && let Err(error) = secrets().set(&connection_key(&form.name), &secret)
+    {
+        return Err(format!(
+            "`{}` was saved, but its password was not: {}",
+            form.name,
+            describe(error)
+        ));
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn update_connection(
+    name: String,
+    form: ConnectionForm,
+    state: State<'_, App>,
+) -> Result<(), String> {
+    state
+        .journal
+        .update_connection(&name, &form.settings()?)
+        .map_err(describe)
+}
+
+/// Replace the stored password.
+///
+/// Offered unconditionally rather than only when one is missing: reading a
+/// keychain item from an unsigned binary prompts on macOS, so asking "does
+/// this have a password?" would put a system dialog on screen just to decide
+/// how to draw a button.
+#[tauri::command]
+fn set_connection_password(
+    name: String,
+    secret: String,
+    state: State<'_, App>,
+) -> Result<(), String> {
+    // Looked up first so a typo names itself rather than writing a keychain
+    // entry nothing will ever read.
+    state.journal.connection_by_name(&name).map_err(describe)?;
+    let key = connection_key(&name);
+    // A blank answer removes the password rather than storing an empty one,
+    // which would be a credential that exists and always fails.
+    let store = secrets();
+    if secret.is_empty() {
+        store.delete(&key).map_err(describe)
+    } else {
+        store.set(&key, &secret).map_err(describe)
+    }
+}
+
+/// Check a connection is reachable, without transferring anything.
+///
+/// A listing of the root, never a write: proving we can reach a NAS must not
+/// leave a file in it.
+#[tauri::command]
+fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, String> {
+    let connection = state.journal.connection_by_name(&name).map_err(describe)?;
+    let root = if connection.root.is_empty() {
+        "/".to_string()
+    } else {
+        connection.root.clone()
+    };
+    tungstate_backend_opendal::probe(&connection, &state.journal, &secrets())
+        .map(|entries| ProbeView { entries, root })
+        .map_err(describe)
+}
+
+/// Forget a connection, and the password that went with it.
+#[tauri::command]
+fn remove_connection(name: String, state: State<'_, App>) -> Result<(), String> {
+    let connection = state.journal.connection_by_name(&name).map_err(describe)?;
+
+    // The row first: if a link still points at it the foreign key refuses, and
+    // deleting the password before finding that out would break a live link.
+    match state.journal.delete_connection(&name) {
+        Ok(()) => {}
+        // The foreign key knows something references the row but not what.
+        // "Remove these two links first" is actionable where "it is in use" is
+        // a guessing game.
+        Err(JournalError::ConnectionInUse(_)) => {
+            let links = state.journal.links_using(connection.id).map_err(describe)?;
+            return Err(format!(
+                "`{name}` is still used by {}: {}. Remove {} first.",
+                plural(links.len(), "link", "links"),
+                links.join(", "),
+                if links.len() == 1 { "it" } else { "them" },
+            ));
+        }
+        Err(other) => return Err(describe(other)),
+    }
+
+    // A password left behind would be read by the next connection to take this
+    // name, which is not a credential anyone meant to reuse.
+    secrets().delete(&connection_key(&name)).map_err(describe)
+}
+
+fn plural(count: usize, one: &str, many: &str) -> String {
+    format!("{count} {}", if count == 1 { one } else { many })
 }
 
 /// One row in a browser pane.
@@ -333,7 +540,7 @@ fn remember_panes(panes: PaneState) {
 }
 
 #[tauri::command]
-fn places() -> Vec<Place> {
+fn places(state: State<'_, App>) -> Vec<Place> {
     let mut places = Vec::new();
     if let Some(home) = directories_home() {
         for (label, sub) in [
@@ -373,6 +580,18 @@ fn places() -> Vec<Place> {
         mounted.sort_by(|a, b| a.label.cmp(&b.label));
         places.append(&mut mounted);
     }
+    // Last, and on every platform. A connection is the route that works when
+    // the mount does not — and it is the only entry Windows and Linux get,
+    // where the volume scan above contributes nothing at all.
+    //
+    // `name:` is the connection's root written the way `parse_end` reads it,
+    // so this needs no new shape: a place is still a label and a location.
+    if let Ok(connections) = state.journal.connections() {
+        places.extend(connections.into_iter().map(|connection| Place {
+            path: format!("{}:", connection.name),
+            label: connection.name,
+        }));
+    }
     places
 }
 
@@ -381,26 +600,40 @@ fn directories_home() -> Option<PathBuf> {
 }
 
 /// List a directory for one side of the browser.
+///
+/// `path` is a composite location — `/Users/me/Videos` or `nas:inbox/2026` —
+/// read by the same parser the command line uses, so a pane and a link spec
+/// cannot disagree about what a string means.
 #[tauri::command]
 fn browse(path: String, state: State<'_, App>) -> Result<Listing, String> {
-    let root = PathBuf::from(&path);
+    listing_for(&path, &state.journal)
+}
+
+/// The body of [`browse`], without the `State` wrapper.
+///
+/// Split out so it can be tested: a `#[tauri::command]` needs an `AppHandle` to
+/// call, and this is the function where a mistake about what a location string
+/// means actually shows up.
+fn listing_for(path: &str, journal: &Journal) -> Result<Listing, String> {
+    let end = ends::parse_end(path, None, journal).map_err(describe)?;
+    // Canonical rather than whatever was typed: `nas:inbox/` and `nas:inbox`
+    // are the same place, and every child built below hangs off this one
+    // string.
+    let here = ends::describe(&end, journal);
+
     // A backend rooted at the directory being shown, so the same path rules
-    // that protect a transfer also apply to browsing. Through the factory
-    // rather than `LocalBackend::new`, so slice 4d can point a pane at a
-    // connection without touching this function.
-    let backend =
-        tungstate_backend_opendal::open(&Endpoint::local(root.clone()), &state.journal, &secrets())
-            .map_err(describe)?;
+    // that protect a transfer also apply to browsing.
+    let backend = tungstate_backend_opendal::open(&end, journal, &secrets()).map_err(describe)?;
 
     let mut entries: Vec<EntryView> = backend
-        .read_dir(std::path::Path::new(""))
+        .read_dir(Path::new(""))
         .map_err(describe)?
         .into_iter()
         .filter(|entry| !entry.meta.is_symlink)
         .map(|entry| {
             let name = entry.path.display().to_string();
             EntryView {
-                path: root.join(&entry.path).display().to_string(),
+                path: ends::join_display(&here, &name),
                 is_dir: entry.meta.is_dir,
                 size: entry.meta.len,
                 modified: entry.meta.modified.and_then(|t| {
@@ -423,8 +656,8 @@ fn browse(path: String, state: State<'_, App>) -> Result<Listing, String> {
     });
 
     Ok(Listing {
-        parent: root.parent().map(|p| p.display().to_string()),
-        path: root.display().to_string(),
+        parent: ends::parent_display(&here),
+        path: here,
         entries,
     })
 }
@@ -462,32 +695,111 @@ struct Plan {
     on_conflict: ConflictAction,
 }
 
+/// The parts of a transfer only the journal can answer: which places the two
+/// ends are in, and what the destination's protocol is able to do.
+///
+/// Resolved once and passed in so [`plan_transfer`] stays a pure function of
+/// its inputs, which is what makes it testable without a journal or a keychain.
+struct Route {
+    source: Endpoint,
+    destination: Endpoint,
+    /// `None` when the destination is this machine.
+    destination_scheme: Option<Scheme>,
+}
+
+/// Read a leg's two composite location strings and look up what they name.
+fn resolve_route(
+    source: &str,
+    destination: &str,
+    journal: &Journal,
+) -> std::result::Result<Route, String> {
+    let source = ends::parse_end(source, None, journal).map_err(describe)?;
+    let destination = ends::parse_end(destination, None, journal).map_err(describe)?;
+    let destination_scheme = destination
+        .connection
+        .map(|id| journal.connection_by_id(id).map(|c| c.scheme))
+        .transpose()
+        .map_err(describe)?;
+    Ok(Route {
+        source,
+        destination,
+        destination_scheme,
+    })
+}
+
+/// The two refusals the CLI makes when a link is created, made here too.
+///
+/// The window must not be able to create a link the command line would reject;
+/// the two surfaces are the same product and a rule that holds in only one of
+/// them is a rule nobody can rely on. Both are about the destination's
+/// protocol rather than its path, which is why they need [`Route`] and not
+/// just the endpoints.
+fn refuse_impossible(
+    route: &Route,
+    source_policy: SourcePolicy,
+    on_conflict: ConflictAction,
+) -> std::result::Result<(), String> {
+    // `trash::delete` drives this desktop's trash and knows nothing about a
+    // remote. Remote trash (`.tungstate-trash/`, DESIGN.md §4) is a later
+    // slice, so say so now rather than at the first file.
+    if source_policy == SourcePolicy::Trash && route.source.is_remote() {
+        return Err(
+            "moving originals to the trash needs a source on this machine, and this \
+                    one is on a connection. Choose to delete them once verified, or to leave \
+                    them alone."
+                .to_string(),
+        );
+    }
+
+    // `replace` keeps the file already there by moving it aside first, and
+    // moving needs rename, which FTP does not give us. Refused here rather
+    // than at the first clash, halfway through a drain.
+    if on_conflict == ConflictAction::Replace
+        && route
+            .destination_scheme
+            .is_some_and(|scheme| !scheme.can_rename())
+    {
+        return Err(
+            "this destination cannot move the file already there aside, so replacing \
+                    it is not something it can promise. Use set aside, keep both, or leave \
+                    that one here."
+                .to_string(),
+        );
+    }
+
+    Ok(())
+}
+
 /// Check a request from the window before anything touches the disk.
 ///
 /// Kept separate from the command so it can be tested. The nesting check is the
 /// one that matters: draining a folder into its own subfolder would feed the
 /// walk its own output.
-fn plan_transfer(request: &TransferRequest, leg: &Leg) -> std::result::Result<Plan, String> {
+fn plan_transfer(
+    request: &TransferRequest,
+    leg: &Leg,
+    route: Route,
+) -> std::result::Result<Plan, String> {
     let source_policy = SourcePolicy::parse(&request.source_policy)
         .ok_or("choose what happens to the originals")?;
     let verify = VerifyLevel::parse(&request.verify).ok_or("unknown verification level")?;
     let on_conflict =
         ConflictAction::parse(&request.on_conflict).ok_or("unknown conflict action")?;
 
-    let source = PathBuf::from(&leg.source);
-    let destination = PathBuf::from(&leg.destination);
-
     if leg.names.is_empty() {
         return Err("nothing is selected".to_string());
     }
 
-    let source = Endpoint::local(source);
-    let destination = Endpoint::local(destination);
+    refuse_impossible(&route, source_policy, on_conflict)?;
+    let Route {
+        source,
+        destination,
+        ..
+    } = route;
 
     // Scoped to one place on purpose. Path containment says nothing across two
     // different connections: `inbox` on the NAS is not inside `inbox` here, and
-    // refusing that pair would block the ordinary drain. Both ends are local in
-    // this slice; writing the guard this way is what stops slice 4d forgetting.
+    // refusing that pair would block the ordinary drain.
     if source.connection == destination.connection {
         if source.path == destination.path {
             return Err("those are the same folder".to_string());
@@ -555,7 +867,8 @@ fn preview_transfer(
     };
 
     for leg in &request.legs {
-        let plan = plan_transfer(&request, leg)?;
+        let route = resolve_route(&leg.source, &leg.destination, &state.journal)?;
+        let plan = plan_transfer(&request, leg, route)?;
 
         // A throwaway link carrying the chosen settings. Nothing is stored: a
         // preview must not leave a trace any more than it moves a file.
@@ -639,12 +952,17 @@ fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<Stri
     if request.legs.is_empty() {
         return Err("nothing is selected".to_string());
     }
+    let state = app.state::<App>();
+
     // Validate every leg before creating anything, so a bad second leg cannot
     // leave a half-configured exchange behind.
     let plans: Vec<Plan> = request
         .legs
         .iter()
-        .map(|leg| plan_transfer(&request, leg))
+        .map(|leg| {
+            resolve_route(&leg.source, &leg.destination, &state.journal)
+                .and_then(|route| plan_transfer(&request, leg, route))
+        })
         .collect::<std::result::Result<_, _>>()?;
 
     // Saving only makes sense for a single direction: a link is one source and
@@ -653,8 +971,6 @@ fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<Stri
     let stamp = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis());
-
-    let state = app.state::<App>();
     let mut names = Vec::new();
     for (index, plan) in plans.iter().enumerate() {
         let name = match (&request.save_as, saved) {
@@ -800,8 +1116,8 @@ fn interrupted(state: State<'_, App>) -> Result<Vec<InterruptedView>, String> {
             runs.iter()
                 .map(|run| InterruptedView {
                     link: run.link.name.clone(),
-                    source: describe_end(&run.link.source, &state.journal),
-                    destination: describe_end(&run.link.destination, &state.journal),
+                    source: ends::describe(&run.link.source, &state.journal),
+                    destination: ends::describe(&run.link.destination, &state.journal),
                     files: run.ops.len(),
                     bytes: run.bytes(),
                     names: run
@@ -1091,6 +1407,12 @@ fn main() {
             interrupted,
             resume_interrupted,
             discard_interrupted,
+            list_connections,
+            add_connection,
+            update_connection,
+            set_connection_password,
+            test_connection,
+            remove_connection,
         ])
         .run(tauri::generate_context!())
         .expect("the window could not start");
@@ -1118,10 +1440,27 @@ mod tests {
         }
     }
 
+    /// Both ends on this machine, which is what every path-containment case
+    /// below is about. Built by hand rather than through `resolve_route`: that
+    /// one needs a journal, and none of these rules do.
+    fn local(leg: &Leg) -> Route {
+        Route {
+            source: Endpoint::local(&leg.source),
+            destination: Endpoint::local(&leg.destination),
+            destination_scheme: None,
+        }
+    }
+
+    /// A connection id nothing looks up. Only its identity matters here: what
+    /// the guard compares is whether two ends are in the *same* place.
+    fn place(n: i64) -> tungstate_journal::ConnectionId {
+        tungstate_journal::ConnectionId(n)
+    }
+
     #[test]
     fn an_ordinary_transfer_is_accepted() {
         let r = request(vec![leg("/tmp/from", "/tmp/to")]);
-        assert!(plan_transfer(&r, &r.legs[0]).is_ok());
+        assert!(plan_transfer(&r, &r.legs[0], local(&r.legs[0])).is_ok());
     }
 
     #[test]
@@ -1134,7 +1473,7 @@ mod tests {
         ] {
             let r = request(vec![leg(from, to)]);
             assert!(
-                plan_transfer(&r, &r.legs[0]).is_err(),
+                plan_transfer(&r, &r.legs[0], local(&r.legs[0])).is_err(),
                 "`{from}` -> `{to}` should have been refused"
             );
         }
@@ -1145,25 +1484,25 @@ mod tests {
         // starts_with on paths compares components, so `videos-old` is not
         // inside `videos`. A naive string prefix check would refuse this.
         let r = request(vec![leg("/tmp/videos", "/tmp/videos-old")]);
-        assert!(plan_transfer(&r, &r.legs[0]).is_ok());
+        assert!(plan_transfer(&r, &r.legs[0], local(&r.legs[0])).is_ok());
     }
 
     #[test]
     fn an_empty_selection_is_refused() {
         let mut r = request(vec![leg("/tmp/from", "/tmp/to")]);
         r.legs[0].names.clear();
-        assert!(plan_transfer(&r, &r.legs[0]).is_err());
+        assert!(plan_transfer(&r, &r.legs[0], local(&r.legs[0])).is_err());
     }
 
     #[test]
     fn unknown_settings_are_refused_rather_than_guessed() {
         let mut r = request(vec![leg("/tmp/from", "/tmp/to")]);
         r.source_policy = "obliterate".to_string();
-        assert!(plan_transfer(&r, &r.legs[0]).is_err());
+        assert!(plan_transfer(&r, &r.legs[0], local(&r.legs[0])).is_err());
 
         let mut r = request(vec![leg("/tmp/from", "/tmp/to")]);
         r.verify = "vibes".to_string();
-        assert!(plan_transfer(&r, &r.legs[0]).is_err());
+        assert!(plan_transfer(&r, &r.legs[0], local(&r.legs[0])).is_err());
     }
 
     #[test]
@@ -1173,8 +1512,176 @@ mod tests {
             leg("/tmp/left", "/tmp/right"),
             leg("/tmp/right", "/tmp/right/inside"),
         ]);
-        assert!(plan_transfer(&r, &r.legs[0]).is_ok());
-        assert!(plan_transfer(&r, &r.legs[1]).is_err());
+        assert!(plan_transfer(&r, &r.legs[0], local(&r.legs[0])).is_ok());
+        assert!(plan_transfer(&r, &r.legs[1], local(&r.legs[1])).is_err());
+    }
+
+    #[test]
+    fn two_different_places_are_never_nested_in_each_other() {
+        // `inbox` on the NAS is not inside `/Users/me/inbox`, and path
+        // containment cannot tell. Refusing this pair would block the drain
+        // the whole program exists for.
+        let r = request(vec![leg("nas:inbox", "/Users/me/inbox")]);
+        let route = Route {
+            source: Endpoint::remote(place(1), "inbox"),
+            destination: Endpoint::local("/Users/me/inbox"),
+            destination_scheme: None,
+        };
+        assert!(plan_transfer(&r, &r.legs[0], route).is_ok());
+    }
+
+    #[test]
+    fn one_place_can_still_drain_into_itself() {
+        // The other half of the same rule: within one connection, containment
+        // means exactly what it means locally.
+        let r = request(vec![leg("nas:inbox", "nas:inbox/2026")]);
+        let route = Route {
+            source: Endpoint::remote(place(1), "inbox"),
+            destination: Endpoint::remote(place(1), "inbox/2026"),
+            destination_scheme: Some(Scheme::Ftp),
+        };
+        assert!(plan_transfer(&r, &r.legs[0], route).is_err());
+    }
+
+    #[test]
+    fn originals_on_a_connection_cannot_go_to_the_trash() {
+        // This desktop's trash knows nothing about a NAS, and there is no
+        // remote trash yet. Said while the dialog is open, not at the first
+        // file.
+        let mut r = request(vec![leg("nas:inbox", "/Users/me/inbox")]);
+        r.source_policy = "trash".to_string();
+        let route = Route {
+            source: Endpoint::remote(place(1), "inbox"),
+            destination: Endpoint::local("/Users/me/inbox"),
+            destination_scheme: None,
+        };
+        assert!(plan_transfer(&r, &r.legs[0], route).is_err());
+
+        // The same policy with a local source is the ordinary case.
+        let r = request(vec![leg("/Users/me/inbox", "nas:inbox")]);
+        let route = Route {
+            source: Endpoint::local("/Users/me/inbox"),
+            destination: Endpoint::remote(place(1), "inbox"),
+            destination_scheme: Some(Scheme::Ftp),
+        };
+        assert!(plan_transfer(&r, &r.legs[0], route).is_ok());
+    }
+
+    #[test]
+    fn replace_is_refused_where_nothing_can_be_moved_aside() {
+        // Replace keeps the file already there by renaming it first, and FTP
+        // gives us no rename. The CLI refuses this at link creation; so does
+        // the window, or the two surfaces disagree about the same link.
+        let mut r = request(vec![leg("/Users/me/inbox", "nas:inbox")]);
+        r.on_conflict = "replace".to_string();
+        let route = Route {
+            source: Endpoint::local("/Users/me/inbox"),
+            destination: Endpoint::remote(place(1), "inbox"),
+            destination_scheme: Some(Scheme::Ftp),
+        };
+        assert!(plan_transfer(&r, &r.legs[0], route).is_err());
+
+        // A destination that can rename takes it.
+        let route = Route {
+            source: Endpoint::local("/Users/me/inbox"),
+            destination: Endpoint::remote(place(1), "inbox"),
+            destination_scheme: Some(Scheme::Fs),
+        };
+        assert!(plan_transfer(&r, &r.legs[0], route).is_ok());
+    }
+
+    /// A journal with one `fs` connection rooted at a real directory.
+    ///
+    /// `fs` because it is the scheme that needs no password: the whole point is
+    /// to walk a *connection* rather than a local path, and no test in this
+    /// workspace may touch the developer's keychain.
+    fn journal_over(root: &std::path::Path) -> Journal {
+        let journal = Journal::open_in_memory().unwrap();
+        journal
+            .create_connection(&tungstate_journal::NewConnection {
+                name: "nas".to_string(),
+                scheme: Scheme::Fs,
+                host: None,
+                port: None,
+                username: None,
+                root: root.display().to_string(),
+                options: BTreeMap::new(),
+            })
+            .unwrap();
+        journal
+    }
+
+    #[test]
+    fn a_connection_root_lists_its_children_as_connection_paths() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join("inbox")).unwrap();
+        std::fs::write(home.path().join("a.mp4"), b"x").unwrap();
+        let journal = journal_over(home.path());
+
+        let listing = listing_for("nas:", &journal).unwrap();
+
+        assert_eq!(listing.path, "nas:", "the root writes as a bare name");
+        assert_eq!(
+            listing.parent, None,
+            "there is nothing above a connection's root, so Up is disabled"
+        );
+        // Folders first, then by name — and every child is a location the
+        // pane can be handed straight back.
+        let paths: Vec<&str> = listing.entries.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["nas:inbox", "nas:a.mp4"]);
+    }
+
+    #[test]
+    fn walking_into_a_connection_and_back_out_again_round_trips() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(home.path().join("inbox/2026")).unwrap();
+        std::fs::write(home.path().join("inbox/2026/holiday.mp4"), b"x").unwrap();
+        let journal = journal_over(home.path());
+
+        // Down two levels, taking each child's own path as the next location,
+        // which is exactly what a double-click in the pane does.
+        let first_child = |at: &str| listing_for(at, &journal).unwrap().entries[0].path.clone();
+        let inbox = first_child("nas:");
+        assert_eq!(inbox, "nas:inbox");
+        let year = first_child(&inbox);
+        assert_eq!(year, "nas:inbox/2026");
+
+        let deep = listing_for(&year, &journal).unwrap();
+        assert_eq!(deep.entries[0].path, "nas:inbox/2026/holiday.mp4");
+
+        // And back up, one Up-button click at a time, to the root and no
+        // further.
+        assert_eq!(deep.parent.as_deref(), Some("nas:inbox"));
+        let up = listing_for(deep.parent.as_deref().unwrap(), &journal).unwrap();
+        assert_eq!(up.parent.as_deref(), Some("nas:"));
+        assert_eq!(listing_for("nas:", &journal).unwrap().parent, None);
+    }
+
+    #[test]
+    fn a_local_pane_still_lists_native_paths() {
+        // The other half: nothing about this slice may change what a local
+        // pane shows, and a local child must read the way this machine spells
+        // a path.
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(home.path().join("a.mp4"), b"x").unwrap();
+        let journal = Journal::open_in_memory().unwrap();
+
+        let listing = listing_for(&home.path().display().to_string(), &journal).unwrap();
+        assert_eq!(
+            listing.entries[0].path,
+            home.path().join("a.mp4").display().to_string()
+        );
+        assert!(listing.parent.is_some(), "a temp dir has a parent");
+    }
+
+    #[test]
+    fn browsing_a_connection_that_does_not_exist_says_which_one() {
+        // The typo case. Answering with an empty listing, or with a local
+        // directory literally named `nsa:inbox`, would both be worse than
+        // saying the name is unknown.
+        let journal = Journal::open_in_memory().unwrap();
+        let error = listing_for("nsa:inbox", &journal).unwrap_err();
+        assert!(error.contains("nsa"), "the message names the typo: {error}");
     }
 
     #[test]

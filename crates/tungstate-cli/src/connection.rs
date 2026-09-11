@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use clap::Subcommand;
-use tungstate_journal::{Journal, NewConnection, Scheme};
+use tungstate_journal::{ConnectionSettings, Journal, NewConnection, Scheme};
 use tungstate_secret::{SecretStore, connection_key};
 
 use crate::fail;
@@ -38,6 +38,45 @@ pub enum ConnectionAction {
         /// Per-scheme extra, as `key=value`. Repeatable.
         #[arg(long = "option", value_name = "KEY=VALUE")]
         options: Vec<String>,
+        /// Read the password from stdin rather than prompting, for scripts.
+        #[arg(long)]
+        secret_stdin: bool,
+    },
+    /// Change a connection. Only the flags given are touched.
+    ///
+    /// There is deliberately no `--name`: the name is what link specs were
+    /// written against and what the keychain entry is filed under, so a rename
+    /// is two migrations wearing one hat. Remove and re-add instead.
+    Update {
+        /// The connection name.
+        name: String,
+        /// Which protocol it speaks.
+        #[arg(long)]
+        scheme: Option<String>,
+        /// Hostname, for the schemes that have one.
+        #[arg(long)]
+        host: Option<String>,
+        /// Port, where it differs from the protocol default.
+        #[arg(long)]
+        port: Option<u16>,
+        /// Who to connect as.
+        #[arg(long = "user")]
+        username: Option<String>,
+        /// Absolute path on the far side that every link path is relative to.
+        #[arg(long)]
+        root: Option<String>,
+        /// Set one per-scheme extra, as `key=value`. Repeatable.
+        #[arg(long = "option", value_name = "KEY=VALUE")]
+        options: Vec<String>,
+    },
+    /// Replace the stored password for a connection.
+    ///
+    /// The recovery path for a password that was mistyped or has since
+    /// changed: `connection remove` is refused while any link points at the
+    /// connection, so until now there was no way back from a refused login.
+    Password {
+        /// The connection name.
+        name: String,
         /// Read the password from stdin rather than prompting, for scripts.
         #[arg(long)]
         secret_stdin: bool,
@@ -82,6 +121,29 @@ pub fn run(action: ConnectionAction, journal: &Journal, secrets: &dyn SecretStor
                 secret_stdin,
             },
         ),
+        ConnectionAction::Update {
+            name,
+            scheme,
+            host,
+            port,
+            username,
+            root,
+            options,
+        } => update(
+            journal,
+            &UpdateArgs {
+                name,
+                scheme,
+                host,
+                port,
+                username,
+                root,
+                options,
+            },
+        ),
+        ConnectionAction::Password { name, secret_stdin } => {
+            password(journal, secrets, &name, secret_stdin)
+        }
         ConnectionAction::List => list(journal),
         ConnectionAction::Test { name } => test(journal, secrets, &name),
         ConnectionAction::Remove { name } => remove(journal, secrets, &name),
@@ -171,6 +233,128 @@ fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode
     ExitCode::SUCCESS
 }
 
+/// Grouped for the same reason [`AddArgs`] is.
+struct UpdateArgs {
+    name: String,
+    scheme: Option<String>,
+    host: Option<String>,
+    port: Option<u16>,
+    username: Option<String>,
+    root: Option<String>,
+    options: Vec<String>,
+}
+
+/// Partial CLI semantics over a journal API that is a full replace.
+///
+/// Read the row, overlay the flags that were given, write the whole settings
+/// struct back. The partial shape belongs here because a flag that was not
+/// typed means "leave it"; the journal takes every field because a form
+/// submits every field.
+fn update(journal: &Journal, args: &UpdateArgs) -> ExitCode {
+    let current = match journal.connection_by_name(&args.name) {
+        Ok(connection) => connection,
+        Err(error) => return fail(&error),
+    };
+
+    let scheme = match args.scheme.as_deref().map(Scheme::parse) {
+        None => current.scheme,
+        Some(Some(scheme)) => scheme,
+        Some(None) => {
+            eprintln!("error: --scheme must be fs, ftp or ftps");
+            return ExitCode::from(2);
+        }
+    };
+
+    // Merged rather than replaced: a repeatable key=value flag reads as "set
+    // this one", and there is no way to spell "and drop the others" that a
+    // second `--option` would not also mean. `--option k=` clears one value.
+    let mut options = current.options.clone();
+    for option in &args.options {
+        let Some((key, value)) = option.split_once('=') else {
+            eprintln!("error: --option must be written key=value, got `{option}`");
+            return ExitCode::from(2);
+        };
+        options.insert(key.to_string(), value.to_string());
+    }
+
+    let settings = ConnectionSettings {
+        scheme,
+        host: args.host.clone().or(current.host),
+        port: args.port.or(current.port),
+        username: args.username.clone().or(current.username),
+        root: args.root.clone().unwrap_or(current.root),
+        options,
+    };
+
+    if let Err(error) = journal.update_connection(&args.name, &settings) {
+        return fail(&error);
+    }
+
+    println!("updated connection `{}`", args.name);
+
+    // Two notes, both about a scheme change, because that is the edit whose
+    // consequences are not on the screen. Neither is an error.
+    if !scheme.is_encrypted() {
+        eprintln!(
+            "warning: `{}` sends your password and your files across the network unencrypted.",
+            scheme.as_str()
+        );
+    }
+    if scheme.authenticates() && !current.scheme.authenticates() {
+        println!(
+            "note: this scheme needs a password, and none is stored yet.\n      \
+             set one with: tungstate connection password {}",
+            args.name
+        );
+    }
+    println!("check it with: tungstate connection test {}", args.name);
+    ExitCode::SUCCESS
+}
+
+/// Replace the stored password, leaving the row alone.
+///
+/// The connection is looked up first so a typo names itself rather than
+/// writing a keychain entry nothing will ever read.
+fn password(
+    journal: &Journal,
+    secrets: &dyn SecretStore,
+    name: &str,
+    from_stdin: bool,
+) -> ExitCode {
+    let connection = match journal.connection_by_name(name) {
+        Ok(connection) => connection,
+        Err(error) => return fail(&error),
+    };
+    if !connection.scheme.authenticates() {
+        eprintln!(
+            "error: `{name}` speaks {}, which does not authenticate, so a password would \
+             never be read",
+            connection.scheme.as_str()
+        );
+        return ExitCode::from(2);
+    }
+
+    let typed = match read_secret(name, from_stdin) {
+        Ok(secret) => secret,
+        Err(error) => {
+            eprintln!("error: could not read a password: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+
+    if let Err(error) = store_password(secrets, name, typed.as_deref()) {
+        eprintln!("error: the password for `{name}` was not saved: {error}");
+        return ExitCode::FAILURE;
+    }
+
+    match typed {
+        Some(_) => println!("stored a new password for `{name}`"),
+        None => println!("removed the stored password for `{name}`"),
+    }
+    println!("check it with: tungstate connection test {name}");
+    ExitCode::SUCCESS
+}
+
 fn list(journal: &Journal) -> ExitCode {
     match journal.connections() {
         Ok(connections) if connections.is_empty() => {
@@ -257,6 +441,25 @@ fn remove(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode 
     ExitCode::SUCCESS
 }
 
+/// Apply a typed answer to the store.
+///
+/// Its own function because it is the part worth testing: `password` above is
+/// a prompt and two lookups around it, and neither a prompt nor the machine's
+/// real keychain belongs in a test.
+///
+/// A blank answer removes the stored password rather than storing an empty
+/// one, which is the rule `add` already follows for a blank prompt.
+fn store_password(
+    secrets: &dyn SecretStore,
+    name: &str,
+    typed: Option<&str>,
+) -> tungstate_secret::Result<()> {
+    match typed {
+        Some(secret) => secrets.set(&connection_key(name), secret),
+        None => secrets.delete(&connection_key(name)),
+    }
+}
+
 /// Read a password without it ever becoming a command-line argument.
 ///
 /// An argument would land in shell history and be visible in `ps` to every
@@ -270,4 +473,41 @@ fn read_secret(name: &str, from_stdin: bool) -> std::io::Result<Option<String>> 
     }
     let typed = rpassword::prompt_password(format!("password for {name} (blank for none): "))?;
     Ok((!typed.is_empty()).then_some(typed))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tungstate_secret::MemoryStore;
+
+    /// The end-to-end suite cannot see this: `TUNGSTATE_SECRETS=memory` is
+    /// per-process, so what one `tungstate` invocation stores is gone before
+    /// the next one starts. In-process is where the replacement is visible.
+    #[test]
+    fn a_new_password_replaces_the_one_already_stored() {
+        let store = MemoryStore::new();
+        let key = connection_key("nas");
+
+        store_password(&store, "nas", Some("first")).unwrap();
+        assert_eq!(store.get(&key).unwrap().as_deref(), Some("first"));
+
+        store_password(&store, "nas", Some("second")).unwrap();
+        assert_eq!(
+            store.get(&key).unwrap().as_deref(),
+            Some("second"),
+            "the recovery path: a mistyped password must be correctable"
+        );
+    }
+
+    #[test]
+    fn a_blank_answer_removes_the_stored_password() {
+        // Not an empty string in the keychain, which would be a credential
+        // that exists and always fails rather than no credential at all.
+        let store = MemoryStore::new();
+        let key = connection_key("nas");
+
+        store_password(&store, "nas", Some("first")).unwrap();
+        store_password(&store, "nas", None).unwrap();
+        assert_eq!(store.get(&key).unwrap(), None);
+    }
 }
