@@ -6,8 +6,6 @@ silently kill work in progress.
 
 **Runnable outcome:** kill the app mid-drain, reopen it, and the Transfers tab
 says what was interrupted with a **Resume** and a **Clean up** beside it.
-Close the window during a run and the drain keeps going; the window comes back
-when it finishes.
 
 **This brief is the spec.** The tour is in [04d-tour.md](04d-tour.md).
 
@@ -65,16 +63,17 @@ shared part moves into one function so the two cannot drift — a sweep that
 matches in one path and not the other is how a file gets deleted that should
 not have been.
 
-**Closing the window during a run hides it; the run continues.** The window is
-shown again when the run ends, so a hidden window is never stranded for longer
-than the work. On macOS clicking the dock icon brings it back sooner. Quitting
-properly still stops the drain, which is safe — that is what the journal and
-resume are for — and the release notes say so.
+**The window and the run are the same thing, and closing one ends the other.**
+Hiding the window so a drain could continue invisibly was built and then
+backed out. It buys a half-daemon: on Windows and Linux there is no dock icon,
+so a hidden window has no way back until the run ends, and "the app is still
+doing something, somewhere" is a worse thing to be unsure about than "closing
+stops it".
 
-**Known gap, stated rather than hidden:** on Windows and Linux there is no dock
-icon, so between closing the window and the run finishing there is no way to
-bring it back. The proper fix is a tray icon, which is its own piece of work.
-Auto-showing on completion is what keeps this acceptable meanwhile.
+So closing stops it, plainly. That is only acceptable *because* of the rest of
+this slice: the operation stays `intended`, nothing is lost, and the next
+launch offers to finish or clear it. Making an interruption cheap is what
+earns the right to make closing simple. A real daemon is slice 10.
 
 ## Shape
 
@@ -85,9 +84,8 @@ Auto-showing on completion is what keeps this acceptable meanwhile.
   into one shared function, and a public `discard(link, destination, journal)`
   that runs it and reports what it removed.
 - **`tungstate-gui`.** Commands `interrupted`, `resume_interrupted`,
-  `discard_interrupted`. A banner in the Transfers tab. `on_window_event`
-  hides rather than closes while a run is in progress, and the run's completion
-  shows the window again.
+  `discard_interrupted`, and a banner in the Transfers tab. No window-close
+  handler: the default behaviour is the decided behaviour.
 - **`tungstate-cli`.** The same two verbs, because the CLI must not be the
   weaker client: `tungstate link resume` listing interrupted work, and
   `tungstate link discard <name>`.
@@ -119,10 +117,14 @@ Auto-showing on completion is what keeps this acceptable meanwhile.
       and the partial is gone
 - [ ] By hand: kill a drain, reopen, clean up, and confirm the space is back
       and nothing was re-copied
-- [ ] By hand: close the window mid-run and confirm the drain continues
+- [ ] By hand: close the window mid-run, reopen, and confirm the banner offers
+      the interrupted file
 
 ## Out of scope
 
-A daemon, so a drain survives quitting: slice 10. A tray icon for Windows and
-Linux. Byte-offset resume, so a resumed file continues rather than restarting.
-Connections in the desktop app, which moves to slice 4e.
+A daemon, so a drain survives closing the window: slice 10, and the reason
+closing stops it today. Byte-offset resume, so a resumed file continues rather
+than restarting from the beginning. A confirmation prompt before closing
+mid-run — worth considering once there is evidence anyone loses work to it,
+and a few lines when that day comes. Connections in the desktop app, which
+moves to slice 4e.

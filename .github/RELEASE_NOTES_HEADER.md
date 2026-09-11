@@ -51,6 +51,12 @@ tungstate link add ~/Videos nas:inbox --name drain --move --verify readback
 went. Kill a run at any moment and start it again; nothing is lost and nothing
 is copied twice.
 
+**Closing the desktop window stops the transfer.** There is no background
+service yet, so the engine runs inside the app. Nothing is lost when you do:
+reopen it and the Transfers tab names what was left unfinished, with a button
+to finish it and a button to clear it. The command line has the same two:
+`tungstate link unfinished` and `tungstate link discard <name>`.
+
 ## What does not work yet
 
 The governance half of the design — declaring a shape for a folder and having
