@@ -5136,7 +5136,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tungstate-api"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "proptest",
  "serde",
@@ -5145,7 +5145,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-backend"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "proptest",
  "tempfile",
@@ -5154,7 +5154,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-backend-opendal"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "futures-util",
  "opendal",
@@ -5170,7 +5170,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-cli"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -5191,7 +5191,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-gui"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "directories",
  "serde",
@@ -5210,7 +5210,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-journal"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "directories",
  "rusqlite",
@@ -5221,7 +5221,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-secret"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "keyring",
  "thiserror 2.0.20",
@@ -5229,7 +5229,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-transfer"
-version = "0.1.0-alpha.1"
+version = "0.1.0-alpha.2"
 dependencies = [
  "blake3",
  "tempfile",

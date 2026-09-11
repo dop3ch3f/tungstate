@@ -28,6 +28,13 @@ chmod +x tungstate && ./tungstate --version
 
 Pick the `arm64` macOS build for Apple silicon and `x86_64` for Intel.
 
+## If you installed v0.1.0-alpha.1
+
+Replace it. Its desktop app could not display a transfer at all: Tauri
+resolved an empty permission list, so the window was denied `event.listen` and
+never heard a thing from the engine. Drains ran correctly and invisibly. The
+Activity view was also unstyled and could not scroll. Both are fixed here.
+
 ## What works today
 
 A durable drain: move files from one place to another, verify each one before
@@ -50,6 +57,18 @@ tungstate link add ~/Videos nas:inbox --name drain --move --verify readback
 `tungstate log <path>` and `tungstate whereis <path|hash>` answer where a file
 went. Kill a run at any moment and start it again; nothing is lost and nothing
 is copied twice.
+
+Several files move at once. How many is decided by asking the destination how
+many connections it will accept, before the first file — so a server with a low
+limit is discovered by a refused handshake rather than by a failed transfer. A
+local folder is never probed and uses four; FTP starts at two and climbs. On
+300 small files over FTP that is about 2.4 times faster than one at a time.
+`--parallel N` raises the ceiling, and never disables the back-off.
+
+If a run is interrupted, the next launch names what was left unfinished and
+offers to finish it or clear it. A transfer started from the browser now
+remembers which files you picked, so resuming takes your batch rather than
+everything in the folder.
 
 **Closing the desktop window stops the transfer.** There is no background
 service yet, so the engine runs inside the app. Nothing is lost when you do:
