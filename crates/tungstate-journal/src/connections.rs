@@ -28,13 +28,80 @@ pub enum Scheme {
     /// A directory on some filesystem this machine can already reach, driven
     /// through `OpenDAL` rather than through `std::fs`.
     Fs,
-    /// File Transfer Protocol. Registered in slice 4c.
+    /// File Transfer Protocol, in the clear.
     Ftp,
+    /// FTP over TLS. Its own value rather than an option on [`Scheme::Ftp`]
+    /// because plain FTP sends the password across the wire in clear text, so
+    /// which one a connection uses has to be visible at a glance in
+    /// `connection list`, not buried in an options blob.
+    Ftps,
 }
 
 // The same spellings serve the database and the CLI, so a stored value is
 // always a value the user could have typed.
-string_enum!(Scheme { Fs => "fs", Ftp => "ftp" });
+string_enum!(Scheme { Fs => "fs", Ftp => "ftp", Ftps => "ftps" });
+
+impl Scheme {
+    /// Whether this scheme has a password worth keeping in the keychain.
+    #[must_use]
+    pub fn authenticates(self) -> bool {
+        match self {
+            Self::Fs => false,
+            Self::Ftp | Self::Ftps => true,
+        }
+    }
+
+    /// Whether credentials and content are encrypted in transit.
+    #[must_use]
+    pub fn is_encrypted(self) -> bool {
+        match self {
+            // Local, so nothing crosses a wire in the first place.
+            Self::Fs | Self::Ftps => true,
+            Self::Ftp => false,
+        }
+    }
+
+    /// Whether this scheme can move a file into place without copying it.
+    ///
+    /// False for FTP not because the protocol lacks `RNFR`/`RNTO` but because
+    /// `OpenDAL`'s FTP service answers `rename` with `Unsupported`. The CLI uses
+    /// this to refuse `--on-conflict replace` when the link is created rather
+    /// than at the first clash; the engine checks the backend's own
+    /// capabilities, which is the authority.
+    #[must_use]
+    pub fn can_rename(self) -> bool {
+        match self {
+            Self::Fs => true,
+            Self::Ftp | Self::Ftps => false,
+        }
+    }
+
+    /// Whether the far side can checksum a file for us.
+    ///
+    /// FTP cannot, so `--verify hash` there only ever attests to the bytes
+    /// that were sent, not to the bytes that landed.
+    #[must_use]
+    pub fn has_native_checksum(self) -> bool {
+        match self {
+            // Not a checksum, but reading the file back is free and local, so
+            // `hash` is not misleading the way it is over a network.
+            Self::Fs => true,
+            Self::Ftp | Self::Ftps => false,
+        }
+    }
+
+    /// The port used when the connection does not name one.
+    #[must_use]
+    pub fn default_port(self) -> Option<u16> {
+        match self {
+            Self::Fs => None,
+            // Explicit FTPS (`AUTH TLS`) upgrades an ordinary control
+            // connection, so it uses 21 too. Implicit FTPS on 990 is legacy
+            // and servers that need it can be given `--port 990`.
+            Self::Ftp | Self::Ftps => Some(21),
+        }
+    }
+}
 
 /// A scheme spelling this build does not know, which means a newer tungstate
 /// wrote the row.

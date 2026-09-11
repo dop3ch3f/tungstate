@@ -6,11 +6,21 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+[features]
+default = ["ftp"]
+# FTP is on by default because a release binary has to be able to reach a NAS.
+# It stays a feature so a smaller build is possible, and so `SchemeNotCompiled`
+# means something rather than being a placeholder.
+ftp = ["opendal/services-ftp"]
+
 [dependencies]
 tungstate-backend = { path = "../tungstate-backend" }
 tungstate-journal = { path = "../tungstate-journal" }
 tungstate-secret = { path = "../tungstate-secret" }
 opendal = { workspace = true }
+# `BufferStream` is a `futures_core::Stream`, and pulling one item needs the
+# extension trait. One RETR per file instead of one per megabyte.
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }

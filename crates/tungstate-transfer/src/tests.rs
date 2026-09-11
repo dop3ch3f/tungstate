@@ -1184,3 +1184,270 @@ fn a_connection_that_changes_underneath_us_stops_the_drain() {
     let left = std::fs::read_dir(rig.source_dir.path()).unwrap().count();
     assert!(left >= 3, "originals must survive, {left} left");
 }
+
+// ---------------------------------------------------------------------------
+// Backends that cannot rename. FTP is the reason these exist, but nothing here
+// needs FTP: a fake that reports `atomic_rename: false` exercises every engine
+// path that FTP will take, on all three platforms with no server.
+// ---------------------------------------------------------------------------
+
+/// Any backend, with rename removed.
+///
+/// Both halves matter. Reporting `atomic_rename: false` is what steers the
+/// engine, and making `rename` actually fail is what proves the engine really
+/// stopped calling it rather than merely reading the flag.
+struct NoRenameBackend(Box<dyn Backend>);
+
+impl NoRenameBackend {
+    fn local(root: &Path) -> Self {
+        Self(Box::new(LocalBackend::new(root.to_path_buf())))
+    }
+}
+
+impl Backend for NoRenameBackend {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        tungstate_backend::Capabilities {
+            atomic_rename: false,
+            ..self.0.capabilities()
+        }
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        self.0.root_token()
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.0.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.0.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.0.open_read(path)
+    }
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
+        self.0.create_write(path)
+    }
+    fn rename(&self, from: &Path, _to: &Path) -> tungstate_backend::Result<()> {
+        Err(tungstate_backend::BackendError::Remote {
+            endpoint: "no-rename".to_string(),
+            operation: "rename",
+            source: format!("`{}` cannot be renamed here", from.display()).into(),
+        })
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_destination_that_cannot_rename_still_drains() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("holiday.mp4", b"a video");
+    rig.write_source("2024/trip.mp4", b"another video");
+
+    let summary = rig
+        .run_over(&NoRenameBackend::local(rig.dest_dir.path()))
+        .unwrap();
+
+    assert_eq!(summary.transferred, 2);
+    assert_eq!(std::fs::read(rig.dest("holiday.mp4")).unwrap(), b"a video");
+    assert_eq!(
+        std::fs::read(rig.dest("2024/trip.mp4")).unwrap(),
+        b"another video"
+    );
+    assert!(!rig.src("holiday.mp4").exists());
+}
+
+#[test]
+fn a_destination_that_cannot_rename_writes_no_part_file() {
+    // The engine must not write to a temp name it can never move. Doing so
+    // would leave a `.part` beside every file, forever.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("holiday.mp4", b"a video");
+
+    rig.run_over(&NoRenameBackend::local(rig.dest_dir.path()))
+        .unwrap();
+
+    let leftovers: Vec<_> = std::fs::read_dir(rig.dest_dir.path())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().to_string_lossy().into_owned())
+        .filter(|name| name.contains("tungstate"))
+        .collect();
+    assert!(leftovers.is_empty(), "left partials behind: {leftovers:?}");
+}
+
+#[test]
+fn a_source_survives_a_failed_verification_without_rename() {
+    // The guarantee the project exists for, on the path FTP will take.
+    let rig = Rig::with(
+        SourcePolicy::Delete,
+        VerifyLevel::Readback,
+        Order::LargestFirst,
+    );
+    rig.write_source("holiday.mp4", b"irreplaceable");
+
+    let corrupting = CorruptingBackend(Box::new(NoRenameBackend::local(rig.dest_dir.path())));
+    let summary = rig.run_over(&corrupting).unwrap();
+
+    assert_eq!(summary.failed, 1);
+    assert_eq!(summary.transferred, 0);
+    assert!(
+        rig.src("holiday.mp4").exists(),
+        "source deleted despite failed verification"
+    );
+    assert!(
+        !rig.dest("holiday.mp4").exists(),
+        "the bad copy must not be left under the real name"
+    );
+}
+
+#[test]
+fn an_interrupted_run_resumes_without_rename() {
+    // Without a temp name the partial can only be under the real name, so
+    // recovery has to delete that instead. The source is untouched either way,
+    // which is what makes deleting it safe.
+    let rig = Rig::new(SourcePolicy::Delete);
+    let destination = NoRenameBackend::local(rig.dest_dir.path());
+
+    rig.write_source("interrupted.mp4", b"was in flight");
+    let op = rig
+        .journal
+        .begin(&tungstate_journal::NewOp {
+            kind: tungstate_journal::OpKind::Move,
+            source: Some(tungstate_journal::Location::within(
+                &rig.link.source,
+                "interrupted.mp4",
+            )),
+            destination: Some(tungstate_journal::Location::within(
+                &rig.link.destination,
+                "interrupted.mp4",
+            )),
+            size: Some(13),
+            link: Some(rig.link.name.clone()),
+            link_id: Some(rig.link.id),
+        })
+        .unwrap();
+    // A partial under the real name, plus the randomly-named orphan a backend
+    // doing its own temp-and-rename would have left beside it.
+    rig.write_dest("interrupted.mp4", b"half a fi");
+    rig.write_dest("interrupted.mp4.k3xq9wpz", b"half a fi");
+    let _ = op;
+
+    let summary = rig.run_over(&destination).unwrap();
+
+    assert_eq!(summary.recovered, 1);
+    assert_eq!(
+        std::fs::read(rig.dest("interrupted.mp4")).unwrap(),
+        b"was in flight",
+        "the interrupted file must land complete, not appended to"
+    );
+    assert!(
+        !rig.dest("interrupted.mp4.k3xq9wpz").exists(),
+        "the abandoned temporary file must be swept"
+    );
+    assert!(!rig.src("interrupted.mp4").exists());
+    assert!(rig.journal.incomplete().unwrap().is_empty());
+}
+
+#[test]
+fn the_sweep_only_removes_what_a_backend_actually_left() {
+    // A pattern this narrow is the only thing standing between "tidy up after
+    // a crash" and "delete one of the user's files".
+    assert!(is_orphan_temp("a.mp4.k3xq9wpz", "a.mp4"));
+    assert!(is_orphan_temp("a.mp4.00000000", "a.mp4"));
+
+    for innocent in [
+        "a.mp4",           // the file itself
+        "a.mp4.txt",       // a real sibling, three characters
+        "a.mp4.backup",    // six
+        "a.mp4.k3xq9wpzz", // nine
+        "a.mp4.k3xq9wp-",  // not alphanumeric
+        "a.mp4k3xq9wpz",   // no separating dot
+        "b.mp4.k3xq9wpz",  // a different file's temp
+    ] {
+        assert!(
+            !is_orphan_temp(innocent, "a.mp4"),
+            "`{innocent}` must survive the sweep"
+        );
+    }
+}
+
+#[test]
+fn replace_is_refused_rather_than_destroying_the_file_it_promised_to_keep() {
+    // Replace moves the existing file aside and then lands the incoming one.
+    // Without rename the first half is impossible, and doing only the second
+    // half is the exact opposite of what Replace undertakes.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("holiday.mp4", b"mine");
+    rig.write_dest("holiday.mp4", b"theirs, different");
+
+    let destination = NoRenameBackend::local(rig.dest_dir.path());
+    let mut resolver = FixedResolver(ConflictAction::Replace);
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+
+    assert_eq!(summary.failed, 1);
+    assert_eq!(
+        std::fs::read(rig.dest("holiday.mp4")).unwrap(),
+        b"theirs, different",
+        "the file Replace promised to keep must still be there"
+    );
+    assert!(rig.src("holiday.mp4").exists(), "and so must the source");
+    assert!(
+        summary.failures[0].reason.contains("cannot rename"),
+        "the reason must say why, got `{}`",
+        summary.failures[0].reason
+    );
+}
+
+#[test]
+fn quarantine_and_rename_still_work_without_rename_support() {
+    // Neither needs to move an existing file, so both must keep working; only
+    // Replace is affected.
+    for (action, landing) in [
+        (ConflictAction::Quarantine, ".tungstate-quarantine/a.mp4"),
+        (ConflictAction::Rename, "a-2.mp4"),
+    ] {
+        let rig = Rig::new(SourcePolicy::Delete);
+        rig.write_source("a.mp4", b"mine");
+        rig.write_dest("a.mp4", b"theirs, different");
+
+        let destination = NoRenameBackend::local(rig.dest_dir.path());
+        let mut resolver = FixedResolver(action);
+        let mut progress = SilentProgress;
+        Transfer::new(
+            &rig.link,
+            &rig.source,
+            &destination,
+            &rig.journal,
+            &mut resolver,
+            &mut progress,
+        )
+        .run()
+        .unwrap();
+
+        assert_eq!(
+            std::fs::read(rig.dest(landing)).unwrap(),
+            b"mine",
+            "{action:?} should have landed at {landing}"
+        );
+        assert_eq!(
+            std::fs::read(rig.dest("a.mp4")).unwrap(),
+            b"theirs, different"
+        );
+    }
+}

@@ -12,7 +12,7 @@ use tungstate_backend::Backend;
 use tungstate_journal::{
     ConflictAction, Journal, Locator, Op, OpStatus, Order, SourcePolicy, VerifyLevel,
 };
-use tungstate_secret::{KeyringStore, MemoryStore, SecretStore};
+use tungstate_secret::{EnvOverride, KeyringStore, MemoryStore, SecretStore};
 use tungstate_transfer::{
     ConflictResolver, FileOutcome, FixedResolver, InteractiveResolver, Progress, SkipReason,
     Transfer,
@@ -192,16 +192,21 @@ fn open_journal() -> tungstate_journal::Result<Journal> {
     }
 }
 
-/// Where passwords are kept, honouring the test override.
+/// Where passwords are kept.
 ///
-/// `TUNGSTATE_SECRETS=memory` is the sibling of `TUNGSTATE_JOURNAL`: a test
-/// must never reach the developer's real keychain, and on headless Linux CI
-/// there is no keychain to reach. Anything else, including unset, is the real
-/// credential store.
+/// Always wrapped in [`EnvOverride`], so `TUNGSTATE_SECRET_<NAME>` works
+/// everywhere: on a NAS or in a container there is no keychain to ask, and it
+/// is how the FTP integration tests hand the binary a password without going
+/// near the developer's real one.
+///
+/// `TUNGSTATE_SECRETS=memory` is the sibling of `TUNGSTATE_JOURNAL`, for tests
+/// that must not write to the real credential store. It is per-process and
+/// therefore forgets between commands, which is exactly why the environment
+/// override exists alongside it.
 fn secret_store() -> Box<dyn SecretStore> {
     match std::env::var("TUNGSTATE_SECRETS").as_deref() {
-        Ok("memory") => Box::new(MemoryStore::new()),
-        _ => Box::new(KeyringStore::new()),
+        Ok("memory") => Box::new(EnvOverride(MemoryStore::new())),
+        _ => Box::new(EnvOverride(KeyringStore::new())),
     }
 }
 
@@ -327,6 +332,30 @@ fn add_link(journal: &Journal, args: &AddLink) -> std::process::ExitCode {
         return std::process::ExitCode::from(2);
     }
 
+    // Both refusals below are about the destination's protocol, so they need
+    // the connection rather than just the endpoint.
+    let destination_scheme = match destination.connection {
+        None => None,
+        Some(id) => match journal.connection_by_id(id) {
+            Ok(connection) => Some(connection.scheme),
+            Err(error) => return fail(&error),
+        },
+    };
+
+    // `replace` keeps the existing file by moving it aside first, and moving
+    // needs rename, which FTP does not give us. Refused here rather than at
+    // the first clash, halfway through a drain.
+    if on_conflict == ConflictAction::Replace && destination_scheme.is_some_and(|s| !s.can_rename())
+    {
+        eprintln!(
+            "error: --on-conflict replace needs a destination that can rename, so the \
+             file already there can be moved aside first.\n  \
+             `{}` cannot. Use quarantine, rename or skip.",
+            args.to
+        );
+        return std::process::ExitCode::from(2);
+    }
+
     let created = journal.create_link(&tungstate_journal::NewLink {
         name: args.name.clone(),
         source,
@@ -343,7 +372,20 @@ fn add_link(journal: &Journal, args: &AddLink) -> std::process::ExitCode {
         Ok(_) => {
             let name = &args.name;
             println!("created link `{name}`");
-            if verify != VerifyLevel::Readback && policy == SourcePolicy::Delete {
+            // A destination with no server-side checksum gets the stronger
+            // nudge, because there `hash` only ever means "the bytes we sent
+            // hashed to this", never "the bytes on the far disk do".
+            if verify != VerifyLevel::Readback
+                && destination_scheme.is_some_and(|s| !s.has_native_checksum())
+            {
+                println!(
+                    "note: this destination cannot checksum a file for us, so `--verify {}` \n      \
+                     only proves what was sent, not what landed. Over a network, \
+                     --verify readback\n      is the one that proves it, at the cost of \
+                     reading every file back.",
+                    verify.as_str()
+                );
+            } else if verify != VerifyLevel::Readback && policy == SourcePolicy::Delete {
                 println!(
                     "note: verification is `{}`. Use --verify readback for the strongest \
                      check, at the cost of reading every file back.",

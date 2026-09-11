@@ -2,9 +2,9 @@
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 
-use opendal::{Buffer, ErrorKind, Operator, Reader, Writer};
+use futures_util::StreamExt;
+use opendal::{Buffer, BufferStream, ErrorKind, Operator, Writer};
 use tungstate_backend::{
     Backend, BackendError, Capabilities, Entry, Meta, Result, RootToken, WriteFinish,
 };
@@ -63,11 +63,13 @@ pub enum Anchor {
     /// A directory on this machine. One `stat` syscall, exactly as
     /// `LocalBackend` does it, and exactly as cheap.
     LocalDir(PathBuf),
-    /// Somewhere only the protocol can reach. Listing the root is the cheapest
-    /// thing `OpenDAL` offers that genuinely goes to the store; `limit` is only
-    /// a hint and the lister is collected regardless. Once-per-file is fine for
-    /// a small root and quadratic for a large one, so slice 4c has to revisit
-    /// this when FTP makes it a real cost.
+    /// Somewhere only the protocol can reach.
+    ///
+    /// Answered by `stat`-ing the link end's own directory, which is one
+    /// command on every service and does go to the store — unlike
+    /// `stat("/")`, which `OpenDAL` synthesises. Listing the connection root
+    /// is the fallback, and it only happens while the link end's folder does
+    /// not exist yet, which is at most once per run rather than once per file.
     Store,
 }
 
@@ -206,6 +208,19 @@ impl Backend for OpendalBackend {
                 }
             }
             Anchor::Store => {
+                // The link end's own directory first: one command, and it
+                // reaches the store. `stat("/")` would not — OpenDAL answers
+                // that from thin air without asking anything.
+                if !self.prefix.is_empty()
+                    && self
+                        .stat_key(&format!("{}/", self.prefix), Path::new(""))
+                        .is_ok()
+                {
+                    return Ok(RootToken { device: None });
+                }
+                // Either this link end is the connection root, or its folder
+                // has not been made yet. Listing is the only thing left that
+                // distinguishes "not created" from "connection is gone".
                 let operator = self.operator.clone();
                 dispatch(async move { operator.list("/").await }).map_err(|_| unreachable())?;
             }
@@ -250,16 +265,21 @@ impl Backend for OpendalBackend {
     fn open_read(&self, path: &Path) -> Result<Box<dyn Read + Send>> {
         let operator = self.operator.clone();
         let owned = self.key(path)?;
-        let reader = dispatch(async move { operator.reader(&owned).await })
-            .map_err(|error| self.failure("read", path, error))?;
-        let len = self.stat_either(path)?.content_length();
+
+        // One request for the whole file, not one per chunk. On FTP a ranged
+        // read is `REST <offset>` followed by `RETR`, which is a fresh data
+        // connection; reading a 4 GB file in 1 MiB ranges would open four
+        // thousand of them.
+        let stream = dispatch(async move {
+            let reader = operator.reader(&owned).await?;
+            reader.into_stream(..).await
+        })
+        .map_err(|error| self.failure("read", path, error))?;
 
         Ok(Box::new(OpendalRead {
-            // `Reader::read` takes `&self`, so an `Arc` is all the sharing the
-            // spawned future needs.
-            reader: Arc::new(reader),
-            offset: 0,
-            len,
+            stream: Some(stream),
+            pending: Buffer::new(),
+            finished: false,
         }))
     }
 
@@ -310,49 +330,69 @@ impl Backend for OpendalBackend {
     }
 }
 
-/// A remote file being read, one engine-sized chunk per ranged request.
+/// A remote file being read: one request, pulled a buffer at a time.
+///
+/// The stream hands out buffers of whatever size the service felt like, and
+/// the engine asks for 1 MiB at a time, so the two will not line up.
+/// `pending` holds whatever is left over from the last buffer.
 struct OpendalRead {
-    reader: Arc<Reader>,
-    offset: u64,
-    len: u64,
+    /// `None` only while the stream is away inside a spawned future.
+    stream: Option<BufferStream>,
+    pending: Buffer,
+    finished: bool,
+}
+
+impl OpendalRead {
+    /// Pull one more buffer, or report that the stream ended.
+    ///
+    /// The stream is moved into the future and moved back out, for the same
+    /// reason the writer is: `Stream::next` needs `&mut`, and `spawn` needs an
+    /// owned `'static` future.
+    fn pull(&mut self) -> std::io::Result<()> {
+        let Some(mut stream) = self.stream.take() else {
+            return Err(std::io::Error::other("this reader is already in use"));
+        };
+        let (stream, item) = dispatch(async move {
+            let item = StreamExt::next(&mut stream).await;
+            (stream, item)
+        });
+        self.stream = Some(stream);
+
+        match item {
+            Some(Ok(buffer)) => {
+                self.pending = buffer;
+                Ok(())
+            }
+            Some(Err(error)) => Err(std::io::Error::other(error.to_string())),
+            None => {
+                self.finished = true;
+                Ok(())
+            }
+        }
+    }
 }
 
 impl Read for OpendalRead {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        if self.offset >= self.len || buf.is_empty() {
+        if buf.is_empty() {
             return Ok(0);
         }
-        // Clamped to the known length: an open-ended range past the end is an
-        // error on some services rather than a short read.
-        let want = (buf.len() as u64).min(self.len - self.offset);
-        let (start, end) = (self.offset, self.offset + want);
-        let reader = Arc::clone(&self.reader);
-
-        let buffer: Buffer = dispatch(async move { reader.read(start..end).await })
-            .map_err(|error| std::io::Error::other(error.to_string()))?;
-
-        // Clamped against a service that answers with more than it was asked
-        // for. Indexing past `buf` would be a panic mid-drain.
-        let read = buffer.len().min(buf.len());
-        if read == 0 {
-            // Zero bytes before the end is a truncated stream, not EOF. Saying
-            // EOF here would hand the engine a short file whose destination
-            // length matches what was sent, so verification would pass on a
-            // file that is missing its tail.
-            return Err(std::io::Error::new(
-                std::io::ErrorKind::UnexpectedEof,
-                format!(
-                    "the remote stopped after {} of {} bytes",
-                    self.offset, self.len
-                ),
-            ));
+        // A service may hand back an empty buffer without meaning end of
+        // stream, so keep pulling until there is something or there is not.
+        while self.pending.is_empty() {
+            if self.finished {
+                return Ok(0);
+            }
+            self.pull()?;
         }
 
-        // `Buffer` is a rope of `Bytes`, so `to_vec` is the copy we would have
-        // made into `buf` anyway rather than an extra one.
-        buf[..read].copy_from_slice(&buffer.to_vec()[..read]);
-        self.offset += read as u64;
-        Ok(read)
+        let take = self.pending.len().min(buf.len());
+        // `split_to` advances the rope without copying the tail, so a large
+        // buffer handed out over several reads costs one copy per read and no
+        // repeated shuffling.
+        let head = self.pending.split_to(take);
+        buf[..take].copy_from_slice(&head.to_vec());
+        Ok(take)
     }
 }
 

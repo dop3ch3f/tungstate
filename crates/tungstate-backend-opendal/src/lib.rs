@@ -26,8 +26,8 @@ pub use keys::remote_key;
 use std::path::PathBuf;
 
 use opendal::Operator;
-use tungstate_backend::Backend;
 use tungstate_backend::local::LocalBackend;
+use tungstate_backend::{Backend, BackendError};
 use tungstate_journal::{Connection, Endpoint, Journal, JournalError, Scheme};
 use tungstate_secret::SecretStore;
 
@@ -68,6 +68,27 @@ pub enum OpenError {
         /// Why it was refused.
         #[source]
         source: tungstate_backend::BackendError,
+    },
+
+    /// The connection was opened, but talking to it failed.
+    #[error("could not read from this connection")]
+    Backend(#[from] BackendError),
+
+    /// The machine's keychain could not be reached.
+    #[error("could not read the saved password for `{name}`")]
+    Secret {
+        /// The connection whose password was wanted.
+        name: String,
+        /// The underlying failure.
+        #[source]
+        source: tungstate_secret::SecretError,
+    },
+
+    /// A networked connection was recorded without a host to connect to.
+    #[error("connection `{name}` has no host; set one with --host")]
+    MissingHost {
+        /// The connection that is missing one.
+        name: String,
     },
 
     /// The connection names a scheme this build has no service for.
@@ -129,23 +150,57 @@ pub fn probe(
 ) -> Result<usize> {
     let endpoint = Endpoint::remote(connection.id, PathBuf::new());
     let backend = open(&endpoint, journal, secrets)?;
-    backend
-        .read_dir(std::path::Path::new(""))
-        .map(|entries| entries.len())
-        .map_err(|source| OpenError::Opendal {
-            name: connection.name.clone(),
-            source: opendal::Error::new(opendal::ErrorKind::Unexpected, source.to_string()),
-        })
+    match backend.read_dir(std::path::Path::new("")) {
+        Ok(entries) => Ok(entries.len()),
+        Err(error) => Err(OpenError::Backend(classify(connection, error))),
+    }
+}
+
+/// Turn a failed first contact into the most useful error we can justify.
+///
+/// `OpenDAL` does not classify a rejected FTP login: `format_ftp_error` maps
+/// everything that is not 421 or 550 to `ErrorKind::Unexpected`, so the only
+/// signal that the password was wrong is the server's own reply text.
+///
+/// So this reads the reply for FTP's "not logged in" status, which is fixed by
+/// RFC 959 and is not an `OpenDAL` detail. It is still string-matching, and it is
+/// contained here for that reason. The failure mode is benign: if the wording
+/// ever changes we fall through to the unclassified error, which is exactly
+/// what the user would have got anyway. The real fix is upstream — `OpenDAL`
+/// reporting `PermissionDenied` — and is worth a patch.
+fn classify(connection: &Connection, error: tungstate_backend::BackendError) -> BackendError {
+    const FTP_NOT_LOGGED_IN: &str = "530";
+
+    if !connection.scheme.authenticates() {
+        return error;
+    }
+
+    let mut rendered = error.to_string();
+    let mut source = std::error::Error::source(&error);
+    while let Some(cause) = source {
+        rendered.push_str(&cause.to_string());
+        source = cause.source();
+    }
+
+    if rendered.contains(FTP_NOT_LOGGED_IN) {
+        return BackendError::Auth {
+            endpoint: connection.name.clone(),
+        };
+    }
+    error
 }
 
 fn operator_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<(Operator, Anchor)> {
     match connection.scheme {
         Scheme::Fs => filesystem_operator(connection),
-        // Registered in slice 4c. Named rather than silently unmatched so the
-        // error tells the user what to do about it. `secrets` is already
-        // threaded this far so that registering the service, and reading the
-        // password it needs, is the only change that arm will need.
-        Scheme::Ftp => {
+
+        #[cfg(feature = "ftp")]
+        Scheme::Ftp | Scheme::Ftps => ftp_operator(connection, secrets),
+
+        // Named rather than silently unmatched, so a build without the feature
+        // says what is wrong instead of failing somewhere obscure.
+        #[cfg(not(feature = "ftp"))]
+        Scheme::Ftp | Scheme::Ftps => {
             let _ = secrets;
             Err(OpenError::SchemeNotCompiled {
                 name: connection.name.clone(),
@@ -153,6 +208,58 @@ fn operator_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
             })
         }
     }
+}
+
+/// An operator over an FTP or FTPS server.
+///
+/// The password is read from the keychain here and handed straight to `OpenDAL`;
+/// it is never written down on the way past.
+#[cfg(feature = "ftp")]
+fn ftp_operator(connection: &Connection, secrets: &dyn SecretStore) -> Result<(Operator, Anchor)> {
+    let Some(host) = connection.host.as_deref().filter(|h| !h.is_empty()) else {
+        return Err(OpenError::MissingHost {
+            name: connection.name.clone(),
+        });
+    };
+    let port = connection
+        .port
+        .or_else(|| connection.scheme.default_port())
+        .unwrap_or(21);
+
+    // OpenDAL picks TLS off the endpoint's scheme rather than from a flag, so
+    // this one string is the whole of the `ftp` versus `ftps` difference.
+    let endpoint = format!("{}://{host}:{port}", connection.scheme.as_str());
+
+    let mut builder = opendal::services::Ftp::default()
+        .endpoint(&endpoint)
+        .root(&connection.root);
+    if let Some(user) = connection.username.as_deref() {
+        builder = builder.user(user);
+    }
+    if let Some(secret) = secret_for(connection, secrets)? {
+        builder = builder.password(&secret);
+    }
+
+    let operator = Operator::new(builder).map_err(|source| OpenError::Opendal {
+        name: connection.name.clone(),
+        source,
+    })?;
+    Ok((operator, Anchor::Store))
+}
+
+/// A connection's saved password, if it has one.
+///
+/// `None` is not an error: an anonymous FTP server is a real thing, and a
+/// rejected login is something the server reports rather than something to
+/// guess at here.
+#[cfg(feature = "ftp")]
+fn secret_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<Option<String>> {
+    secrets
+        .get(&tungstate_secret::connection_key(&connection.name))
+        .map_err(|source| OpenError::Secret {
+            name: connection.name.clone(),
+            source,
+        })
 }
 
 /// An operator over a directory this machine can already reach.

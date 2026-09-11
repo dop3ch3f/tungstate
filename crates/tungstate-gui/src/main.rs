@@ -26,7 +26,7 @@ use tungstate_journal::{
     ConflictAction, Endpoint, Journal, Link, Locator, NewLink, Op, OpStatus, Order, SourcePolicy,
     VerifyLevel,
 };
-use tungstate_secret::{KeyringStore, SecretStore};
+use tungstate_secret::{EnvOverride, KeyringStore, SecretStore};
 use tungstate_transfer::{Summary, Transfer};
 
 use bridge::{ConflictChannel, EventProgress, Reply, WindowResolver};
@@ -98,7 +98,7 @@ fn place(location: &tungstate_journal::Location, journal: &Journal) -> String {
 
 /// Where passwords are kept. One store for the life of the window.
 fn secrets() -> impl SecretStore {
-    KeyringStore::new()
+    EnvOverride(KeyringStore::new())
 }
 
 /// One end of a link as a backend, through the factory rather than by

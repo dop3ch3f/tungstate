@@ -72,6 +72,16 @@ pub enum TransferError {
         detail: String,
     },
 
+    /// The destination cannot rename, so `replace` cannot keep its promise.
+    #[error(
+        "`{path}`: this destination cannot rename, so the file already there \
+         cannot be moved aside; use --on-conflict quarantine, rename or skip"
+    )]
+    ReplaceNeedsRename {
+        /// The file whose conflict could not be resolved that way.
+        path: PathBuf,
+    },
+
     /// The source is remote, and there is no trash to send an original to.
     #[error("`{path}` is on a remote, which has no trash; use --move or --copy")]
     TrashUnsupported {
@@ -448,7 +458,7 @@ impl<'a> Transfer<'a> {
                     summary.failed += 1;
                     summary.failures.push(Failure {
                         path: file.path.clone(),
-                        reason: error.to_string(),
+                        reason: explain(&error),
                     });
                     FileOutcome::Failed
                 }
@@ -490,11 +500,23 @@ impl<'a> Transfer<'a> {
     fn recover(&mut self) -> Result<u64> {
         let interrupted = self.journal.incomplete_for_link(self.link.id)?;
 
+        let atomic = self.destination.capabilities().atomic_rename;
+
         for op in &interrupted {
             if let Some(destination) = &op.destination {
-                let partial = temp_name(&destination.path, op.id);
-                // Already gone is the common case and not an error.
-                let _ = self.destination.remove_file(&partial);
+                if atomic {
+                    let partial = temp_name(&destination.path, op.id);
+                    // Already gone is the common case and not an error.
+                    let _ = self.destination.remove_file(&partial);
+                } else {
+                    // Nothing was written to a temp name, so the only partial
+                    // there can be is under the real name. Removing it is safe
+                    // because the source has not been touched: `copy_to`
+                    // applies the source policy only after the journal commit
+                    // this operation never reached.
+                    let _ = self.destination.remove_file(&destination.path);
+                    self.sweep_orphans(&destination.path);
+                }
             }
             self.journal.finish(
                 op.id,
@@ -505,6 +527,41 @@ impl<'a> Transfer<'a> {
         }
 
         Ok(interrupted.len() as u64)
+    }
+
+    /// Delete temporary files a backend left beside `destination` when it died.
+    ///
+    /// Only for backends that cannot rename, because those are the ones that
+    /// may be doing their own temp-and-rename internally. `OpenDAL`'s FTP
+    /// service is the case in hand: it streams to `<name>.<8 random chars>`
+    /// and renames on close, and because the name is random neither it nor we
+    /// can find it again afterwards. Left alone, a NAS accumulates one of
+    /// these next to every transfer that was ever interrupted.
+    ///
+    /// Scoped hard: only the interrupted operation's own directory, only names
+    /// that are this destination's name plus the exact suffix shape. Assumes
+    /// no second process is mid-write to the same destination path, which is
+    /// already true — a link is run one at a time.
+    fn sweep_orphans(&self, destination: &Path) {
+        let Some(name) = destination.file_name().and_then(|n| n.to_str()) else {
+            return;
+        };
+        let directory = destination.parent().unwrap_or(Path::new(""));
+        let Ok(entries) = self.destination.read_dir(directory) else {
+            return;
+        };
+
+        for entry in entries {
+            if entry
+                .path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|candidate| is_orphan_temp(candidate, name))
+            {
+                tracing::debug!(path = %entry.path.display(), "removing an abandoned temporary file");
+                let _ = self.destination.remove_file(&entry.path);
+            }
+        }
     }
 
     fn transfer_one(&mut self, file: &walk::File) -> Result<FileOutcome> {
@@ -586,6 +643,17 @@ impl<'a> Transfer<'a> {
             }
 
             ConflictAction::Replace => {
+                // Replace promises the existing file is preserved, and the only
+                // way to keep that promise is to move it aside first. Without
+                // rename there is no way to move anything, and writing the
+                // incoming file first would destroy the very thing Replace
+                // undertakes to keep. Refuse rather than quietly do the
+                // opposite of what was asked.
+                if !self.destination.capabilities().atomic_rename {
+                    return Err(TransferError::ReplaceNeedsRename {
+                        path: file.path.clone(),
+                    });
+                }
                 // The existing file is quarantined rather than deleted. Replace is
                 // the user's decision about which copy they want, not permission
                 // to destroy the other one.
@@ -653,6 +721,14 @@ impl<'a> Transfer<'a> {
             self.destination.create_dir_all(parent)?;
         }
 
+        // `Capabilities::atomic_rename` has existed since slice 1 and this is
+        // the first thing to read it. FTP is why: OpenDAL's FTP service
+        // answers `rename` with `Unsupported`, so the temp-then-rename dance
+        // below cannot even be attempted there.
+        if !self.destination.capabilities().atomic_rename {
+            return self.write_in_place(file, destination);
+        }
+
         let temp = temp_name(destination, op);
         let (hash, written) = self.stream(&file.path, &temp)?;
 
@@ -665,6 +741,36 @@ impl<'a> Transfer<'a> {
         // Atomic where the backend supports it, so the destination name never
         // refers to a partial file.
         self.destination.rename(&temp, destination)?;
+        Ok(hash)
+    }
+
+    /// Publish by writing to the destination name, for a backend that cannot
+    /// rename.
+    ///
+    /// There is no third option: without rename, the only route to the final
+    /// name is to write to it. What protects the commit is
+    /// [`WriteFinish::finish`], which the trait already defines as "commit
+    /// everything written durably, then close" — how a backend achieves that
+    /// is its own business. `OpenDAL`'s FTP service, for instance, streams to a
+    /// temporary name of its own and renames on close, so the publish is still
+    /// atomic even though `rename` is unavailable to us.
+    ///
+    /// The exposure this adds is the window before `finish`. A rename backend
+    /// can only ever leave a `.part`; here the real name may hold a partial,
+    /// so another program watching the folder could see an incomplete file.
+    /// Recovery deletes it and the source is untouched either way, so nothing
+    /// is lost. How wide the window actually is depends on the backend: one
+    /// doing its own temp-and-rename, as `OpenDAL`'s FTP service does, never
+    /// exposes the real name at all. The engine cannot tell, so it assumes
+    /// the worst and recovery cleans up for both.
+    fn write_in_place(&self, file: &walk::File, destination: &Path) -> Result<String> {
+        let (hash, written) = self.stream(&file.path, destination)?;
+
+        if let Err(error) = self.verify(file, destination, &hash, written) {
+            let _ = self.destination.remove_file(destination);
+            return Err(error);
+        }
+
         Ok(hash)
     }
 
@@ -742,6 +848,45 @@ impl<'a> Transfer<'a> {
             }
         }
     }
+}
+
+/// An error and everything underneath it, on one line.
+///
+/// The top line of a `TransferError` is deliberately short — "transfer of
+/// `a.mp4` failed" — and on its own it is useless in the end-of-run report,
+/// which is the only place most users will ever see why something failed. The
+/// cause is the whole point.
+fn explain(error: &dyn std::error::Error) -> String {
+    use std::fmt::Write as _;
+
+    let mut message = error.to_string();
+    let mut source = error.source();
+    while let Some(cause) = source {
+        // Writing into a String cannot fail, and rendering an error must not
+        // itself be fallible.
+        let _ = write!(message, ": {cause}");
+        source = cause.source();
+    }
+    message
+}
+
+/// How many random characters a backend's temporary suffix has.
+///
+/// `OpenDAL`'s `build_tmp_path_of` uses eight. Matching it exactly is what keeps
+/// the sweep from touching a real file: `holiday.mp4.backup` has six
+/// characters after the dot and survives, `holiday.mp4.k3xq9wpz` has eight and
+/// does not.
+const TEMP_SUFFIX_LENGTH: usize = 8;
+
+/// Whether `candidate` is a temporary file a backend left beside `name`.
+fn is_orphan_temp(candidate: &str, name: &str) -> bool {
+    let Some(suffix) = candidate
+        .strip_prefix(name)
+        .and_then(|rest| rest.strip_prefix('.'))
+    else {
+        return false;
+    };
+    suffix.len() == TEMP_SUFFIX_LENGTH && suffix.chars().all(|c| c.is_ascii_alphanumeric())
 }
 
 /// BLAKE3 of everything `backend` holds at `path`.

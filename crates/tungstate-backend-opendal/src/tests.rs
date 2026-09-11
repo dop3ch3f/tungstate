@@ -260,20 +260,26 @@ fn capabilities_are_read_not_probed() {
     );
 }
 
-#[test]
-fn an_unregistered_scheme_says_so_rather_than_failing_obscurely() {
-    let journal = Journal::open_in_memory().unwrap();
-    let id = journal
+/// An FTP connection row, with whatever host the caller wants to give it.
+fn ftp_connection(journal: &Journal, host: Option<&str>) -> tungstate_journal::ConnectionId {
+    journal
         .create_connection(&NewConnection {
             name: "nas-ftp".to_string(),
             scheme: Scheme::Ftp,
-            host: Some("nas.local".to_string()),
+            host: host.map(str::to_string),
             port: Some(21),
             username: Some("me".to_string()),
             root: "/volume1".to_string(),
             options: BTreeMap::new(),
         })
-        .unwrap();
+        .unwrap()
+}
+
+#[cfg(not(feature = "ftp"))]
+#[test]
+fn a_scheme_this_build_lacks_says_so_rather_than_failing_obscurely() {
+    let journal = Journal::open_in_memory().unwrap();
+    let id = ftp_connection(&journal, Some("nas.local"));
 
     let result = open(
         &Endpoint::remote(id, std::path::PathBuf::new()),
@@ -284,6 +290,104 @@ fn an_unregistered_scheme_says_so_rather_than_failing_obscurely() {
         result,
         Err(OpenError::SchemeNotCompiled { scheme: "ftp", .. })
     ));
+}
+
+#[cfg(feature = "ftp")]
+#[test]
+fn an_ftp_connection_with_no_host_is_refused_before_any_network_call() {
+    // Cheap to get wrong — `--host` is optional on the command line because
+    // `fs` has no use for one — and the error should not be a DNS timeout.
+    let journal = Journal::open_in_memory().unwrap();
+    let id = ftp_connection(&journal, None);
+
+    let result = open(
+        &Endpoint::remote(id, std::path::PathBuf::new()),
+        &journal,
+        &MemoryStore::new(),
+    );
+    assert!(matches!(result, Err(OpenError::MissingHost { .. })));
+}
+
+/// A backend on `OpenDAL`'s in-memory service, anchored the way a remote is.
+///
+/// The point is [`Anchor::Store`]: `fs` answers reachability with a `stat`
+/// syscall, so nothing else in this file exercises the protocol path. `memory`
+/// gives us that path with no server and no network.
+fn store_anchored(prefix: &str) -> OpendalBackend {
+    let operator = opendal::Operator::new(opendal::services::Memory::default()).unwrap();
+    OpendalBackend::new(
+        operator,
+        prefix.to_string(),
+        Anchor::Store,
+        "scratch".to_string(),
+    )
+}
+
+#[test]
+fn a_store_anchored_link_end_is_reachable_before_its_folder_exists() {
+    // The rule slice 4b settled, on the path FTP takes: the connection must be
+    // there, a folder inside it need not be.
+    let backend = store_anchored("inbox");
+
+    assert!(
+        backend.root_token().is_ok(),
+        "the connection is reachable even though `inbox` is not there yet"
+    );
+
+    backend.create_dir_all(Path::new("")).unwrap();
+    {
+        let mut writer = backend.create_write(Path::new("a.mp4")).unwrap();
+        writer.write_all(b"landed").unwrap();
+        writer.finish().unwrap();
+    }
+
+    // And once it does exist, the cheap path answers instead of the listing.
+    assert!(backend.root_token().is_ok());
+    assert_eq!(backend.stat(Path::new("a.mp4")).unwrap().len, 6);
+}
+
+#[test]
+fn a_store_anchored_backend_round_trips_across_chunk_boundaries() {
+    // The streaming reader hands out buffers of whatever size the service
+    // chose, and the engine asks for its own size. A payload that is not a
+    // multiple of anything is the point.
+    let backend = store_anchored("");
+    let payload: Vec<u8> = (0..1_234_567_u32).map(|n| (n % 251) as u8).collect();
+
+    {
+        let mut writer = backend.create_write(Path::new("big.bin")).unwrap();
+        writer.write_all(&payload).unwrap();
+        writer.finish().unwrap();
+    }
+
+    for chunk_size in [1, 7, 4096, 1024 * 1024] {
+        let mut reader = backend.open_read(Path::new("big.bin")).unwrap();
+        let mut readback = Vec::new();
+        let mut chunk = vec![0_u8; chunk_size];
+        loop {
+            let read = reader.read(&mut chunk).unwrap();
+            if read == 0 {
+                break;
+            }
+            readback.extend_from_slice(&chunk[..read]);
+        }
+        assert_eq!(readback, payload, "reading {chunk_size} bytes at a time");
+    }
+}
+
+#[test]
+fn an_empty_file_reads_as_zero_bytes_rather_than_hanging() {
+    let backend = store_anchored("");
+    backend
+        .create_write(Path::new("empty.bin"))
+        .unwrap()
+        .finish()
+        .unwrap();
+
+    let mut reader = backend.open_read(Path::new("empty.bin")).unwrap();
+    let mut buffer = [0_u8; 16];
+    assert_eq!(reader.read(&mut buffer).unwrap(), 0);
+    assert_eq!(reader.read(&mut buffer).unwrap(), 0, "and stays at zero");
 }
 
 #[test]

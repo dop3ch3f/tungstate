@@ -10,6 +10,12 @@ rust-version.workspace = true
 name = "tungstate"
 path = "src/main.rs"
 
+[features]
+# Opt-in: these tests need a real FTP server on the other end, so CI runs them
+# on Linux only. Everything the engine does without rename is covered by a fake
+# backend in tungstate-transfer, on all three platforms.
+ftp-integration = []
+
 [dependencies]
 tungstate-api = { path = "../tungstate-api" }
 tungstate-backend = { path = "../tungstate-backend" }

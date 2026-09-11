@@ -27,7 +27,12 @@ pub enum ConnectionAction {
         /// Who to connect as.
         #[arg(long = "user")]
         username: Option<String>,
-        /// The directory on the far side that every path is relative to.
+        /// Absolute path on the far side that every link path is relative to.
+        ///
+        /// For a remote this is a path on the server, not on this machine, and
+        /// it is often not the same as the directory you land in when you log
+        /// in: many servers put you in `/home/you` while `/` is the whole
+        /// disk. `connection test` prints what it found there, so check it.
         #[arg(long, default_value = "")]
         root: String,
         /// Per-scheme extra, as `key=value`. Repeatable.
@@ -98,7 +103,7 @@ struct AddArgs {
 
 fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode {
     let Some(scheme) = Scheme::parse(&args.scheme) else {
-        eprintln!("error: --scheme must be fs or ftp");
+        eprintln!("error: --scheme must be fs, ftp or ftps");
         return ExitCode::from(2);
     };
 
@@ -111,9 +116,20 @@ fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode
         parsed.insert(key.to_string(), value.to_string());
     }
 
+    // Said before the password prompt, so the user can still change their mind
+    // about sending it in the clear.
+    if !scheme.is_encrypted() {
+        eprintln!(
+            "warning: `{}` sends your password and your files across the network \
+             unencrypted.\n  \
+             If the server offers it, use --scheme ftps instead.",
+            scheme.as_str()
+        );
+    }
+
     // Read the password before writing the row. Storing a connection whose
     // password prompt was then cancelled would leave something half-made.
-    let secret = if authenticates(scheme) {
+    let secret = if scheme.authenticates() {
         match read_secret(&args.name, args.secret_stdin) {
             Ok(secret) => secret,
             Err(error) => {
@@ -173,8 +189,16 @@ fn list(journal: &Journal) -> ExitCode {
                     .as_deref()
                     .map(|u| format!(" as {u}"))
                     .unwrap_or_default();
+                // Named on every line, not just when adding. "Which of my
+                // connections is still sending passwords in the clear?" should
+                // be answerable by looking.
+                let wire = if connection.scheme.is_encrypted() {
+                    ""
+                } else {
+                    "  [UNENCRYPTED]"
+                };
                 println!(
-                    "{}  {} {}{}  root={}",
+                    "{}  {} {}{}  root={}{}",
                     connection.name,
                     connection.scheme.as_str(),
                     where_to,
@@ -184,6 +208,7 @@ fn list(journal: &Journal) -> ExitCode {
                     } else {
                         &connection.root
                     },
+                    wire,
                 );
             }
             ExitCode::SUCCESS
@@ -198,9 +223,21 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
         Err(error) => return fail(&error),
     };
 
+    // The root is named, not just the count. "reachable, 18 entries" is
+    // reassuring and useless when the 18 entries are the server's own `/bin`
+    // and `/etc` because `--root` was left at the default.
+    let root = if connection.root.is_empty() {
+        "/"
+    } else {
+        &connection.root
+    };
     match tungstate_backend_opendal::probe(&connection, journal, secrets) {
         Ok(count) => {
-            println!("`{name}` is reachable; its root holds {count} entries");
+            println!("`{name}` is reachable");
+            println!("  {root} holds {count} entries");
+            if !connection.scheme.is_encrypted() {
+                println!("  (this connection is not encrypted)");
+            }
             ExitCode::SUCCESS
         }
         Err(error) => fail(&error),
@@ -218,14 +255,6 @@ fn remove(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode 
     }
     println!("removed connection `{name}`");
     ExitCode::SUCCESS
-}
-
-/// Whether this scheme has a password worth keeping.
-fn authenticates(scheme: Scheme) -> bool {
-    match scheme {
-        Scheme::Fs => false,
-        Scheme::Ftp => true,
-    }
 }
 
 /// Read a password without it ever becoming a command-line argument.

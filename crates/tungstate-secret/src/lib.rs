@@ -118,6 +118,50 @@ impl SecretStore for KeyringStore {
     }
 }
 
+/// Reads a password from the environment before asking the inner store.
+///
+/// `TUNGSTATE_SECRET_<NAME>`, where `<NAME>` is the connection name uppercased
+/// with `-` turned into `_`. So connection `nas-attic` is `TUNGSTATE_SECRET_NAS_ATTIC`.
+///
+/// This exists for machines with no keychain to ask. DESIGN.md §6b puts a
+/// tungstate daemon on the NAS itself, and a container or a systemd unit has
+/// no Secret Service, no Keychain and nobody to type at a prompt; passing a
+/// secret by environment is how such things are normally fed. It is also what
+/// lets the FTP integration tests give the binary a password without touching
+/// the developer's real keychain.
+///
+/// Writes always go to the inner store. A process cannot put a secret into a
+/// future process's environment, so pretending `set` succeeded would be a lie.
+#[derive(Debug, Default, Clone)]
+pub struct EnvOverride<S>(pub S);
+
+/// The environment variable a connection's password can be passed in.
+#[must_use]
+pub fn env_var_for(key: &str) -> String {
+    let name = key.strip_prefix("connection/").unwrap_or(key);
+    format!("TUNGSTATE_SECRET_{}", name.to_uppercase().replace('-', "_"))
+}
+
+impl<S: SecretStore> SecretStore for EnvOverride<S> {
+    fn get(&self, key: &str) -> Result<Option<String>> {
+        // An empty variable means "no password", not "fall through". Someone
+        // who sets it to empty on purpose gets an anonymous login rather than
+        // a surprise credential from the keychain.
+        if let Ok(secret) = std::env::var(env_var_for(key)) {
+            return Ok(Some(secret));
+        }
+        self.0.get(key)
+    }
+
+    fn set(&self, key: &str, secret: &str) -> Result<()> {
+        self.0.set(key, secret)
+    }
+
+    fn delete(&self, key: &str) -> Result<()> {
+        self.0.delete(key)
+    }
+}
+
 /// A store that lives and dies with the process, for tests.
 #[derive(Debug, Default)]
 pub struct MemoryStore {
@@ -198,6 +242,40 @@ mod tests {
                 });
             }
         });
+    }
+
+    #[test]
+    fn an_environment_variable_names_its_connection() {
+        assert_eq!(env_var_for("connection/nas"), "TUNGSTATE_SECRET_NAS");
+        // A hyphen is legal in a connection name and illegal in most shells'
+        // variable names, so it has to become an underscore.
+        assert_eq!(
+            env_var_for("connection/nas-attic"),
+            "TUNGSTATE_SECRET_NAS_ATTIC"
+        );
+    }
+
+    #[test]
+    fn an_override_with_nothing_set_behaves_exactly_like_the_inner_store() {
+        // The other half — that the environment wins — cannot be tested here:
+        // `std::env::set_var` is `unsafe`, and the workspace forbids `unsafe`
+        // outright. It is proved end to end instead, in the FTP integration
+        // tests, where the parent sets the variable on the child process.
+        // That is the more honest test anyway, since the feature exists for
+        // exactly that shape: one process configuring another.
+        let store = EnvOverride(MemoryStore::new());
+        let key = connection_key("envtest-delegation");
+
+        assert_eq!(store.get(&key).unwrap(), None);
+        store.set(&key, "hunter2").unwrap();
+        assert_eq!(store.get(&key).unwrap().as_deref(), Some("hunter2"));
+        assert_eq!(
+            store.0.get(&key).unwrap().as_deref(),
+            Some("hunter2"),
+            "a write must reach the inner store, not be swallowed"
+        );
+        store.delete(&key).unwrap();
+        assert_eq!(store.get(&key).unwrap(), None);
     }
 
     /// Run by hand on a real desktop: `cargo test -p tungstate-secret -- --ignored`.
