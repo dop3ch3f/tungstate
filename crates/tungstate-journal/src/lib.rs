@@ -224,13 +224,38 @@ impl Location {
         }
     }
 
-    /// The full path this location denotes.
+    /// The full path this location denotes, as a path on this machine.
     ///
-    /// For a remote this is a display string rather than something the local
-    /// filesystem could open; the connection is what says where it really is.
+    /// Only meaningful for a local location. Use [`Location::display_path`]
+    /// when the answer is going in front of a person, because that one knows
+    /// a remote's separator is not this machine's.
     #[must_use]
     pub fn full(&self) -> PathBuf {
         self.root.join(&self.path)
+    }
+
+    /// How this location reads to a human.
+    ///
+    /// A remote's separator is `/` whatever this machine happens to use, so
+    /// the two halves are joined literally rather than through `Path::join`.
+    /// Same rule as `remote_key` in the `OpenDAL` adapter, for the same reason:
+    /// `inbox\a.mp4` is not a path the far side has ever heard of, and
+    /// someone copying it out of `tungstate whereis` would be copying a name
+    /// that does not exist.
+    #[must_use]
+    pub fn display_path(&self) -> String {
+        if self.connection.is_none() {
+            return self.full().display().to_string();
+        }
+        let (root, path) = (
+            self.root.display().to_string(),
+            self.path.display().to_string(),
+        );
+        match (root.is_empty(), path.is_empty()) {
+            (true, _) => path,
+            (false, true) => root,
+            (false, false) => format!("{}/{path}", root.trim_end_matches('/')),
+        }
     }
 }
 

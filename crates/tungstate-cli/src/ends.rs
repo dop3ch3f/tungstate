@@ -102,7 +102,7 @@ pub fn describe(end: &Endpoint, journal: &Journal) -> String {
 /// because the path on its own means nothing without the place it is in.
 #[must_use]
 pub fn place(location: &tungstate_journal::Location, journal: &Journal) -> String {
-    let full = location.full().display().to_string();
+    let full = location.display_path();
     match location.connection {
         None => full,
         Some(id) => {

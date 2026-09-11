@@ -647,3 +647,31 @@ fn a_full_path_query_does_not_match_a_remote_row_by_concatenation() {
     // The relative spelling still finds both: that branch is not about roots.
     assert_eq!(journal.history(Path::new("holiday.mp4")).unwrap().len(), 2);
 }
+
+#[test]
+fn a_remote_location_reads_with_the_separator_the_far_side_uses() {
+    // Caught by Windows CI. `Location::full` goes through `Path::join`, which
+    // produces `inbox\a.mp4` there — a name no FTP or S3 server has ever
+    // heard of, printed by `whereis` for someone to copy.
+    let remote = Location {
+        connection: Some(ConnectionId(1)),
+        root: "inbox".into(),
+        path: "2026/a.mp4".into(),
+    };
+    assert_eq!(remote.display_path(), "inbox/2026/a.mp4");
+
+    // The root of a connection, where one half is empty.
+    let at_root = Location {
+        connection: Some(ConnectionId(1)),
+        root: PathBuf::new(),
+        path: "a.mp4".into(),
+    };
+    assert_eq!(at_root.display_path(), "a.mp4");
+
+    // A local one still reads as a path on this machine, separators and all.
+    let local = Location::new("/Users/x", "a.mp4");
+    assert_eq!(
+        local.display_path(),
+        Path::new("/Users/x").join("a.mp4").display().to_string()
+    );
+}

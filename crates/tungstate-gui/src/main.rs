@@ -84,7 +84,7 @@ fn describe_end(end: &Endpoint, journal: &Journal) -> String {
 
 /// Where one end of a recorded operation was, written the way the user would.
 fn place(location: &tungstate_journal::Location, journal: &Journal) -> String {
-    let full = location.full().display().to_string();
+    let full = location.display_path();
     match location.connection {
         None => full,
         Some(id) => {
