@@ -27,15 +27,15 @@ use tungstate_journal::{
     VerifyLevel,
 };
 use tungstate_secret::{EnvOverride, KeyringStore, SecretStore};
-use tungstate_transfer::{Summary, Transfer};
+use tungstate_transfer::{IdenticalAction, Stop, Summary, Transfer};
 
-use bridge::{ConflictChannel, EventProgress, Reply, WindowResolver};
+use bridge::{Answer, ConflictChannel, EventProgress, Reply, WindowResolver};
 
 /// Shared state for the whole window.
 struct App {
     journal: Journal,
     conflicts: ConflictChannel,
-    cancel: Arc<AtomicBool>,
+    cancel: Arc<Stop>,
     running: AtomicBool,
 }
 
@@ -836,7 +836,19 @@ fn discard_interrupted(link: String, state: State<'_, App>) -> Result<u64, Strin
 
 #[tauri::command]
 fn cancel_run(state: State<'_, App>) {
-    state.cancel.store(true, Ordering::Relaxed);
+    state.cancel.after_this_file();
+}
+
+/// Put the run down where it is, mid-file.
+///
+/// Separate command rather than an argument to `cancel_run` because they are
+/// different promises and the window says so: this one abandons whatever is
+/// being written. What it leaves is what a killed process leaves, so the
+/// interrupted-run banner picks it up with Resume and Clean up already
+/// attached — the kill switch needs no recovery of its own.
+#[tauri::command]
+fn stop_now(state: State<'_, App>) {
+    state.cancel.now();
 }
 
 #[tauri::command]
@@ -847,7 +859,29 @@ fn resolve_conflict(
 ) -> Result<(), String> {
     let action = ConflictAction::parse(&action).ok_or("that conflict action is not one I know")?;
     if state.conflicts.reply(Reply {
-        action,
+        answer: Answer::Conflict(action),
+        apply_to_all,
+    }) {
+        Ok(())
+    } else {
+        Err("nothing is waiting for that answer any more".to_string())
+    }
+}
+
+/// Answer "an identical copy is already there — may the original here go?".
+#[tauri::command]
+fn resolve_identical(
+    remove: bool,
+    apply_to_all: bool,
+    state: State<'_, App>,
+) -> Result<(), String> {
+    let action = if remove {
+        IdenticalAction::DeleteOriginal
+    } else {
+        IdenticalAction::KeepOriginal
+    };
+    if state.conflicts.reply(Reply {
+        answer: Answer::Identical(action),
         apply_to_all,
     }) {
         Ok(())
@@ -891,7 +925,7 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<(), String> {
         }
     }
 
-    state.cancel.store(false, Ordering::Relaxed);
+    state.cancel.clear();
     let replies = state.conflicts.open();
     let cancel = Arc::clone(&state.cancel);
 
@@ -1033,7 +1067,7 @@ fn main() {
         .manage(App {
             journal,
             conflicts: ConflictChannel::default(),
-            cancel: Arc::new(AtomicBool::new(false)),
+            cancel: Arc::new(Stop::new()),
             running: AtomicBool::new(false),
         })
         .invoke_handler(tauri::generate_handler![
@@ -1047,7 +1081,9 @@ fn main() {
             start_transfer,
             preview_transfer,
             cancel_run,
+            stop_now,
             resolve_conflict,
+            resolve_identical,
             history,
             whereis,
             recent,

@@ -11,7 +11,10 @@ use std::time::Duration;
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tungstate_journal::ConflictAction;
-use tungstate_transfer::{Conflict, ConflictResolver, FileOutcome, Progress, RunShape, SkipReason};
+use tungstate_transfer::{
+    Conflict, ConflictResolver, FileOutcome, Identical, IdenticalAction, Original, Progress,
+    RunShape, SkipReason,
+};
 
 /// What the run turned out to be, before any of it happens.
 #[derive(Debug, Clone, Copy, Serialize)]
@@ -41,6 +44,14 @@ pub struct AdvancedEvent {
 /// A file starting to transfer.
 #[derive(Debug, Clone, Serialize)]
 pub struct StartedEvent {
+    pub path: String,
+    pub size: u64,
+}
+
+/// A file whose content is already byte-for-byte at the destination, where
+/// the link would otherwise remove the original from this machine.
+#[derive(Debug, Clone, Serialize)]
+pub struct IdenticalEvent {
     pub path: String,
     pub size: u64,
 }
@@ -98,6 +109,21 @@ impl Progress for EventProgress {
         );
     }
 
+    fn at_once(&mut self, files: usize) {
+        let _ = self.app.emit("transfer://at-once", files);
+    }
+
+    fn checking(&mut self, path: &Path, done: u64, total: u64) {
+        let _ = self.app.emit(
+            "transfer://checking",
+            AdvancedEvent {
+                path: path.display().to_string(),
+                done,
+                total,
+            },
+        );
+    }
+
     fn advanced(&mut self, path: &Path, done: u64, total: u64) {
         let _ = self.app.emit(
             "transfer://advanced",
@@ -124,7 +150,14 @@ impl Progress for EventProgress {
     fn finished(&mut self, path: &Path, outcome: FileOutcome) {
         let (outcome, detail) = match outcome {
             FileOutcome::Transferred => ("transferred", None),
-            FileOutcome::AlreadyPresent => ("already-present", None),
+            FileOutcome::AlreadyPresent(Original::Removed) => (
+                "already-present",
+                Some("both copies read and compared; the original here was removed"),
+            ),
+            FileOutcome::AlreadyPresent(Original::Kept) => (
+                "already-present",
+                Some("both copies read and compared; the original here was kept"),
+            ),
             FileOutcome::Quarantined => ("quarantined", None),
             FileOutcome::Failed => ("failed", None),
             FileOutcome::Skipped(SkipReason::RecentlyModified) => (
@@ -149,9 +182,22 @@ impl Progress for EventProgress {
 /// What the window sent back when asked about a conflict.
 #[derive(Debug, Clone, Copy)]
 pub struct Reply {
-    pub action: ConflictAction,
-    /// Apply to every later conflict in this run without asking again.
+    pub answer: Answer,
+    /// Apply to every later question of the same kind in this run.
     pub apply_to_all: bool,
+}
+
+/// Which question the window is answering.
+///
+/// One channel carries both because only one question is ever outstanding —
+/// the engine holds a single resolver behind a lock — and the variant is what
+/// stops a stale answer to one being read as an answer to the other.
+#[derive(Debug, Clone, Copy)]
+pub enum Answer {
+    /// What to do about something already holding the name.
+    Conflict(ConflictAction),
+    /// What to do with the original when the destination already matches.
+    Identical(IdenticalAction),
 }
 
 /// The half of the conflict channel the window writes to.
@@ -200,6 +246,9 @@ pub struct WindowResolver {
     replies: Receiver<Reply>,
     /// Set once the user answers "do this for all of them".
     sticky: Option<ConflictAction>,
+    /// The same, for the identical-copy question. Separate because answering
+    /// every conflict one way says nothing about whether originals may go.
+    sticky_identical: Option<IdenticalAction>,
     /// Used when the window never answers.
     fallback: ConflictAction,
 }
@@ -210,6 +259,7 @@ impl WindowResolver {
             app,
             replies,
             sticky: None,
+            sticky_identical: None,
             fallback,
         }
     }
@@ -246,9 +296,48 @@ impl ConflictResolver for WindowResolver {
             return self.fallback;
         };
 
+        let Answer::Conflict(action) = reply.answer else {
+            tracing::warn!(
+                "an answer to a different question arrived; using the configured action"
+            );
+            return self.fallback;
+        };
         if reply.apply_to_all {
-            self.sticky = Some(reply.action);
+            self.sticky = Some(action);
         }
-        reply.action
+        action
+    }
+
+    fn identical(&mut self, found: &Identical) -> IdenticalAction {
+        if let Some(action) = self.sticky_identical {
+            return action;
+        }
+
+        let sent = self.app.emit(
+            "transfer://identical",
+            IdenticalEvent {
+                path: found.path.display().to_string(),
+                size: found.size,
+            },
+        );
+        // No window to ask. Keep it: deleting somebody's only other copy
+        // because nobody was there to say no is the outcome this exists to
+        // prevent, and a file left behind costs disk space rather than data.
+        if sent.is_err() {
+            return IdenticalAction::KeepOriginal;
+        }
+
+        let Ok(reply) = self.replies.recv_timeout(ANSWER_TIMEOUT) else {
+            tracing::warn!("no answer about an identical copy; leaving the original here");
+            return IdenticalAction::KeepOriginal;
+        };
+
+        let Answer::Identical(action) = reply.answer else {
+            return IdenticalAction::KeepOriginal;
+        };
+        if reply.apply_to_all {
+            self.sticky_identical = Some(action);
+        }
+        action
     }
 }

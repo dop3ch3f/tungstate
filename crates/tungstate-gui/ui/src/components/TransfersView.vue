@@ -9,6 +9,9 @@ export interface Row {
   detail: string | null;
   /// Bytes transferred so far, for the file in flight.
   done: number;
+  /// Total of the comparison pass, spanning both copies. Zero when not
+  /// comparing; `done` is measured against this instead of `size`.
+  checked: number;
 }
 
 const props = defineProps<{
@@ -21,20 +24,33 @@ const props = defineProps<{
   busy: string;
   note: string;
   shape: Began | null;
+  /// Live width. Moves during a run as the governor measures, so it is not
+  /// part of `shape`.
+  atOnce: number | null;
+  halting: boolean;
 }>();
-const emit = defineEmits<{ stop: []; resume: [link: string]; discard: [link: string] }>();
+const emit = defineEmits<{
+  stop: []; stopNow: []; resume: [link: string]; discard: [link: string];
+}>();
 
 const reclaimed = computed(() =>
   props.rows.filter((r) => r.state === "transferred").reduce((n, r) => n + r.size, 0),
 );
 const settled = computed(() =>
-  props.rows.filter((r) => r.state !== "live" && r.state !== "waiting").length,
+  props.rows.filter((r) => !["live", "waiting", "checking"].includes(r.state)).length,
 );
 // Bytes rather than file count: fifteen small files and one enormous one
 // would otherwise sit at 94% for most of the run.
 const totalBytes = computed(() => props.rows.reduce((n, r) => n + r.size, 0));
+// A row being compared has moved nothing, however far through the comparison
+// it is: counting its check against the overall bar would show progress that
+// no byte at the destination backs up.
 const movedBytes = computed(() =>
-  props.rows.reduce((n, r) => n + (r.state === "waiting" ? 0 : r.state === "live" ? r.done : r.size), 0),
+  props.rows.reduce(
+    (n, r) =>
+      n + (r.state === "waiting" || r.state === "checking" ? 0 : r.state === "live" ? r.done : r.size),
+    0,
+  ),
 );
 const progress = computed(() => (totalBytes.value ? (movedBytes.value / totalBytes.value) * 100 : 0));
 
@@ -50,6 +66,7 @@ const tally = computed(() => {
 
 const word: Record<string, string> = {
   waiting: "waiting",
+  checking: "comparing",
   live: "copying",
   transferred: "verified",
   "already-present": "already there",
@@ -63,9 +80,17 @@ const word: Record<string, string> = {
   <div class="sheet">
     <div style="display:flex; align-items:baseline; justify-content:space-between; gap:12px">
       <h1>Transfers</h1>
-      <button v-if="props.live" class="btn danger" :disabled="props.stopping" @click="emit('stop')">
-        {{ props.stopping ? "Finishing what is in flight" : "Stop after these files" }}
-      </button>
+      <div v-if="props.live" class="go">
+        <button class="btn" :disabled="props.stopping" @click="emit('stop')">
+          {{ props.stopping ? "Finishing what is in flight" : "Stop after these files" }}
+        </button>
+        <!-- Offered even while the gentle stop is settling: waiting for four
+             large files to finish is exactly when somebody decides they meant
+             now. -->
+        <button class="btn danger" :disabled="props.halting" @click="emit('stopNow')">
+          {{ props.halting ? "Stopping…" : "Stop now" }}
+        </button>
+      </div>
     </div>
 
     <!-- Outside the branches below on purpose. A run that fails before its
@@ -121,8 +146,8 @@ const word: Record<string, string> = {
           <!-- The engine decides this by asking the destination, so it is the
                only place the answer exists. Shown because "is it going one at
                a time?" was otherwise unanswerable from the window. -->
-          <div v-if="props.shape" class="note">
-            {{ props.shape.at_once === 1 ? "one at a time" : props.shape.at_once + " at a time" }}
+          <div v-if="props.atOnce" class="note">
+            {{ props.atOnce === 1 ? "one at a time" : props.atOnce + " at a time" }}
           </div>
         </div>
       </div>
@@ -136,7 +161,7 @@ const word: Record<string, string> = {
       </div>
 
       <div v-if="props.summary" class="notice" :class="props.summary.failed ? 'bad' : 'good'">
-        {{ props.summary.cancelled ? "Stopped early." : props.summary.destination_lost ? "Stopped." : "Finished." }}
+        {{ props.summary.cancelled ? "Stopped." : props.summary.destination_lost ? "Stopped." : "Finished." }}
         {{ props.summary.transferred }} {{ moved }},
         {{ props.summary.already_present }} already there,
         {{ props.summary.skipped }} {{ takes ? "left here" : "not copied" }},
@@ -172,6 +197,16 @@ const word: Record<string, string> = {
               </span>
               <span v-if="row.state === 'live' && row.size" class="pct">
                 {{ bytes(row.done) }} of {{ bytes(row.size) }}
+              </span>
+
+              <!-- Its own bar, measured against the comparison total rather
+                   than the file size, because a comparison reads both copies
+                   and would otherwise appear to reach 200%. -->
+              <span v-if="row.state === 'checking' && row.checked" class="filebar reading">
+                <span :style="{ width: Math.min(100, (row.done / row.checked) * 100) + '%' }"></span>
+              </span>
+              <span v-if="row.state === 'checking'" class="pct">
+                reading both copies — nothing sent yet
               </span>
             </td>
           </tr>

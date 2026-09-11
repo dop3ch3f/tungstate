@@ -656,7 +656,6 @@ fn a_failure_carries_a_reason_worth_reading() {
 #[test]
 fn a_cancelled_run_stops_cleanly_and_keeps_what_it_finished() {
     use std::sync::Arc;
-    use std::sync::atomic::AtomicBool;
 
     // More files than workers, deliberately. With several in flight,
     // "stop after this file" means "stop after the files in flight" — the
@@ -667,7 +666,7 @@ fn a_cancelled_run_stops_cleanly_and_keeps_what_it_finished() {
         rig.write_source(&format!("f{i:02}.mp4"), b"contents");
     }
 
-    let flag = Arc::new(AtomicBool::new(false));
+    let flag = Arc::new(Stop::new());
     let mut stopper = StopAfterFirst {
         flag: Arc::clone(&flag),
     };
@@ -714,13 +713,13 @@ fn a_cancelled_run_stops_cleanly_and_keeps_what_it_finished() {
 }
 
 struct StopAfterFirst {
-    flag: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    flag: std::sync::Arc<Stop>,
 }
 
 impl Progress for StopAfterFirst {
     fn starting(&mut self, _path: &Path, _size: u64) {}
     fn finished(&mut self, _path: &Path, _outcome: FileOutcome) {
-        self.flag.store(true, std::sync::atomic::Ordering::Relaxed);
+        self.flag.after_this_file();
     }
 }
 
@@ -1947,7 +1946,7 @@ fn a_parallel_run_moves_the_same_bytes_as_a_sequential_one() {
 /// Panics if asked two questions at once, which is what an unguarded
 /// resolver would allow.
 struct OneAtATime {
-    inside: std::sync::Arc<AtomicBool>,
+    inside: std::sync::Arc<std::sync::atomic::AtomicBool>,
     asked: std::sync::Arc<std::sync::atomic::AtomicUsize>,
 }
 
@@ -1977,7 +1976,7 @@ fn conflicts_are_asked_one_at_a_time_however_many_files_are_in_flight() {
 
     let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut resolver = OneAtATime {
-        inside: std::sync::Arc::new(AtomicBool::new(false)),
+        inside: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
         asked: std::sync::Arc::clone(&asked),
     };
     let mut progress = SilentProgress;
@@ -2225,5 +2224,321 @@ fn a_local_destination_really_does_move_several_at_once() {
     assert_eq!(
         reached, 4,
         "a local destination should use all four workers, peaked at {reached}"
+    );
+}
+
+/// Answers the identical-copy question, and remembers being asked.
+struct Keeper {
+    asked: std::sync::Arc<std::sync::atomic::AtomicUsize>,
+    action: IdenticalAction,
+}
+
+impl ConflictResolver for Keeper {
+    fn resolve(&mut self, _conflict: &Conflict) -> ConflictAction {
+        ConflictAction::Quarantine
+    }
+    fn identical(&mut self, _found: &Identical) -> IdenticalAction {
+        self.asked.fetch_add(1, Ordering::SeqCst);
+        self.action
+    }
+}
+
+fn ask_about_identical(policy: SourcePolicy, action: IdenticalAction) -> (usize, bool, Summary) {
+    let rig = Rig::new(policy);
+    rig.write_source("same.mp4", b"identical contents");
+    rig.write_dest("same.mp4", b"identical contents");
+
+    let asked = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let mut resolver = Keeper {
+        asked: std::sync::Arc::clone(&asked),
+        action,
+    };
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+
+    let still_here = rig.source_dir.path().join("same.mp4").exists();
+    (asked.load(Ordering::SeqCst), still_here, summary)
+}
+
+#[test]
+fn a_move_asks_before_removing_an_original_that_is_already_over_there() {
+    // The scariest thing this program does: deleting the user's other copy on
+    // the strength of a hash it computed itself. It now asks first.
+    let (asked, still_here, summary) =
+        ask_about_identical(SourcePolicy::Delete, IdenticalAction::KeepOriginal);
+    assert_eq!(asked, 1, "a move must ask");
+    assert!(still_here, "answering 'keep' must leave the original here");
+    assert_eq!(summary.already_present, 1);
+
+    let (asked, still_here, _) =
+        ask_about_identical(SourcePolicy::Delete, IdenticalAction::DeleteOriginal);
+    assert_eq!(asked, 1);
+    assert!(!still_here, "answering 'remove' must remove it");
+}
+
+#[test]
+fn a_copy_has_nothing_to_ask_about_and_does_not() {
+    // Nothing was ever going to happen to the original, so a dialog here would
+    // be a question with one answer.
+    let (asked, still_here, summary) =
+        ask_about_identical(SourcePolicy::Keep, IdenticalAction::DeleteOriginal);
+    assert_eq!(asked, 0, "a copy must not ask");
+    assert!(still_here);
+    assert_eq!(summary.already_present, 1);
+}
+
+#[test]
+fn an_unattended_run_still_reclaims_space_by_default() {
+    // The defaulted answer is what a scheduled drain gets. If this flipped to
+    // "keep", every unattended drain would silently stop freeing anything.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("same.mp4", b"identical contents");
+    rig.write_dest("same.mp4", b"identical contents");
+
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let mut progress = SilentProgress;
+    Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+
+    assert!(
+        !rig.source_dir.path().join("same.mp4").exists(),
+        "the default must stay as it was: the content is verifiably there"
+    );
+}
+
+/// Reports the phase each file passed through, in order.
+#[derive(Default)]
+struct Phases {
+    seen: Vec<String>,
+}
+
+impl Progress for Phases {
+    fn checking(&mut self, path: &Path, _done: u64, _total: u64) {
+        let line = format!("checking {}", path.display());
+        if self.seen.last() != Some(&line) {
+            self.seen.push(line);
+        }
+    }
+    fn starting(&mut self, path: &Path, _size: u64) {
+        self.seen.push(format!("starting {}", path.display()));
+    }
+    fn finished(&mut self, path: &Path, _outcome: FileOutcome) {
+        self.seen.push(format!("finished {}", path.display()));
+    }
+}
+
+#[test]
+fn comparing_two_copies_is_reported_as_its_own_phase() {
+    // The row said "copying, 0 bytes" through two full-file reads, which is
+    // what made four parallel comparisons look like four stalled transfers.
+    let rig = Rig::new(SourcePolicy::Keep);
+    rig.write_source("same.mp4", b"identical contents");
+    rig.write_dest("same.mp4", b"identical contents");
+
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let mut progress = Phases::default();
+    Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+
+    assert_eq!(
+        progress.seen,
+        vec![
+            "starting same.mp4".to_string(),
+            "checking same.mp4".to_string(),
+            "finished same.mp4".to_string(),
+        ],
+    );
+}
+
+#[test]
+fn a_fresh_file_is_never_reported_as_being_compared() {
+    // Nothing is at the destination, so there is nothing to read: a check
+    // phase here would be a bar for work that is not happening.
+    let rig = Rig::new(SourcePolicy::Keep);
+    rig.write_source("new.mp4", b"not there yet");
+
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let mut progress = Phases::default();
+    Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+
+    assert!(
+        !progress.seen.iter().any(|s| s.starts_with("checking")),
+        "got {:?}",
+        progress.seen
+    );
+}
+
+/// Presses "stop now" as soon as the first file starts moving bytes.
+struct HardStop {
+    stop: std::sync::Arc<Stop>,
+}
+
+impl Progress for HardStop {
+    // Pressed as the file starts rather than from `advanced`: progress is
+    // throttled to four times a second, so a local file finishes before a
+    // single report and there would be no mid-file moment to press in.
+    fn starting(&mut self, _path: &Path, _size: u64) {
+        self.stop.now();
+    }
+    fn finished(&mut self, _path: &Path, _outcome: FileOutcome) {}
+}
+
+#[test]
+fn a_hard_stop_abandons_the_file_in_flight_and_leaves_it_recoverable() {
+    use std::sync::Arc;
+
+    // Big enough to span several chunks, so there is a mid-file moment to
+    // stop in at all.
+    let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::Discovered);
+    let big = vec![b'x'; 5 * 1024 * 1024];
+    rig.write_source("big.mp4", &big);
+
+    let stop = Arc::new(Stop::new());
+    let mut progress = HardStop {
+        stop: Arc::clone(&stop),
+    };
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .cancellable(Arc::clone(&stop))
+    .run()
+    .unwrap();
+
+    assert!(summary.cancelled, "a hard stop must report as a stop");
+    assert_eq!(summary.transferred, 0, "the file was abandoned, not moved");
+    assert!(
+        summary.failures.is_empty(),
+        "a deliberate stop is not a failure: {:?}",
+        summary.failures
+    );
+    assert!(
+        rig.source_dir.path().join("big.mp4").exists(),
+        "the original must survive a stop untouched"
+    );
+    // The op stays open, which is what puts Resume and Clean up in front of
+    // the user rather than leaving an orphan nobody can find.
+    assert_eq!(
+        rig.journal.incomplete_for_link(rig.link.id).unwrap().len(),
+        1,
+        "the abandoned file must be findable as interrupted work"
+    );
+}
+
+/// Asks for the weaker stop at the same moment [`HardStop`] asks for the
+/// stronger one, so the two tests differ only in which was pressed.
+struct Gentle(std::sync::Arc<Stop>);
+
+impl Progress for Gentle {
+    fn starting(&mut self, _path: &Path, _size: u64) {
+        self.0.after_this_file();
+    }
+    fn finished(&mut self, _path: &Path, _outcome: FileOutcome) {}
+}
+
+#[test]
+fn a_gentle_stop_never_abandons_a_file_part_way() {
+    use std::sync::Arc;
+
+    let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::Discovered);
+    let big = vec![b'x'; 5 * 1024 * 1024];
+    rig.write_source("big.mp4", &big);
+
+    let stop = Arc::new(Stop::new());
+    let mut progress = Gentle(Arc::clone(&stop));
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .cancellable(Arc::clone(&stop))
+    .run()
+    .unwrap();
+
+    assert_eq!(
+        summary.transferred, 1,
+        "the file in flight must be finished, not dropped"
+    );
+    assert_eq!(
+        rig.journal.incomplete_for_link(rig.link.id).unwrap().len(),
+        0,
+        "nothing should be left open"
+    );
+}
+
+#[test]
+fn narrowing_mid_run_still_lands_every_file() {
+    // The park-and-wake path, which replaced workers simply returning. A
+    // parked worker that is never woken, or one that returns while files are
+    // still queued, both look like a hung transfer — so the guarantee is not
+    // about speed, it is that the run finishes and nothing is dropped.
+    let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::Discovered);
+    for i in 0..60 {
+        rig.write_source(&format!("f{i:02}.mp4"), b"contents");
+    }
+
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    // Short enough that the width is reconsidered many times over 60 files.
+    .sampling_every(Duration::from_millis(1))
+    .run()
+    .unwrap();
+
+    assert_eq!(summary.transferred, 60);
+    assert_eq!(
+        std::fs::read_dir(rig.dest_dir.path()).unwrap().count(),
+        60,
+        "every file must land however often the width changed"
     );
 }

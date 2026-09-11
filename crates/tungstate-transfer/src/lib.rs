@@ -16,14 +16,19 @@
 
 mod conflict;
 mod governor;
+mod stop;
 mod walk;
 
-pub use conflict::{Conflict, ConflictResolver, Decision, FixedResolver, InteractiveResolver};
+pub use conflict::{
+    Conflict, ConflictResolver, Decision, FixedResolver, Identical, IdenticalAction,
+    InteractiveResolver,
+};
 pub use governor::{Governor, Limits};
+pub use stop::{Halt, Stop};
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
@@ -90,6 +95,17 @@ pub enum TransferError {
         path: PathBuf,
     },
 
+    /// A hard stop landed mid-file, and this file was put down where it was.
+    ///
+    /// Its own variant rather than an `Io` error because it is not a failure:
+    /// the run was told to do this, and reporting it beside genuine failures
+    /// would make a deliberate stop look like a fault.
+    #[error("`{path}` was abandoned when the run was stopped")]
+    Stopped {
+        /// The file that was being written when the stop arrived.
+        path: PathBuf,
+    },
+
     /// The source is remote, and there is no trash to send an original to.
     #[error("`{path}` is on a remote, which has no trash; use --move or --copy")]
     TrashUnsupported {
@@ -116,14 +132,25 @@ pub type Result<T> = std::result::Result<T, TransferError>;
 pub enum FileOutcome {
     /// Copied, verified, and the source policy applied.
     Transferred,
-    /// Already present at the destination with identical content.
-    AlreadyPresent,
+    /// Already present at the destination with identical content, having read
+    /// both copies to be sure. Carries what became of the original here.
+    AlreadyPresent(Original),
     /// Left alone, with the reason.
     Skipped(SkipReason),
     /// Parked under the quarantine directory.
     Quarantined,
     /// Could not be transferred. The original was left untouched.
     Failed,
+}
+
+/// What happened to the copy on this machine when the destination already
+/// matched it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Original {
+    /// The source policy was applied: deleted, or trashed.
+    Removed,
+    /// Left here, either because this was a copy or because it was asked.
+    Kept,
 }
 
 /// One file that could not be transferred, and why.
@@ -207,6 +234,15 @@ pub trait Progress: Send {
     /// per link, so an exchange reports twice.
     fn began(&mut self, _shape: RunShape) {}
 
+    /// The run has narrowed or widened since it began.
+    ///
+    /// Separate from `began` because `began` is a promise about one moment
+    /// and this is a correction to it: a width chosen by handshake can turn
+    /// out to be more than the far side can usefully do, and the window
+    /// showing "4 at a time" while two are parked would be another comfortable
+    /// lie of the kind this slice exists to remove.
+    fn at_once(&mut self, _files: usize) {}
+
     /// The whole plan, once, before the first file.
     ///
     /// Defaulted because not every caller wants it, and because this arrived
@@ -217,6 +253,15 @@ pub trait Progress: Send {
 
     /// A file is about to be transferred.
     fn starting(&mut self, path: &Path, size: u64);
+
+    /// Both copies are being read to find out whether they match.
+    ///
+    /// Its own phase because it is not copying and moves no bytes anywhere: a
+    /// row that says "copying, 0 bytes" through two full-file reads — one of
+    /// them across the network — looks exactly like a stalled transfer.
+    /// `total` spans both reads, so the bar crosses the whole check once
+    /// rather than filling twice.
+    fn checking(&mut self, _path: &Path, _done: u64, _total: u64) {}
 
     /// Bytes have moved for the file in flight.
     ///
@@ -415,9 +460,17 @@ pub struct Transfer<'a> {
     // and one silently overwrites the other. Sequentially each always sees
     // the other, so this is a hazard concurrency creates.
     claimed: Mutex<std::collections::BTreeSet<PathBuf>>,
-    // Checked between files, never mid-file: stopping partway through a copy
-    // would leave a partial, and the next run would redo it anyway.
-    cancel: Option<Arc<AtomicBool>>,
+    // Checked between files at either strength, and inside the copy and check
+    // loops at the stronger one.
+    cancel: Option<Arc<Stop>>,
+    /// How long the governor times one width for. Only a test sets this; a
+    /// real run uses the governor's own window.
+    #[cfg(test)]
+    window: Option<Duration>,
+    /// Bytes written by every worker this run, for the governor to divide by
+    /// a window. Relaxed: it feeds a throughput estimate, and an exact value
+    /// would not change any decision made from it.
+    moved: AtomicU64,
     /// An explicit ceiling, when the user has one in mind. Raises the limit a
     /// run will climb to; never removes the handshake gate or the back-off.
     parallel: Option<usize>,
@@ -451,17 +504,22 @@ impl<'a> Transfer<'a> {
             progress: Mutex::new(progress),
             claimed: Mutex::new(std::collections::BTreeSet::new()),
             cancel: None,
+            #[cfg(test)]
+            window: None,
+            moved: AtomicU64::new(0),
             parallel: None,
         }
     }
 
-    /// Stop cleanly when `flag` is set.
+    /// Stop when asked, at whichever strength was asked for.
     ///
-    /// Honoured between files rather than mid-copy, so a cancelled run leaves
-    /// completed transfers committed and nothing half-written.
+    /// [`Halt::AfterThisFile`] is honoured between files, so nothing in flight
+    /// is abandoned. [`Halt::Now`] is honoured inside the copy and check
+    /// loops, so it may leave a partial file — which recovery already handles,
+    /// because it is the same thing a killed process leaves.
     #[must_use]
-    pub fn cancellable(mut self, flag: Arc<AtomicBool>) -> Self {
-        self.cancel = Some(flag);
+    pub fn cancellable(mut self, stop: Arc<Stop>) -> Self {
+        self.cancel = Some(stop);
         self
     }
 
@@ -491,13 +549,25 @@ impl<'a> Transfer<'a> {
         anchor: &tungstate_backend::RootToken,
     ) {
         loop {
-            if index >= governor.limit() {
-                tracing::debug!(index, "standing down; the far side wants fewer");
-                return;
-            }
             if self.cancelled() {
                 tracing::info!("stopping at the user's request");
                 lock(shared).cancelled = true;
+                return;
+            }
+
+            // Between files is the only point a width change can take effect:
+            // a worker part-way through a copy cannot stand down without
+            // throwing the work away.
+            if let Some(width) = governor.reconsider(self.moved.load(Ordering::Relaxed)) {
+                lock(&self.progress).at_once(width);
+            }
+
+            // Park rather than return when the run has narrowed. A returned
+            // thread cannot be recalled, which would make the limit one-way
+            // and a measurement that guessed wrong permanent.
+            let empty = || lock(queue).is_empty() || self.cancelled();
+            if !governor.wait_for_room(index, &empty) {
+                tracing::debug!(index, "standing down; nothing left to take");
                 return;
             }
 
@@ -522,6 +592,13 @@ impl<'a> Transfer<'a> {
             // `failures` is what the caller shows at the end.
             let outcome = match self.transfer_one(&file) {
                 Ok(outcome) => outcome,
+                // Asked for, so not reported beside genuine failures. The file
+                // stays where it was in every sense: original untouched, op
+                // still open, partial findable.
+                Err(TransferError::Stopped { .. }) => {
+                    lock(shared).cancelled = true;
+                    return;
+                }
                 Err(error) => {
                     // The far side saying "not so many at once" is not this
                     // file's fault, and the answer is fewer workers rather
@@ -547,7 +624,7 @@ impl<'a> Transfer<'a> {
                     summary.transferred += 1;
                     summary.bytes += file.size;
                 }
-                FileOutcome::AlreadyPresent => summary.already_present += 1,
+                FileOutcome::AlreadyPresent(_) => summary.already_present += 1,
                 FileOutcome::Skipped(_) => summary.skipped += 1,
                 FileOutcome::Quarantined => summary.quarantined += 1,
                 // Already counted above; the source was left untouched.
@@ -556,10 +633,14 @@ impl<'a> Transfer<'a> {
         }
     }
 
+    /// Whether the run should stop before picking up another file.
     fn cancelled(&self) -> bool {
-        self.cancel
-            .as_ref()
-            .is_some_and(|flag| flag.load(Ordering::Relaxed))
+        self.cancel.as_ref().is_some_and(|stop| stop.asked())
+    }
+
+    /// Whether the run should drop what it is holding, mid-file.
+    fn abandoning(&self) -> bool {
+        self.cancel.as_ref().is_some_and(|stop| stop.immediate())
     }
 
     /// Transfer everything the link covers.
@@ -623,6 +704,27 @@ impl<'a> Transfer<'a> {
         }
     }
 
+    /// Make the governor decide on a short window, so a test can watch the
+    /// width move without sleeping through several real ones.
+    #[cfg(test)]
+    pub(crate) fn sampling_every(mut self, window: Duration) -> Self {
+        self.window = Some(window);
+        self
+    }
+
+    #[cfg(test)]
+    fn new_governor(&self) -> Governor {
+        match self.window {
+            Some(window) => Governor::sampling_every(self.limits(), window),
+            None => Governor::new(self.limits()),
+        }
+    }
+
+    #[cfg(not(test))]
+    fn new_governor(&self) -> Governor {
+        Governor::new(self.limits())
+    }
+
     fn carry(&mut self, mut files: Vec<walk::File>) -> Result<Summary> {
         // Pin what the destination is before anything moves, so a volume
         // swapped underneath us is detectable rather than silently written to.
@@ -644,14 +746,15 @@ impl<'a> Transfer<'a> {
         // Find the limit before the first file, by handshake. Climbing during
         // the run would mean a real transfer is the thing that discovers the
         // ceiling; asking first means a refusal costs a rejected connection.
-        let governor = Governor::new(self.limits());
+        let governor = self.new_governor();
         loop {
             let before = governor.limit();
             if governor.try_promote(self.destination) == before {
                 break;
             }
         }
-        let workers = governor.limit().min(files.len().max(1));
+        governor.agree();
+        let workers = governor.agreed().min(files.len().max(1));
         tracing::info!(workers, files = files.len(), "starting");
 
         // Ahead of the plan so the caller can word the plan correctly. The
@@ -755,10 +858,9 @@ impl<'a> Transfer<'a> {
             Placement::Fresh => self
                 .copy_to(file, &destination)
                 .map(|()| FileOutcome::Transferred),
-            Placement::Identical => {
-                self.record_already_present(file, &destination)?;
-                Ok(FileOutcome::AlreadyPresent)
-            }
+            Placement::Identical => self
+                .record_already_present(file, &destination)
+                .map(FileOutcome::AlreadyPresent),
             Placement::Conflicting => self.resolve_conflict(file, &destination),
         }
     }
@@ -785,8 +887,26 @@ impl<'a> Transfer<'a> {
             return Ok(Placement::Conflicting);
         }
 
-        let here = digest(self.source, &file.path)?;
-        let there = digest(self.destination, destination)?;
+        // Two full reads, one of them possibly across the network, before a
+        // single byte can be sent. Reported as its own phase for exactly that
+        // reason, and throttled on the same interval a copy uses.
+        let total = file.size * 2;
+        let mut done = 0_u64;
+        let mut reported = Instant::now();
+        let mut watching = |read: u64| {
+            done += read;
+            if reported.elapsed() >= PROGRESS_INTERVAL {
+                reported = Instant::now();
+                lock(&self.progress).checking(&file.path, done, total);
+            }
+            !self.abandoning()
+        };
+
+        lock(&self.progress).checking(&file.path, 0, total);
+        let here = digest_watching(self.source, &file.path, &mut watching)?;
+        let there = digest_watching(self.destination, destination, &mut watching)?;
+        lock(&self.progress).checking(&file.path, total, total);
+
         if here == there {
             Ok(Placement::Identical)
         } else {
@@ -873,6 +993,11 @@ impl<'a> Transfer<'a> {
                 )?;
                 self.apply_source_policy(&file.path)?;
             }
+            // Left `Intended` on purpose when the run was stopped: that is
+            // the state `interrupted()` looks for, and it is what puts the
+            // abandoned file in front of the user with Resume and Clean up
+            // beside it. Marking it Failed would hide it.
+            Err(TransferError::Stopped { .. }) => {}
             Err(error) => {
                 self.journal.finish(
                     op,
@@ -978,6 +1103,17 @@ impl<'a> Transfer<'a> {
                     source: e,
                 })?;
             written += read as u64;
+            self.moved.fetch_add(read as u64, Ordering::Relaxed);
+
+            // Checked per chunk, which is what makes "stop now" mean now: a
+            // 4 GB file would otherwise hold the run open for minutes after
+            // the button was pressed. The partial left behind is the same
+            // shape a killed process leaves, and recovery already handles it.
+            if self.abandoning() {
+                return Err(TransferError::Stopped {
+                    path: source.to_path_buf(),
+                });
+            }
 
             // Throttled here rather than in the caller. A 4 GB file passes
             // through this loop four thousand times, and a window that redrew
@@ -1183,7 +1319,17 @@ fn is_orphan_temp(candidate: &str, name: &str) -> bool {
 }
 
 /// BLAKE3 of everything `backend` holds at `path`.
-fn digest(backend: &dyn Backend, path: &Path) -> Result<String> {
+/// Hash a file, telling `watching` how far in it is after every chunk.
+///
+/// The reporter is a closure rather than a `&dyn Progress` because the two
+/// callers count differently: a content check spans two files and wants one
+/// bar across both, while a readback verification is its own thing. Returning
+/// `false` from it abandons the read.
+fn digest_watching(
+    backend: &dyn Backend,
+    path: &Path,
+    mut watching: impl FnMut(u64) -> bool,
+) -> Result<String> {
     let mut reader = backend.open_read(path)?;
     let mut hasher = blake3::Hasher::new();
     let mut buffer = vec![0_u8; CHUNK];
@@ -1196,8 +1342,17 @@ fn digest(backend: &dyn Backend, path: &Path) -> Result<String> {
             break;
         }
         hasher.update(&buffer[..read]);
+        if !watching(read as u64) {
+            return Err(TransferError::Stopped {
+                path: path.to_path_buf(),
+            });
+        }
     }
     Ok(hasher.finalize().to_hex().to_string())
+}
+
+fn digest(backend: &dyn Backend, path: &Path) -> Result<String> {
+    digest_watching(backend, path, |_| true)
 }
 
 impl Transfer<'_> {
@@ -1227,7 +1382,7 @@ impl Transfer<'_> {
         }
     }
 
-    fn record_already_present(&self, file: &walk::File, destination: &Path) -> Result<()> {
+    fn record_already_present(&self, file: &walk::File, destination: &Path) -> Result<Original> {
         let op = self.journal.begin(&NewOp {
             kind: OpKind::Move,
             source: Some(Location::within(&self.link.source, file.path.clone())),
@@ -1245,8 +1400,26 @@ impl Transfer<'_> {
                 reason: "identical copy already at destination".to_string(),
             },
         )?;
-        // The content is safely there, so the source policy still applies.
-        self.apply_source_policy(&file.path)
+
+        // A copy has nothing to decide: the original was always staying.
+        if self.link.source_policy == SourcePolicy::Keep {
+            return Ok(Original::Kept);
+        }
+
+        // The content is verifiably there, so the source policy *can* apply —
+        // but applying it means deleting the user's other copy on the strength
+        // of a hash this program computed, and that is worth asking about.
+        let kept = lock(&self.resolver).identical(&Identical {
+            path: file.path.clone(),
+            size: file.size,
+        });
+        match kept {
+            IdenticalAction::KeepOriginal => Ok(Original::Kept),
+            IdenticalAction::DeleteOriginal => {
+                self.apply_source_policy(&file.path)?;
+                Ok(Original::Removed)
+            }
+        }
     }
 }
 
