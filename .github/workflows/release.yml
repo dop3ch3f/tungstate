@@ -84,7 +84,8 @@ jobs:
           if [ "$GITHUB_REF_TYPE" = tag ]; then
             version="${GITHUB_REF_NAME#v}"
           else
-            version="main-$(git rev-parse --short HEAD)"
+            base=$(grep -m1 '^version = ' Cargo.toml | sed 's/.*"\(.*\)".*/\1/' | cut -d- -f1)
+            version="${base}-main.g$(git rev-parse --short HEAD)"
           fi
           name="tungstate-${version}-${{ matrix.label }}"
           mkdir -p "dist/$name"
@@ -158,6 +159,33 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: desktop-${{ matrix.label }}
+
+      # Every bundler names its output after the configured version. Without
+      # this a rolling DMG is called `Tungstate_0.1.0-alpha.2_aarch64.dmg` --
+      # byte-different from the real alpha.2 release and impossible to tell
+      # apart from it by name, which is the exact confusion the rolling build
+      # exists to remove. It also makes the installed app report what it is.
+      #
+      # Node rather than jq: this job already installs node, and jq is not
+      # guaranteed on every runner image.
+      - name: Stamp the rolling version
+        if: github.event_name == 'workflow_run'
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=$(grep -m1 '^version = ' Cargo.toml | sed 's/.*"\(.*\)".*/\1/' | cut -d- -f1)
+          # `g` prefix, git-describe style, and not decoration: a 7-character
+          # hex SHA can come out all digits, and an all-digit semver identifier
+          # with a leading zero is invalid. The letter makes that unreachable.
+          version="${base}-main.g$(git rev-parse --short HEAD)"
+          node -e '
+            const fs = require("fs");
+            const path = "crates/tungstate-gui/tauri.conf.json";
+            const config = JSON.parse(fs.readFileSync(path, "utf8"));
+            config.version = process.argv[1];
+            fs.writeFileSync(path, JSON.stringify(config, null, 2) + "\n");
+          ' "$version"
+          echo "stamped $version"
 
       # Unsigned, deliberately. There is no Apple Developer certificate and no
       # Windows code-signing certificate, so macOS will show a Gatekeeper
@@ -273,7 +301,8 @@ jobs:
             echo "Built from [\`$short\`](https://github.com/${GITHUB_REPOSITORY}/commit/$SHA) — $subject"
             echo
             echo "This is whatever is on \`main\` right now, rebuilt every time the test suite"
-            echo "passes there. It moves without warning and its version reads \`main-$short\`."
+            echo "passes there. It moves without warning, and every file in it is named"
+            echo "for the commit it came from rather than for a version number."
             echo "For something that stays put, use a numbered release."
             echo
             cat .github/RELEASE_NOTES_HEADER.md
