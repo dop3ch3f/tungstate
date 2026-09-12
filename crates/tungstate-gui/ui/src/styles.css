@@ -280,6 +280,15 @@ button, .chrome { user-select: none; }
 /* A row's own buttons. Right-aligned so the verbs line up down the table
    rather than ragging with the width of whatever is beside them. */
 .ledger .actions { text-align: right; white-space: nowrap; padding-right: 0; }
+
+/* The connections table. `.path` breaks anywhere, which is right for a file
+   path and wrong for an address: the first long error in the column beside it
+   turned `127.0.0.1:2121` into `127.0.0.1:2 121`. A host and a root are read
+   as single tokens, so they get their own rule, and the check column is capped
+   so a sentence-long failure wraps inside itself instead of starving them. */
+.conns .addr { font-family: var(--mono); white-space: nowrap; }
+.conns .addr.root { white-space: normal; overflow-wrap: anywhere; }
+.conns .check { max-width: 32ch; }
 .ledger .actions .btn + .btn { margin-left: 2px; }
 
 .empty {

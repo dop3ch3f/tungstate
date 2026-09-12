@@ -96,7 +96,7 @@ function saved() {
       <span>Add one and it appears in each pane's “Go to…” list, ready to browse and drain into.</span>
     </div>
 
-    <table v-else class="ledger">
+    <table v-else class="ledger conns">
       <thead>
         <tr>
           <th>Name</th>
@@ -114,13 +114,13 @@ function saved() {
               {{ c.scheme }}<template v-if="!c.encrypted"> · sends your password in the clear</template>
             </div>
           </td>
-          <td class="path">
+          <td class="addr">
             <template v-if="c.host">{{ c.host }}<template v-if="c.port">:{{ c.port }}</template></template>
             <template v-else>this machine</template>
             <div v-if="c.username" class="detail">as {{ c.username }}</div>
           </td>
-          <td class="path">{{ c.root || "/" }}</td>
-          <td>
+          <td class="addr root">{{ c.root || "/" }}</td>
+          <td class="check">
             <span v-if="probes[c.name]" class="state" :class="probes[c.name].state">
               {{ probes[c.name].state === "waiting" ? "checking" :
                  probes[c.name].state === "ok" ? "reachable" : "unreachable" }}
