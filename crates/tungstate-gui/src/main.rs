@@ -1067,31 +1067,19 @@ fn recent(state: State<'_, App>) -> Result<Vec<OpView>, String> {
 }
 
 /// Files sitting in a link's quarantine folder, waiting for a decision.
+///
+/// Through the destination backend, because that is how the engine put them
+/// there. This used to walk `std::fs` against `link.destination.path`, which
+/// for a remote link is a connection-relative path resolved against this
+/// machine's working directory — so it found nothing and reported "nothing is
+/// set aside" however many files there were.
 #[tauri::command]
 fn quarantined(link: String, state: State<'_, App>) -> Result<Vec<String>, String> {
     let link = state.journal.link_by_name(&link).map_err(describe)?;
-    let root = link.destination.path.join(".tungstate-quarantine");
-    if !root.exists() {
-        return Ok(Vec::new());
-    }
-
-    let mut found = Vec::new();
-    let mut pending = vec![root.clone()];
-    while let Some(directory) = pending.pop() {
-        let Ok(entries) = std::fs::read_dir(&directory) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.is_dir() {
-                pending.push(path);
-            } else if let Ok(relative) = path.strip_prefix(&root) {
-                found.push(relative.display().to_string());
-            }
-        }
-    }
-    found.sort();
-    Ok(found)
+    let destination = backend_for(&link.destination, &state.journal)?;
+    tungstate_transfer::quarantined(destination.as_ref())
+        .map(|paths| paths.iter().map(|p| p.display().to_string()).collect())
+        .map_err(describe)
 }
 
 /// A run that was begun and never finished, as the window shows it.
