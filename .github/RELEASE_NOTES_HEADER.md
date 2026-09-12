@@ -28,13 +28,6 @@ chmod +x tungstate && ./tungstate --version
 
 Pick the `arm64` macOS build for Apple silicon and `x86_64` for Intel.
 
-## If you installed v0.1.0-alpha.1
-
-Replace it. Its desktop app could not display a transfer at all: Tauri
-resolved an empty permission list, so the window was denied `event.listen` and
-never heard a thing from the engine. Drains ran correctly and invisibly. The
-Activity view was also unstyled and could not scroll. Both are fixed here.
-
 ## What works today
 
 A durable drain: move files from one place to another, verify each one before
@@ -53,6 +46,10 @@ tungstate connection add nas --scheme ftps --host nas.local --user me --root /vo
 tungstate connection test nas
 tungstate link add ~/Videos nas:inbox --name drain --move --verify readback
 ```
+
+If a sign-in starts being refused, `tungstate connection password nas` replaces
+the stored one, and `tungstate connection update nas --root /volume2/media`
+moves a connection without disturbing the links that point at it.
 
 `tungstate log <path>` and `tungstate whereis <path|hash>` answer where a file
 went. Kill a run at any moment and start it again; nothing is lost and nothing
@@ -76,11 +73,21 @@ reopen it and the Transfers tab names what was left unfinished, with a button
 to finish it and a button to clear it. The command line has the same two:
 `tungstate link unfinished` and `tungstate link discard <name>`.
 
+The desktop app reaches remote places too. **Connections** adds a NAS over FTP
+or FTPS, tests it without transferring anything, and then it appears in each
+pane's "Go to…" list — so you can browse it and drag files onto it whether or
+not the volume is mounted. Editing a connection re-points every link that uses
+it, and there is a **Change password** button for the case a sign-in stops
+working.
+
 ## What does not work yet
 
 The governance half of the design — declaring a shape for a folder and having
-it reconciled — is not built. `tungstate folder add` is a stub. The desktop app
-cannot add connections yet, so remote destinations are command line only. See
+it reconciled — is not built. `tungstate folder add` is a stub. See
 [`docs/SYLLABUS.md`](docs/SYLLABUS.md) for the build order.
+
+Renaming a connection is not supported — its name is both what your saved pairs
+refer to and what the stored password is filed under, so remove and re-add
+instead.
 
 ---
