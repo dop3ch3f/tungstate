@@ -73,7 +73,26 @@ impl LinkView {
     }
 }
 
+/// Open the machine journal, honouring the test override.
+///
+/// `TUNGSTATE_JOURNAL` is the same seam the command line has had since slice
+/// 4b, and it is here for the same reason: without it, exercising the window
+/// means writing to the real database on the machine doing the exercising.
+/// Walking through a drain by hand should not leave connections and links in
+/// the journal a person actually keeps their history in.
+fn open_journal() -> tungstate_journal::Result<Journal> {
+    match std::env::var_os("TUNGSTATE_JOURNAL") {
+        Some(path) => Journal::open(Path::new(&path)),
+        None => Journal::open_default(),
+    }
+}
+
 /// Where passwords are kept. One store for the life of the window.
+///
+/// Always wrapped in [`EnvOverride`], so `TUNGSTATE_SECRET_<NAME>` supplies a
+/// password without the keychain being touched at all — which is what makes a
+/// walkthrough against a throwaway server possible without leaving a
+/// credential behind on the machine running it.
 fn secrets() -> impl SecretStore {
     EnvOverride(KeyringStore::new())
 }
@@ -1350,7 +1369,7 @@ fn main() {
         )
         .init();
 
-    let journal = match Journal::open_default() {
+    let journal = match open_journal() {
         Ok(journal) => journal,
         Err(error) => {
             // No journal means no history and no crash recovery, so there is
