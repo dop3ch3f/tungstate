@@ -1,13 +1,26 @@
 name: Release
 
-# Tags only. A release is a deliberate act, and anything else would publish
-# artefacts nobody decided to publish.
+# Three ways in, and they publish to different places.
+#
+# A tag is a deliberate act and becomes a real release. A green commit on main
+# becomes the rolling `main` prerelease, so there is always something
+# installable that matches the head of the branch without anyone having to cut
+# a version. A manual run proves the pipeline and publishes nothing.
+#
+# The rolling build reuses this file rather than living in its own workflow on
+# purpose: one definition of how an artefact is built means the thing you test
+# from `main` is made the same way the thing you release is.
 on:
   push:
     tags: ["v*"]
-  # So the pipeline can be proved before a real tag exists. Builds everything
-  # and uploads nothing.
   workflow_dispatch:
+  # Gated on CI rather than on the push itself. A build that compiles but fails
+  # its tests is exactly the build nobody should be installing, and `workflow_run`
+  # is what lets this wait for the answer.
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
 
 permissions:
   contents: write
@@ -36,8 +49,15 @@ jobs:
             target: x86_64-unknown-linux-gnu
             label: linux-x86_64
     runs-on: ${{ matrix.os }}
+    # A red CI run must not become an installable artefact.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
+      # The commit CI tested, not the current head of main: another merge can
+      # land between the two runs, and publishing something no CI run ever saw
+      # is the hole this whole gate exists to close.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -58,8 +78,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          [ "$GITHUB_REF_TYPE" = tag ] || version="dev-${GITHUB_SHA::7}"
+          # From the checked-out commit, not from the event: on a workflow_run
+          # `GITHUB_SHA` is the branch head, which is not necessarily what was
+          # checked out above.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            version="${GITHUB_REF_NAME#v}"
+          else
+            version="main-$(git rev-parse --short HEAD)"
+          fi
           name="tungstate-${version}-${{ matrix.label }}"
           mkdir -p "dist/$name"
           bin=target/${{ matrix.target }}/release/tungstate
@@ -104,8 +130,11 @@ jobs:
             args: ""
             label: linux-x86_64
     runs-on: ${{ matrix.os }}
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
 
       - name: Install Linux webview dependencies
         if: startsWith(matrix.os, 'ubuntu')
@@ -159,17 +188,21 @@ jobs:
 
   publish:
     needs: [cli, desktop]
-    # Only a tag becomes a release. A manual run proves the build and stops.
-    if: github.ref_type == 'tag'
+    # A tag becomes a release; a green commit on main refreshes the rolling
+    # one. A manual run proves the build and stops.
+    if: github.ref_type == 'tag' || github.event_name == 'workflow_run'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.workflow_run.head_sha || github.ref }}
       - uses: actions/download-artifact@v4
         with:
           path: artifacts
 
       - name: Collect
         run: |
+          set -euo pipefail
           mkdir -p release
           find artifacts -type f \
             \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \
@@ -178,7 +211,35 @@ jobs:
             -exec cp {} release/ \;
           ls -la release
 
-      - uses: softprops/action-gh-release@v2
+      # The desktop job uploads with `if-no-files-found: warn`, which it has to:
+      # its artefact paths list every platform's bundle and only one of them
+      # ever matches on a given runner. The cost is that a bundle path going
+      # stale would empty the desktop half of a release in silence. Checking the
+      # collected set here is where that becomes loud — a release nobody can
+      # install the app from should fail, not ship.
+      - name: Check every platform is represented
+        run: |
+          set -euo pipefail
+          missing=""
+          for pattern in '*.dmg' '*-setup.exe' '*.AppImage' '*.deb' \
+                         '*macos-arm64.tar.gz' '*macos-x86_64.tar.gz' \
+                         '*linux-x86_64.tar.gz' '*windows-x86_64.zip'; do
+            # `ls` on the glob rather than `compgen -G`: the builtin is bash
+            # only, and this check is worth nothing if it silently succeeds
+            # under a shell that lacks it.
+            # shellcheck disable=SC2086
+            ls release/$pattern > /dev/null 2>&1 || missing="$missing $pattern"
+          done
+          if [ -n "$missing" ]; then
+            echo "::error::the release is missing:$missing"
+            exit 1
+          fi
+          echo "all platforms present"
+        shell: bash
+
+      - name: Publish the release
+        if: github.ref_type == 'tag'
+        uses: softprops/action-gh-release@v2
         with:
           files: release/*
           # Anything with a hyphen in the version is a prerelease, so
@@ -187,3 +248,38 @@ jobs:
           generate_release_notes: true
           body_path: .github/RELEASE_NOTES_HEADER.md
           fail_on_unmatched_files: true
+
+      # Deleted and recreated rather than updated. A release that is only ever
+      # added to keeps an asset for ever after main stops producing it, and
+      # "latest from main" offering a file main does not build is worse than
+      # offering nothing. `--cleanup-tag` moves the tag with it.
+      #
+      # Always a prerelease, so this can never displace a real version as the
+      # repository's "Latest release".
+      - name: Refresh the rolling build
+        if: github.event_name == 'workflow_run'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          set -euo pipefail
+          short="${SHA::7}"
+          subject=$(git log -1 --pretty=%s "$SHA")
+          gh release delete main --yes --cleanup-tag || true
+          # A moment for the tag deletion to settle before the same name is
+          # created again; the two calls race often enough to matter.
+          sleep 5
+          {
+            echo "Built from [\`$short\`](https://github.com/${GITHUB_REPOSITORY}/commit/$SHA) — $subject"
+            echo
+            echo "This is whatever is on \`main\` right now, rebuilt every time the test suite"
+            echo "passes there. It moves without warning and its version reads \`main-$short\`."
+            echo "For something that stays put, use a numbered release."
+            echo
+            cat .github/RELEASE_NOTES_HEADER.md
+          } > notes.md
+          gh release create main release/* \
+            --title "Latest from main" \
+            --notes-file notes.md \
+            --prerelease \
+            --target "$SHA"
