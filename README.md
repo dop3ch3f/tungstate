@@ -14,6 +14,12 @@ delete the source, reclaim the space, next file, surviving sleep and network los
 Nothing is code-signed yet, so both macOS and Windows will warn you about an
 unidentified developer; the release notes say how to get past it.
 
+For whatever is on `main` right now, there is a rolling
+[**Latest from main**](https://github.com/dop3ch3f/tungstate/releases/tag/main)
+prerelease, rebuilt from the same pipeline every time the test suite passes on
+the branch. It moves without warning — use a numbered release for anything you
+want to stay put.
+
 Status: early construction. The durable drain works: `tungstate link add <from> <to> --name x --move` then `tungstate link run x`, resumable after a crash. Governance is next. See `docs/DESIGN.md` for the full design and
 `docs/SYLLABUS.md` for the build order.
 
