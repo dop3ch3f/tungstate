@@ -210,6 +210,26 @@ impl Governor {
     /// interrupting it to satisfy a measurement would throw the work away.
     #[must_use]
     pub fn reconsider(&self, moved: u64) -> Option<usize> {
+        self.reconsider_within(moved, None)
+    }
+
+    /// [`Governor::reconsider`] with the window's length supplied rather than
+    /// measured.
+    ///
+    /// The seam the narrowing tests use. A decision here is a function of
+    /// bytes and elapsed time, and the clock is the one input a test cannot
+    /// control: a CI runner that deschedules a thread mid-window turns a flat
+    /// rate into a collapsed one, and a single collapsed window settles the
+    /// governor for the rest of the run. Sleeping for real made the tests
+    /// assert on the scheduler rather than on the decision, and they failed on
+    /// macOS CI for exactly that reason.
+    #[cfg(test)]
+    pub(crate) fn reconsider_after(&self, moved: u64, elapsed: Duration) -> Option<usize> {
+        self.reconsider_within(moved, Some(elapsed))
+    }
+
+    /// `elapsed` is `None` in production, where the clock is the authority.
+    fn reconsider_within(&self, moved: u64, elapsed: Option<Duration>) -> Option<usize> {
         let mut sample = self
             .sample
             .lock()
@@ -218,7 +238,7 @@ impl Governor {
             return None;
         }
 
-        let elapsed = sample.since.elapsed();
+        let elapsed = elapsed.unwrap_or_else(|| sample.since.elapsed());
         if elapsed < self.window {
             return None;
         }
@@ -591,10 +611,21 @@ mod narrowing {
     use super::*;
 
     /// Drive one decision: pretend `bytes` moved over one whole window.
+    /// One window's worth of transfer, with the clock supplied rather than
+    /// slept through.
+    ///
+    /// It used to `sleep(window)` and let the real clock answer. That made
+    /// every assertion below a bet on the scheduler: `sleep` may overshoot by
+    /// any amount, an overshoot collapses the measured rate, and one collapsed
+    /// window settles the governor permanently. It failed on macOS CI as
+    /// `left: 3, right: 1` — narrowing stalled at the first bad window and
+    /// never resumed, because settling is for the rest of the run by design.
+    ///
+    /// Handing the duration in makes these tests deterministic *and* instant:
+    /// four tests that spent a second sleeping now spend none.
     fn after(governor: &Governor, window: Duration, total: &mut u64, bytes: u64) -> Option<usize> {
-        std::thread::sleep(window);
         *total += bytes;
-        governor.reconsider(*total)
+        governor.reconsider_after(*total, window)
     }
 
     #[test]
@@ -607,9 +638,9 @@ mod narrowing {
         governor.agree();
         assert_eq!(governor.limit(), 4);
 
-        // Doubling rather than holding steady: `sleep` overshoots by a few
-        // per cent, so "the same bytes each window" is not the same rate each
-        // window, and the comparison here is within five per cent by design.
+        // Doubling rather than holding steady. It had to be, when the clock
+        // was real and `sleep` overshot; it need not be now, but a rising rate
+        // is also the honest shape of "narrower is not slower", so it stays.
         let mut total = 0;
         assert_eq!(after(&governor, window, &mut total, 1_000), Some(3));
         assert_eq!(after(&governor, window, &mut total, 2_000), Some(2));
