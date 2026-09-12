@@ -2542,3 +2542,121 @@ fn narrowing_mid_run_still_lands_every_file() {
         "every file must land however often the width changed"
     );
 }
+
+// -- Reading back what was set aside -----------------------------------------
+
+/// A destination that answers every listing with a network failure.
+///
+/// The whole point of the quarantine tests below: "nothing is set aside" and
+/// "I could not ask" have to stay different answers, and only a backend that
+/// fails can prove they do.
+struct UnreachableBackend(Box<dyn Backend>);
+
+impl Backend for UnreachableBackend {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.0.capabilities()
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        self.0.root_token()
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.0.stat(path)
+    }
+    fn read_dir(&self, _path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        Err(tungstate_backend::BackendError::Remote {
+            endpoint: "nas".to_string(),
+            operation: "read_dir",
+            source: "the connection was reset".into(),
+        })
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.0.open_read(path)
+    }
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
+        self.0.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.0.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_quarantined_file_is_named_the_way_the_user_thinks_of_it() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("holiday.mp4", b"mine");
+    rig.write_dest("holiday.mp4", b"theirs, different");
+
+    let summary = rig
+        .run_with(&mut FixedResolver(ConflictAction::Quarantine))
+        .unwrap();
+    assert_eq!(summary.quarantined, 1);
+
+    // `holiday.mp4`, not `.tungstate-quarantine/holiday.mp4`. The directory is
+    // this program's bookkeeping and the user never chose it.
+    assert_eq!(
+        crate::quarantined(&rig.destination).unwrap(),
+        vec![PathBuf::from("holiday.mp4")]
+    );
+}
+
+#[test]
+fn quarantine_is_walked_all_the_way_down_and_sorted() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    for path in ["2024/trip.mp4", "2026/holiday.mp4", "loose.mp4"] {
+        rig.write_source(path, b"mine");
+        rig.write_dest(path, b"theirs, different");
+    }
+
+    rig.run_with(&mut FixedResolver(ConflictAction::Quarantine))
+        .unwrap();
+
+    // Sorted, because a list that reorders itself between two glances is a
+    // list nobody can check twice.
+    assert_eq!(
+        crate::quarantined(&rig.destination).unwrap(),
+        vec![
+            PathBuf::from("2024/trip.mp4"),
+            PathBuf::from("2026/holiday.mp4"),
+            PathBuf::from("loose.mp4"),
+        ]
+    );
+}
+
+#[test]
+fn a_destination_with_nothing_set_aside_reports_nothing() {
+    // No quarantine directory at all, which is every destination that has
+    // never had a conflict. Not an error.
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("holiday.mp4", b"mine");
+    rig.run().unwrap();
+
+    assert!(crate::quarantined(&rig.destination).unwrap().is_empty());
+}
+
+#[test]
+fn a_destination_that_cannot_be_reached_says_so_rather_than_reporting_nothing() {
+    // The bug this function was rewritten for. The old version walked
+    // `std::fs` at a path that does not exist on this machine when the
+    // destination is remote, found nothing, and returned an empty list — which
+    // reads as "nothing is quarantined" and is a lie about the user's files.
+    //
+    // Empty and unreachable must never be the same answer.
+    let rig = Rig::new(SourcePolicy::Delete);
+    let unreachable = UnreachableBackend(Box::new(LocalBackend::new(
+        rig.dest_dir.path().to_path_buf(),
+    )));
+
+    assert!(
+        crate::quarantined(&unreachable).is_err(),
+        "an unlistable destination must be an error, not an empty quarantine"
+    );
+}

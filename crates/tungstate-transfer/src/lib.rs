@@ -1270,6 +1270,55 @@ pub struct Discarded {
     pub bytes: u64,
 }
 
+/// Files the engine set aside at a destination, waiting for a decision.
+///
+/// Paths are relative to the quarantine directory, because that is where the
+/// user thinks of them as living: `holiday.mp4`, not
+/// `.tungstate-quarantine/holiday.mp4`.
+///
+/// Lives here rather than in a caller because this crate is the one that
+/// *writes* quarantine — [`QUARANTINE_DIR`] and the layout beneath it are its
+/// convention, and a second reader spelling them out again is a second thing
+/// to get wrong. It takes the destination backend for the same reason the
+/// engine does: a quarantined file is written through the backend, so it is
+/// only reachable through the backend. Reading it with `std::fs` finds nothing
+/// whenever the destination is not this machine.
+///
+/// # Errors
+/// [`TransferError::Backend`] if the destination cannot be listed. Note what is
+/// *not* an error: a destination that has never had a conflict has no
+/// quarantine directory, and that is the ordinary case of nothing set aside.
+pub fn quarantined(destination: &dyn Backend) -> Result<Vec<PathBuf>> {
+    let root = Path::new(QUARANTINE_DIR);
+
+    // Asked by listing the destination rather than by stat'ing the directory,
+    // so "nothing is set aside" and "the destination cannot be reached" stay
+    // different answers. Reporting an unreachable NAS as an empty quarantine
+    // is precisely the failure this function exists not to have.
+    let present = destination
+        .read_dir(Path::new(""))?
+        .iter()
+        .any(|entry| entry.meta.is_dir && entry.path == root);
+    if !present {
+        return Ok(Vec::new());
+    }
+
+    let mut found: Vec<PathBuf> = walk::files_under(destination, root)?
+        .into_iter()
+        // The walk started at `root`, so every path is under it and the
+        // fallback is unreachable; it is there so a future change to the walk
+        // cannot turn this into a panic.
+        .map(|file| {
+            file.path
+                .strip_prefix(root)
+                .unwrap_or(&file.path)
+                .to_path_buf()
+        })
+        .collect();
+    found.sort();
+    Ok(found)
+}
+
 /// Abandon an interrupted run: clear what it left behind, copy nothing.
 ///
 /// The counterpart to resuming. Same cleanup the next run would have done,
