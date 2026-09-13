@@ -3,9 +3,13 @@ name: Release
 # Three ways in, and they publish to different places.
 #
 # A tag is a deliberate act and becomes a real release. A green commit on main
-# becomes the rolling `main` prerelease, so there is always something
-# installable that matches the head of the branch without anyone having to cut
-# a version. A manual run proves the pipeline and publishes nothing.
+# becomes the `rolling` prerelease, so there is always something installable
+# that matches the head of the branch without anyone having to cut a version.
+# A manual run proves the pipeline and publishes nothing.
+#
+# The rolling tag is `rolling`, not `main`: git resolves `refs/tags/` before
+# `refs/heads/`, so a tag called `main` makes `git log main` and `git rebase
+# main` silently target a stale release instead of the branch.
 #
 # The rolling build reuses this file rather than living in its own workflow on
 # purpose: one definition of how an artefact is built means the thing you test
@@ -293,7 +297,7 @@ jobs:
           set -euo pipefail
           short="${SHA::7}"
           subject=$(git log -1 --pretty=%s "$SHA")
-          gh release delete main --yes --cleanup-tag || true
+          gh release delete rolling --yes --cleanup-tag || true
           # A moment for the tag deletion to settle before the same name is
           # created again; the two calls race often enough to matter.
           sleep 5
@@ -307,7 +311,7 @@ jobs:
             echo
             cat .github/RELEASE_NOTES_HEADER.md
           } > notes.md
-          gh release create main release/* \
+          gh release create rolling release/* \
             --title "Latest from main" \
             --notes-file notes.md \
             --prerelease \

@@ -15,7 +15,7 @@ Nothing is code-signed yet, so both macOS and Windows will warn you about an
 unidentified developer; the release notes say how to get past it.
 
 For whatever is on `main` right now, there is a rolling
-[**Latest from main**](https://github.com/dop3ch3f/tungstate/releases/tag/main)
+[**Latest from main**](https://github.com/dop3ch3f/tungstate/releases/tag/rolling)
 prerelease, rebuilt from the same pipeline every time the test suite passes on
 the branch. It moves without warning — use a numbered release for anything you
 want to stay put.
