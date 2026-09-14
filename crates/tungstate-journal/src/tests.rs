@@ -1037,3 +1037,86 @@ fn removing_a_link_that_is_not_there_says_so() {
     journal.remove_link("once").unwrap();
     assert!(journal.remove_link("once").is_err());
 }
+
+#[test]
+fn a_path_is_found_by_the_spelling_this_platform_uses() {
+    // Windows caught this: a row keeps its root and its path apart, the
+    // queries join them with `/`, and every caller on Windows types
+    // backslashes throughout — so nothing ever matched and `tungstate log`
+    // against an absolute path had never worked there.
+    //
+    // Built with `PathBuf` rather than a literal, so the test asks the
+    // question in whichever spelling the platform actually produces.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("dst");
+    let full = root.join("a.mp4");
+
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal
+        .begin(&NewOp {
+            source: Some(Location::new(dir.path().join("src"), "a.mp4")),
+            destination: Some(Location::new(&root, "a.mp4")),
+            ..drain_op()
+        })
+        .unwrap();
+    journal
+        .finish(id, &Outcome::Committed { hash: None })
+        .unwrap();
+
+    assert_eq!(
+        journal.history(&full).unwrap().len(),
+        1,
+        "an absolute path should find its own operation"
+    );
+    assert_eq!(
+        journal.whereis(&Locator::Path(&full)).unwrap().len(),
+        1,
+        "and so should whereis"
+    );
+
+    // A relative path still matches the stored path on its own.
+    assert_eq!(journal.history(Path::new("a.mp4")).unwrap().len(), 1);
+    // And something else does not.
+    assert!(journal.history(&root.join("b.mp4")).unwrap().is_empty());
+}
+
+#[test]
+fn windows_spellings_are_normalised_and_unix_ones_are_left_alone() {
+    use crate::{path_clause, separators_as_slashes};
+
+    // Both branches, from whichever platform is running this. The Windows one
+    // was wrong for the life of the project and only CI could see it.
+    assert_eq!(
+        separators_as_slashes(r"C:\Users\me\dst\a.mp4", true),
+        "C:/Users/me/dst/a.mp4"
+    );
+    assert_eq!(
+        separators_as_slashes("/Users/me/dst/a.mp4", true),
+        "/Users/me/dst/a.mp4"
+    );
+
+    // On Unix a backslash is an ordinary character in a filename, so leaving
+    // it alone is the difference between finding one file and conflating two.
+    assert_eq!(
+        separators_as_slashes(r"odd\name.mp4", false),
+        r"odd\name.mp4"
+    );
+
+    // The clause normalises the stored side to match, and only where it must.
+    let windows = path_clause(true);
+    assert!(windows.contains("replace(src_path"), "{windows}");
+    assert!(windows.contains(r"'\', '/'"), "{windows}");
+    let unix = path_clause(false);
+    assert!(!unix.contains("replace("), "{unix}");
+    assert!(unix.contains("src_root || '/' || src_path"), "{unix}");
+
+    // And both spellings are SQL this database will actually accept. A syntax
+    // error in the Windows branch is otherwise invisible from anywhere but a
+    // Windows CI run, which is a slow way to find a typo.
+    let conn = rusqlite::Connection::open_in_memory().expect("memory database");
+    crate::schema::prepare(&conn).expect("schema");
+    for (platform, clause) in [("windows", &windows), ("unix", &unix)] {
+        conn.prepare(&format!("SELECT * FROM ops WHERE {clause}"))
+            .unwrap_or_else(|e| panic!("the {platform} clause is not valid SQL: {e}\n{clause}"));
+    }
+}

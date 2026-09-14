@@ -503,18 +503,9 @@ impl Journal {
     /// # Errors
     /// [`JournalError::Query`] if the rows cannot be read.
     pub fn history(&self, path: &Path) -> Result<Vec<Op>> {
-        let needle = path_str(path);
+        let needle = path_needle(path);
         self.select(
-            // The concatenation branches are scoped to local rows on purpose.
-            // `root || '/' || path` is only a real path when the row is local;
-            // for a remote it splices a connection-relative root onto a
-            // connection-relative path and can collide with a genuine local
-            // file of the same shape.
-            "SELECT * FROM ops
-             WHERE src_path = ?1 OR dst_path = ?1
-                OR (src_connection IS NULL AND (src_root || '/' || src_path) = ?1)
-                OR (dst_connection IS NULL AND (dst_root || '/' || dst_path) = ?1)
-             ORDER BY id",
+            &format!("SELECT * FROM ops WHERE {} ORDER BY id", matches_path()),
             rusqlite::params![needle],
             "reading the history of a path",
         )
@@ -547,17 +538,13 @@ impl Journal {
                 "locating by hash",
             ),
             Locator::Path(path) => {
-                let needle = path_str(path);
+                let needle = path_needle(path);
                 self.select(
-                    // Same scoping as `history`; see the note there.
-                    "SELECT * FROM ops
-                     WHERE status = 'committed'
-                       AND (src_path = ?1 OR dst_path = ?1
-                            OR (src_connection IS NULL
-                                AND (src_root || '/' || src_path) = ?1)
-                            OR (dst_connection IS NULL
-                                AND (dst_root || '/' || dst_path) = ?1))
-                     ORDER BY id DESC",
+                    &format!(
+                        "SELECT * FROM ops WHERE status = 'committed' AND ({})
+                         ORDER BY id DESC",
+                        matches_path()
+                    ),
                     rusqlite::params![needle],
                     "locating by path",
                 )
@@ -613,6 +600,69 @@ pub(crate) fn query(context: &'static str) -> impl Fn(rusqlite::Error) -> Journa
 /// in a database dump. Revisit if a real filename ever trips it.
 pub(crate) fn path_str(path: &Path) -> String {
     path.to_string_lossy().into_owned()
+}
+
+/// A path as a needle for the history queries, with separators normalised.
+///
+/// Windows only, and deliberately. A journal row keeps its root and its path
+/// apart and the queries join them with `/`, so on Windows the stored spelling
+/// is `C:\Users\me\dst/a.mp4` while every caller types backslashes
+/// throughout. Nothing ever matched, which is why `tungstate log <path>` had
+/// never worked there.
+///
+/// Not done on Unix, where a backslash is an ordinary character in a filename:
+/// normalising there would make `a\b.mp4` and `a/b.mp4` compare equal, which
+/// is two different files answering to one name.
+pub(crate) fn path_needle(path: &Path) -> String {
+    separators_as_slashes(&path.to_string_lossy(), cfg!(windows))
+}
+
+/// The body of [`path_needle`], with the platform as an argument.
+///
+/// Taken as a parameter rather than read from `cfg!` so both answers can be
+/// tested from either platform. The Windows behaviour is the one that was
+/// wrong for the life of the project, and proving it on the machine doing the
+/// work beats waiting for a CI run to disagree.
+fn separators_as_slashes(text: &str, windows: bool) -> String {
+    if windows {
+        text.replace('\\', "/")
+    } else {
+        text.to_string()
+    }
+}
+
+/// The `WHERE` fragment that matches a path at either end of an operation.
+///
+/// The concatenation branches are scoped to local rows on purpose.
+/// `root || '/' || path` is only a real path when the row is local; for a
+/// remote it splices a connection-relative root onto a connection-relative
+/// path and can collide with a genuine local file of the same shape.
+fn matches_path() -> String {
+    path_clause(cfg!(windows))
+}
+
+/// The body of [`matches_path`], with the platform as an argument.
+fn path_clause(windows: bool) -> String {
+    // SQL string literals have no escape character, so `'\'` here is one
+    // backslash to SQLite rather than the start of an escape.
+    let normalised = |expression: String| {
+        if windows {
+            format!("replace({expression}, '\\', '/')")
+        } else {
+            expression
+        }
+    };
+    let joined = |root: &str, path: &str| normalised(format!("{root} || '/' || {path}"));
+
+    format!(
+        "{} = ?1 OR {} = ?1
+         OR (src_connection IS NULL AND {} = ?1)
+         OR (dst_connection IS NULL AND {} = ?1)",
+        normalised("src_path".to_string()),
+        normalised("dst_path".to_string()),
+        joined("src_root", "src_path"),
+        joined("dst_root", "dst_path"),
+    )
 }
 
 /// SQLite's INTEGER is signed 64-bit and it has no unsigned type, so sizes are
