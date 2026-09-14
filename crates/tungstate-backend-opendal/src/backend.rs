@@ -429,12 +429,57 @@ struct OpendalWrite {
 
 impl OpendalWrite {
     fn remote(&self, operation: &'static str, error: &opendal::Error) -> std::io::Error {
-        std::io::Error::other(format!(
-            "{operation} failed on `{}` at `{}`: {error}",
-            self.endpoint,
-            self.path.display()
-        ))
+        std::io::Error::other(match refused_write(error) {
+            Some(advice) => format!(
+                "`{}` refused to create `{}`.\n  {advice}\n  the server said: {error}",
+                self.endpoint,
+                self.path.display()
+            ),
+            None => format!(
+                "{operation} failed on `{}` at `{}`: {error}",
+                self.endpoint,
+                self.path.display()
+            ),
+        })
     }
+}
+
+/// Advice for a write the far side refused outright, or `None` if this is some
+/// other failure.
+///
+/// String-matching, for the same reason and with the same containment as
+/// `classify` in `lib.rs`: `OpenDAL` cannot classify an FTP refusal, because
+/// `format_ftp_error` maps everything that is not 421 or 550 to
+/// `ErrorKind::Unexpected`, so the server's own reply text is the only signal
+/// there is. The failure mode is benign — if the wording ever changes we fall
+/// through to the unclassified error, which is what the caller would have got
+/// anyway.
+///
+/// Worth the lines because of how this fails without it. A connection saved
+/// with no root writes relative to the server's own `/`, every file is
+/// refused, and the user reads sixty lines of protocol context that never
+/// mention the one field that is wrong.
+fn refused_write(error: &opendal::Error) -> Option<&'static str> {
+    const PERMISSION: [&str; 4] = ["553", "550", "permission denied", "access denied"];
+
+    if error.kind() != ErrorKind::PermissionDenied && error.kind() != ErrorKind::Unexpected {
+        return None;
+    }
+    let mut rendered = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        rendered.push_str(&cause.to_string());
+        source = cause.source();
+    }
+    let rendered = rendered.to_ascii_lowercase();
+    PERMISSION
+        .iter()
+        .any(|marker| rendered.contains(marker))
+        .then_some(concat!(
+            "the account may not be able to write to that directory, or the\n  ",
+            "connection's root may be wrong: a connection saved with no root writes\n  ",
+            "relative to the server's own `/`, which is rarely writable."
+        ))
 }
 
 impl Write for OpendalWrite {
@@ -476,10 +521,20 @@ impl WriteFinish for OpendalWrite {
         // The one that matters. A protocol write is not committed until the
         // stream is closed, so without this the journal could record a commit
         // for bytes the far side never accepted.
-        result.map(|_| ()).map_err(|error| BackendError::Remote {
-            endpoint: self.endpoint.clone(),
-            operation: "close",
-            source: Box::new(error),
+        // The same refusal can arrive on close rather than on the first write,
+        // so it gets the same advice rather than only the protocol text.
+        result.map(|_| ()).map_err(|error| {
+            let source: Box<dyn std::error::Error + Send + Sync> = match refused_write(&error) {
+                Some(advice) => Box::new(std::io::Error::other(format!(
+                    "{advice}\n  the server said: {error}"
+                ))),
+                None => Box::new(error),
+            };
+            BackendError::Remote {
+                endpoint: self.endpoint.clone(),
+                operation: "close",
+                source,
+            }
         })
     }
 }

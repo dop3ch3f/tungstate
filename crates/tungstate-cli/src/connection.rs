@@ -229,6 +229,9 @@ fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode
     }
 
     println!("added connection `{}`", args.name);
+    if let Some(warning) = scheme.rootless_warning(&args.root) {
+        println!("note: {warning}");
+    }
     println!("check it with: tungstate connection test {}", args.name);
     ExitCode::SUCCESS
 }
@@ -291,6 +294,9 @@ fn update(journal: &Journal, args: &UpdateArgs) -> ExitCode {
     }
 
     println!("updated connection `{}`", args.name);
+    if let Some(warning) = settings.scheme.rootless_warning(&settings.root) {
+        println!("note: {warning}");
+    }
 
     // Two notes, both about a scheme change, because that is the edit whose
     // consequences are not on the screen. Neither is an error.
@@ -419,6 +425,9 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
         Ok(count) => {
             println!("`{name}` is reachable");
             println!("  {root} holds {count} entries");
+            if let Some(warning) = connection.scheme.rootless_warning(&connection.root) {
+                println!("  note: {warning}");
+            }
             if !connection.scheme.is_encrypted() {
                 println!("  (this connection is not encrypted)");
             }

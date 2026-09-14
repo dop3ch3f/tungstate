@@ -228,6 +228,9 @@ button, .chrome { user-select: none; }
 .ledger .path { font-family: var(--mono); word-break: break-all; }
 .ledger .num { font-family: var(--mono); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--dust); }
 .ledger .detail { color: var(--dust-dim); font-size: 11.5px; }
+/* A connection that cannot possibly write. Loud enough to read before the
+   drain, because the alternative is finding out one file at a time. */
+.ledger .detail.warn { color: var(--held); max-width: 24ch; white-space: normal; }
 
 .state { white-space: nowrap; }
 .state.waiting { color: var(--dust-dim); }

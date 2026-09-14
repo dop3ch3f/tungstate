@@ -835,3 +835,36 @@ fn explain_reaches_a_file_through_a_connection() {
         .failure()
         .stderr(predicates::str::contains("no connection named `nsa`"));
 }
+
+#[test]
+fn a_networked_connection_saved_without_a_root_says_what_that_means() {
+    // The failure this prevents cost a real afternoon: OpenDAL normalises an
+    // empty root to `/`, so the drain wrote relative to the NAS's own root
+    // directory, every file came back `553 Permission denied`, and nothing in
+    // the product mentioned the one field that was wrong.
+    let home = sandbox();
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "ftp"])
+        .args(["--host", "nas.local", "--user", "me", "--secret-stdin"])
+        .write_stdin("\n")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("server's own `/`"))
+        .stdout(predicates::str::contains("connection test"));
+
+    // Naming a root settles it, whatever the root is: `/` may genuinely be
+    // right on a server that chroots the login, and that is the user's call.
+    sandboxed(&home)
+        .args(["connection", "update", "nas", "--root", "/volume1/media"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("server's own `/`").not());
+
+    // A local filesystem connection has no far side to be wrong about.
+    sandboxed(&home)
+        .args(["connection", "add", "here", "--scheme", "fs", "--root"])
+        .arg(home.path())
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("server's own `/`").not());
+}

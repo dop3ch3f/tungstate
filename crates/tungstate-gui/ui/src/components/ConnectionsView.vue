@@ -119,7 +119,13 @@ function saved() {
             <template v-else>this machine</template>
             <div v-if="c.username" class="detail">as {{ c.username }}</div>
           </td>
-          <td class="addr root">{{ c.root || "/" }}</td>
+          <td class="addr root">
+            {{ c.root || "/" }}
+            <div v-if="c.rootless" class="detail warn">
+              not set, so this writes to the server's own <code>/</code> and will
+              likely be refused
+            </div>
+          </td>
           <td class="check">
             <span v-if="probes[c.name]" class="state" :class="probes[c.name].state">
               {{ probes[c.name].state === "waiting" ? "checking" :

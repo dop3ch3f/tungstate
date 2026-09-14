@@ -293,6 +293,11 @@ struct ConnectionView {
     options: BTreeMap<String, String>,
     encrypted: bool,
     networked: bool,
+    /// Why this connection will refuse every write, when it will.
+    ///
+    /// Derived in Rust rather than tested for in the template, so the CLI and
+    /// the window cannot come to different conclusions about the same row.
+    rootless: Option<&'static str>,
 }
 
 impl From<Connection> for ConnectionView {
@@ -303,6 +308,7 @@ impl From<Connection> for ConnectionView {
             host: connection.host,
             port: connection.port,
             username: connection.username,
+            rootless: connection.scheme.rootless_warning(&connection.root),
             root: connection.root,
             options: connection.options,
             encrypted: connection.scheme.is_encrypted(),

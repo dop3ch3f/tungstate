@@ -71,9 +71,9 @@ export interface Place { label: string; path: string }
 /**
  * A connection as the window shows it. Mirrors `ConnectionView` in main.rs.
  *
- * `encrypted` and `networked` arrive already decided. The rule lives in
- * `Scheme::is_encrypted` in Rust, and re-deriving it from `scheme` here would
- * be a second implementation of a warning that has to be right.
+ * `encrypted`, `networked` and `rootless` arrive already decided. The rules
+ * live on `Scheme` in Rust, and re-deriving them from `scheme` here would be a
+ * second implementation of a warning that has to be right.
  */
 export interface Connection {
   name: string;
@@ -85,6 +85,8 @@ export interface Connection {
   options: Record<string, string>;
   encrypted: boolean;
   networked: boolean;
+  /** Why every write will be refused, when it will. Null when it will not. */
+  rootless: string | null;
 }
 
 /** What the add/edit dialog sends. Mirrors `ConnectionForm` in main.rs. */

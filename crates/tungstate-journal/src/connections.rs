@@ -90,6 +90,23 @@ impl Scheme {
         }
     }
 
+    /// What an empty root means, for a connection that has one.
+    ///
+    /// `OpenDAL` normalises an empty root to `/`, so a networked connection
+    /// with no root writes relative to the *server's* root directory. On a NAS
+    /// that is almost never where the account can write, and the failure
+    /// arrives much later as a refused write on the first file, which is the
+    /// wrong moment to learn it. `None` when there is nothing to warn about.
+    #[must_use]
+    pub fn rootless_warning(self, root: &str) -> Option<&'static str> {
+        (self.is_networked() && root.trim().is_empty()).then_some(concat!(
+            "no root was given, so paths are taken from the server's own `/`.\n",
+            "      That is rarely where the account can write, and you would find out at\n",
+            "      the first file. If your login lands in a folder, set that as the root.\n",
+            "      `connection test` prints the directory it is actually using."
+        ))
+    }
+
     /// Whether reaching this place costs a network connection.
     ///
     /// What decides how many transfers may run at once: a filesystem has no

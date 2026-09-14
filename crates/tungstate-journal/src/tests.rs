@@ -884,3 +884,27 @@ fn a_v4_journal_upgrades_to_v5_and_its_links_mean_the_whole_source() {
         .unwrap();
     assert_eq!(journal.files_for(links[0].id).unwrap().len(), 1);
 }
+
+#[test]
+fn a_networked_connection_with_no_root_is_warned_about() {
+    // The trap this exists for: OpenDAL normalises an empty root to `/`, so
+    // the drain writes relative to the server's own root and every file is
+    // refused at the far side, long after the mistake was made.
+    let warning = Scheme::Ftp
+        .rootless_warning("")
+        .expect("ftp with no root warns");
+    assert!(warning.contains("server's own `/`"), "{warning}");
+    assert!(warning.contains("connection test"), "{warning}");
+
+    // Whitespace is no root either.
+    assert!(Scheme::Ftps.rootless_warning("   ").is_some());
+
+    // A root that was given is not warned about, whatever it is — `/` may
+    // genuinely be right on a server that chroots the login.
+    assert!(Scheme::Ftp.rootless_warning("/volume1/media").is_none());
+    assert!(Scheme::Ftp.rootless_warning("/").is_none());
+
+    // A local filesystem connection has no far side to be wrong about, and
+    // the factory refuses a root that is not a directory anyway.
+    assert!(Scheme::Fs.rootless_warning("").is_none());
+}
