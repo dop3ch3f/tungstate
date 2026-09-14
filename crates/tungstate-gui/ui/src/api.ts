@@ -145,6 +145,18 @@ export interface Preview {
   items: Prospect[];
 }
 
+/**
+ * What a submission did. Mirrors `Accepted` in main.rs.
+ *
+ * `started` is false when the files joined a transfer already in flight, and
+ * the window must not clear the progress it is showing: those rows belong to
+ * the run these files were added to.
+ */
+export interface Accepted {
+  started: boolean;
+  waiting: number;
+}
+
 export const api = {
   previewTransfer: (request: TransferRequest) => invoke<Preview>("preview_transfer", { request }),
   browse: (path: string) => invoke<Listing>("browse", { path }),
@@ -155,7 +167,7 @@ export const api = {
   startTransfer: (request: TransferRequest) => invoke<string>("start_transfer", { request }),
   links: () => invoke<Link[]>("list_links"),
   createLink: (form: Omit<Link, never>) => invoke<void>("create_link", { form }),
-  run: (name: string) => invoke<void>("run_link", { name }),
+  run: (name: string) => invoke<Accepted>("run_link", { name }),
   cancel: () => invoke<void>("cancel_run"),
   stopNow: () => invoke<void>("stop_now"),
   resolve: (action: string, applyToAll: boolean) =>
@@ -176,7 +188,7 @@ export const api = {
   testConnection: (name: string) => invoke<Probe>("test_connection", { name }),
   removeConnection: (name: string) => invoke<void>("remove_connection", { name }),
   interrupted: () => invoke<InterruptedRun[]>("interrupted"),
-  resumeInterrupted: (link: string) => invoke<void>("resume_interrupted", { link }),
+  resumeInterrupted: (link: string) => invoke<Accepted>("resume_interrupted", { link }),
   discardInterrupted: (link: string) => invoke<number>("discard_interrupted", { link }),
 };
 
@@ -194,6 +206,8 @@ export const on = {
   conflict: (f: (e: ConflictAsk) => void) => listen<ConflictAsk>("transfer://conflict", (e) => f(e.payload)),
   identical: (f: (e: IdenticalAsk) => void) =>
     listen<IdenticalAsk>("transfer://identical", (e) => f(e.payload)),
+  queued: (f: (e: Accepted) => void) =>
+    listen<Accepted>("transfer://queued", (e) => f(e.payload)),
   done: (f: (e: Summary) => void) => listen<Summary>("transfer://done", (e) => f(e.payload)),
   failed: (f: (e: string) => void) => listen<string>("transfer://error", (e) => f(e.payload)),
 };

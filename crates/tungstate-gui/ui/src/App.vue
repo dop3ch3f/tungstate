@@ -7,7 +7,7 @@ import ActivityView from "./components/ActivityView.vue";
 import ConnectionsView from "./components/ConnectionsView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
-import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk, type Connection} from "./api";
+import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk, type Connection, type Accepted} from "./api";
 
 type Tab = "browse" | "transfers" | "connections" | "activity";
 
@@ -62,6 +62,8 @@ const arrow = computed(() =>
 const rows = ref<Row[]>([]);
 const summary = ref<Summary | null>(null);
 const runError = ref("");
+/// How many transfers are waiting behind the one running, when any are.
+const queued = ref(0);
 const liveFile = ref<string | null>(null);
 const stopping = ref(false);
 const conflict = ref<ConflictAsk | null>(null);
@@ -188,11 +190,13 @@ async function attach() {
     await on.identical((e) => { sameFile.value = e; }),
     await on.done((e) => {
       summary.value = e; liveFile.value = null; stopping.value = false; halting.value = false;
+      queued.value = 0;
       atOnce.value = null; sameFile.value = null;
       refreshInterrupted();
       left.value?.reload(); right.value?.reload();
       api.links().then((l) => (links.value = l)).catch(() => {});
     }),
+    await on.queued((e) => began(e)),
     await on.failed((e) => { runError.value = e; stopping.value = false; halting.value = false; }),
   );
 }
@@ -223,11 +227,6 @@ function begin(which: "move" | "copy") {
 
 async function go(payload: Payload) {
   syncing.value = false;
-  rows.value = [];
-  summary.value = null;
-  runError.value = "";
-  shape.value = null;
-  atOnce.value = null;
   tab.value = "transfers";
   try {
     await api.startTransfer({ legs: legs.value, ...payload });
@@ -235,9 +234,20 @@ async function go(payload: Payload) {
 }
 
 async function runSaved(name: string) {
-  rows.value = []; summary.value = null; runError.value = ""; shape.value = null; atOnce.value = null;
   tab.value = "transfers";
-  try { await api.run(name); } catch (e) { runError.value = String(e); }
+  try { began(await api.run(name)); } catch (e) { runError.value = String(e); }
+}
+
+/// Clear the last run's progress, but only when a new run actually started.
+/// Files added to a transfer already going share its rows, and blanking them
+/// would erase the live view of the thing they just joined.
+function began(accepted: Accepted) {
+  if (accepted.started) {
+    rows.value = []; summary.value = null; runError.value = "";
+    shape.value = null; atOnce.value = null; queued.value = 0;
+  } else {
+    queued.value = accepted.waiting;
+  }
 }
 
 async function answer(action: string) {
@@ -344,7 +354,7 @@ function browseAt(location: string) {
     <TransfersView v-else-if="tab === 'transfers'" :rows="rows" :summary="summary"
                    :error="runError" :live="running" :stopping="stopping"
                    :interrupted="interrupted" :busy="busy" :note="discarded" :shape="shape"
-                   :at-once="atOnce" :halting="halting"
+                   :at-once="atOnce" :halting="halting" :queued="queued"
                    @stop="stop" @stop-now="stopNow" @resume="resumeRun" @discard="discardRun" />
 
     <ConnectionsView v-else-if="tab === 'connections'" :connections="connections"

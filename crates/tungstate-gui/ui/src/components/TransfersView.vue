@@ -28,6 +28,9 @@ const props = defineProps<{
   /// part of `shape`.
   atOnce: number | null;
   halting: boolean;
+  /// Transfers waiting behind this one. Worth saying: a Move during a run is
+  /// accepted now rather than refused, and without this the click looks lost.
+  queued: number;
 }>();
 const emit = defineEmits<{
   stop: []; stopNow: []; resume: [link: string]; discard: [link: string];
@@ -148,6 +151,9 @@ const word: Record<string, string> = {
                a time?" was otherwise unanswerable from the window. -->
           <div v-if="props.atOnce" class="note">
             {{ props.atOnce === 1 ? "one at a time" : props.atOnce + " at a time" }}
+          </div>
+          <div v-if="props.queued" class="note">
+            {{ props.queued === 1 ? "1 more transfer queued" : props.queued + " more transfers queued" }}
           </div>
         </div>
       </div>

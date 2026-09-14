@@ -82,6 +82,24 @@ fn connect(home: &tempfile::TempDir, password: &str) {
         .success();
 }
 
+/// Add a connection whose root is a directory of this test's own.
+///
+/// `connect` shares `server().root` across the suite, which is right for the
+/// drain tests and wrong for anything that asserts on what is *in* the root:
+/// the tests run in parallel against one server, so another test's probe file
+/// could be in flight while this one looks.
+fn connect_rooted(home: &tempfile::TempDir, root: &str) {
+    let server = server();
+    tungstate(home, &server.password)
+        .args(["connection", "add", "nas", "--scheme", "ftp"])
+        .args(["--host", &server.host, "--port", &server.port])
+        .args(["--user", &server.user, "--root", root])
+        .arg("--secret-stdin")
+        .write_stdin("\n")
+        .assert()
+        .success();
+}
+
 /// A link end nothing else in the suite will use.
 ///
 /// The uniqueness is in the *link end*, not the connection root, for two
@@ -348,6 +366,32 @@ mod raw {
             assert!(done.starts_with('2'), "STOR {path} did not finish: {done}");
         }
 
+        /// The names in `path`, via `NLST`.
+        pub fn names(&mut self, path: &str) -> Vec<String> {
+            let mut data = self.passive();
+            let reply = self.command(&format!("NLST {path}"));
+            if reply.starts_with('5') {
+                // An empty directory answers 550 on some servers, and empty is
+                // a perfectly good answer.
+                drop(data);
+                return Vec::new();
+            }
+            let mut text = String::new();
+            data.read_to_string(&mut text).expect("ftp nlst");
+            drop(data);
+            self.read_reply();
+            text.lines()
+                .map(|line| {
+                    line.trim()
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or_default()
+                        .to_string()
+                })
+                .filter(|name| !name.is_empty())
+                .collect()
+        }
+
         pub fn retrieve(&mut self, path: &str) -> Option<Vec<u8>> {
             let mut data = self.passive();
             let reply = self.command(&format!("RETR {path}"));
@@ -499,7 +543,10 @@ fn a_connection_test_reports_whether_the_root_accepts_files() {
     // separately, which is how it presented the first time: 63 files refused
     // one at a time, with an error naming neither the root nor the reason.
     let home = tempfile::tempdir().unwrap();
-    connect(&home, &server().password);
+    // Its own root, so no other test's probe can be in flight inside it.
+    let own = format!("{}/{}", server().root, unique_end("writable"));
+    put(&format!("{own}/.keep"), b"x");
+    connect_rooted(&home, &own);
 
     cli(&home)
         .args(["connection", "test", "nas"])
@@ -508,34 +555,14 @@ fn a_connection_test_reports_whether_the_root_accepts_files() {
         .stdout(predicates::str::contains("is reachable"))
         .stdout(predicates::str::contains("accepts files"));
 
-    // And it leaves nothing behind, whichever way it went. Asserted by the
-    // count being unchanged across a second probe rather than by looking for
-    // the file: the name carries the writing process's pid, which this one
-    // does not know.
-    let count_of = |out: &[u8]| {
-        String::from_utf8_lossy(out)
-            .lines()
-            .find_map(|line| {
-                line.trim()
-                    .strip_suffix(" entries")?
-                    .rsplit(' ')
-                    .next()?
-                    .parse::<usize>()
-                    .ok()
-            })
-            .expect("the probe reports how many entries it saw")
-    };
-    let first = cli(&home)
-        .args(["connection", "test", "nas"])
-        .output()
-        .expect("test runs");
-    let second = cli(&home)
-        .args(["connection", "test", "nas"])
-        .output()
-        .expect("test runs");
-    assert_eq!(
-        count_of(&first.stdout),
-        count_of(&second.stdout),
-        "the probe left something behind"
-    );
+    // And it leaves nothing behind, whichever way it went. By name rather
+    // than by counting: this suite shares one server, so the number of
+    // entries in the root moves for reasons that are nothing to do with
+    // this test.
+    let leftovers: Vec<String> = client()
+        .names(&own)
+        .into_iter()
+        .filter(|name| name.starts_with(".tungstate-writable-"))
+        .collect();
+    assert!(leftovers.is_empty(), "the probe littered: {leftovers:?}");
 }

@@ -254,6 +254,16 @@ pub struct WindowResolver {
 }
 
 impl WindowResolver {
+    /// Change what an unanswered question falls back to.
+    ///
+    /// The window's queue can grow while it is running, so there is no first
+    /// link whose conflict rule can speak for every link after it. A sticky
+    /// answer the user gave is deliberately left alone: "do this for all of
+    /// them" was said about the run, not about one leg of it.
+    pub fn answer_unheard_with(&mut self, fallback: ConflictAction) {
+        self.fallback = fallback;
+    }
+
     pub fn new(app: AppHandle, replies: Receiver<Reply>, fallback: ConflictAction) -> Self {
         Self {
             app,

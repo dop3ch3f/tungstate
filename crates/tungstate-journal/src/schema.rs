@@ -110,6 +110,19 @@ fn configure(conn: &Connection) -> Result<()> {
     // mid-transaction. An in-memory database has no WAL, so ignore that failure.
     let _ = conn.pragma_update(None, "journal_mode", "WAL");
 
+    // WAL still allows only one writer at a time, and without this a second
+    // process's write returns SQLITE_BUSY the instant it collides rather than
+    // waiting for the first to commit. Two drains running at once is an
+    // ordinary thing to want — one to the NAS, one somewhere else — and a
+    // spurious "database is locked" partway through either of them is not an
+    // error anyone can act on.
+    //
+    // Five seconds because journal writes are two small statements per file,
+    // so a real wait is milliseconds; this is long enough to cover a stalled
+    // fsync and short enough that a genuinely stuck writer still surfaces.
+    conn.busy_timeout(std::time::Duration::from_secs(5))
+        .map_err(open_err)?;
+
     // NORMAL skips an fsync per commit, which matters when a drain commits tens
     // of thousands of times. The trade is that a power cut can lose the last few
     // journal writes. Slice 3 orders its work so that costs a redundant re-copy

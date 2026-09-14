@@ -908,3 +908,29 @@ fn a_networked_connection_with_no_root_is_warned_about() {
     // the factory refuses a root that is not a directory anyway.
     assert!(Scheme::Fs.rootless_warning("").is_none());
 }
+
+#[test]
+fn two_journals_on_one_file_do_not_collide() {
+    // Two drains at once is an ordinary thing to want, and each is its own
+    // process with its own connection. WAL still allows only one writer, so
+    // without a busy timeout the second gets SQLITE_BUSY the instant it
+    // collides rather than waiting for the first to commit.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.db");
+    let one = Journal::open(&path).expect("first journal");
+    let two = Journal::open(&path).expect("second journal");
+
+    std::thread::scope(|scope| {
+        for journal in [&one, &two] {
+            scope.spawn(move || {
+                for _ in 0..50 {
+                    journal
+                        .begin(&drain_op())
+                        .expect("a write should wait for the other writer, not fail");
+                }
+            });
+        }
+    });
+
+    assert_eq!(one.recent(1000).unwrap().len(), 100);
+}

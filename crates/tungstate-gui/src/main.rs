@@ -15,10 +15,10 @@
 
 mod bridge;
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
@@ -40,7 +40,79 @@ struct App {
     journal: Journal,
     conflicts: ConflictChannel,
     cancel: Arc<Stop>,
+    /// Work the running transfer has not reached yet, and whether a worker
+    /// exists to reach it. Shared rather than moved into the worker, which is
+    /// the whole of what lets a transfer be added to one already in flight.
+    queue: RunQueue<Link>,
+}
+
+/// Work waiting for a worker, and whether a worker is there to take it.
+///
+/// The two facts live together because they have to be decided together. A
+/// worker finishes when it finds the queue empty, and a submission starts a
+/// worker when it finds none running; if those two read each other outside a
+/// lock, a transfer submitted at the wrong moment is accepted by nobody and
+/// sits there for ever.
+struct RunQueue<T> {
+    waiting: Mutex<VecDeque<T>>,
+    /// Only ever written while `waiting` is held. That is the invariant the
+    /// whole type rests on, and why this is not a bare `AtomicBool` on `App`.
     running: AtomicBool,
+}
+
+impl<T> RunQueue<T> {
+    fn new() -> Self {
+        Self {
+            waiting: Mutex::new(VecDeque::new()),
+            running: AtomicBool::new(false),
+        }
+    }
+
+    /// Add work. `true` when the caller has to start a worker, `false` when
+    /// one is already running and will reach it.
+    fn submit(&self, items: impl IntoIterator<Item = T>) -> bool {
+        let mut waiting = lock(&self.waiting);
+        waiting.extend(items);
+        !self.running.swap(true, Ordering::SeqCst)
+    }
+
+    /// The next piece of work, or `None` having recorded that the worker is
+    /// finished. Called only by the worker.
+    fn next(&self) -> Option<T> {
+        let mut waiting = lock(&self.waiting);
+        let next = waiting.pop_front();
+        if next.is_none() {
+            self.running.store(false, Ordering::SeqCst);
+        }
+        next
+    }
+
+    /// Drop everything still waiting, without ending the worker.
+    fn clear(&self) {
+        lock(&self.waiting).clear();
+    }
+
+    /// Give up being the worker, leaving anything waiting for the next one.
+    /// The panic path: a submission afterwards starts a fresh worker.
+    fn stand_down(&self) {
+        let _waiting = lock(&self.waiting);
+        self.running.store(false, Ordering::SeqCst);
+    }
+
+    fn waiting(&self) -> usize {
+        lock(&self.waiting).len()
+    }
+}
+
+/// Take a lock, ignoring poisoning.
+///
+/// A panic in a worker leaves the queue poisoned, and refusing every later
+/// transfer because of it would turn one bad run into a dead window. What is
+/// behind it is a list of links, which a panic cannot leave half-written.
+fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
+    mutex
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// A link as the window shows it.
@@ -1039,7 +1111,10 @@ fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<Stri
         names.push(name);
     }
 
-    spawn_run(&app, names)?;
+    let accepted = spawn_run(&app, names)?;
+    // The count of files is what the dialog reports; whether this joined a run
+    // already going is separate and reaches the window through `queued`.
+    let _ = app.emit("transfer://queued", &accepted);
     Ok(names_summary(&request))
 }
 
@@ -1152,7 +1227,7 @@ fn interrupted(state: State<'_, App>) -> Result<Vec<InterruptedView>, String> {
 /// Finish an interrupted run. Works for a one-off browser link, which is the
 /// case that would otherwise be unreachable: `list_links` hides unsaved links.
 #[tauri::command]
-fn resume_interrupted(link: String, app: AppHandle) -> Result<(), String> {
+fn resume_interrupted(link: String, app: AppHandle) -> Result<Accepted, String> {
     spawn_run(&app, vec![link])
 }
 
@@ -1223,7 +1298,7 @@ fn resolve_identical(
 }
 
 #[tauri::command]
-fn run_link(name: String, app: AppHandle) -> Result<(), String> {
+fn run_link(name: String, app: AppHandle) -> Result<Accepted, String> {
     spawn_run(&app, vec![name])
 }
 
@@ -1232,29 +1307,29 @@ fn run_link(name: String, app: AppHandle) -> Result<(), String> {
 /// Sequential rather than parallel: two legs of an exchange can touch the same
 /// names, and running them at once would race. Each leg is its own link, so each
 /// is journaled and resumable on its own terms.
-fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<(), String> {
+fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
     let state = app.state::<App>();
 
-    // compare_exchange rather than load-then-store: two rapid clicks on Run
-    // would otherwise both see "not running" and start two drains over the same
-    // files.
-    if state
-        .running
-        .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-        .is_err()
-    {
-        return Err("a transfer is already running".to_string());
+    // Resolved before anything is queued, so a bad name is refused here rather
+    // than halfway through a run that has already started moving files.
+    let mut wanted = VecDeque::with_capacity(links.len());
+    for name in &links {
+        wanted.push_back(state.journal.link_by_name(name).map_err(describe)?);
     }
 
-    let mut queue = Vec::new();
-    for name in &links {
-        match state.journal.link_by_name(name) {
-            Ok(link) => queue.push(link),
-            Err(error) => {
-                state.running.store(false, Ordering::SeqCst);
-                return Err(describe(error));
-            }
-        }
+    // The lock is held across the push *and* the decision to start a worker.
+    // That is the whole correctness argument: a worker only ever clears
+    // `running` while holding this same lock, so it cannot decide it has
+    // finished in the window between this push and this check.
+    if !state.queue.submit(wanted) {
+        // A worker is already going and will reach these. The caller has to be
+        // told, because the window blanks its progress list when a transfer
+        // starts, and doing that here would wipe the live view of the run
+        // these files just joined.
+        return Ok(Accepted {
+            started: false,
+            waiting: state.queue.waiting(),
+        });
     }
 
     state.cancel.clear();
@@ -1272,13 +1347,19 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<(), String> {
         // already running" — for the rest of the session, with no way back
         // but restarting the app.
         let _guard = RunGuard(worker.clone());
-        let fallback = queue[0].on_conflict;
-        let mut resolver = WindowResolver::new(worker.clone(), replies, fallback);
+        let mut resolver = WindowResolver::new(worker.clone(), replies, ConflictAction::Quarantine);
         let mut progress = EventProgress::new(worker.clone());
         let mut total = Summary::default();
         let mut failure = None;
 
-        for link in &queue {
+        // `next` is what ends the run: it hands back `None` only after it has
+        // recorded that this worker is finished, under the lock that a
+        // submission takes to decide whether to start one.
+        while let Some(link) = state.queue.next() {
+            // Per link rather than per run: a queue that can grow has no
+            // meaningful "first link" whose conflict rule speaks for the rest.
+            resolver.answer_unheard_with(link.on_conflict);
+
             let ends = backend_for(&link.source, &state.journal).and_then(|source| {
                 backend_for(&link.destination, &state.journal).map(|dest| (source, dest))
             });
@@ -1290,7 +1371,7 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<(), String> {
                 }
             };
             let mut transfer = Transfer::new(
-                link,
+                &link,
                 source.as_ref(),
                 destination.as_ref(),
                 &state.journal,
@@ -1314,13 +1395,31 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<(), String> {
             }
         }
 
+        // Every `break` above is a stop, and a stop has to mean the queue as
+        // well. Leaving work behind would have the next unrelated Move quietly
+        // run whatever Stop was pressed on.
+        state.queue.clear();
+
         let _ = match failure {
             Some(message) => worker.emit("transfer://error", message),
             None => worker.emit("transfer://done", SummaryView::from(&total)),
         };
     });
 
-    Ok(())
+    Ok(Accepted {
+        started: true,
+        waiting: 0,
+    })
+}
+
+/// What happened to a submission: a new run, or work added to one in flight.
+#[derive(Debug, Serialize)]
+struct Accepted {
+    /// True when this call started the worker, which is when the window may
+    /// clear the progress it is showing.
+    started: bool,
+    /// How much is queued behind the file being moved right now.
+    waiting: usize,
 }
 
 /// Releases the "a transfer is running" flag however the worker thread ends.
@@ -1335,7 +1434,7 @@ impl Drop for RunGuard {
     fn drop(&mut self) {
         let state = self.0.state::<App>();
         state.conflicts.close();
-        state.running.store(false, Ordering::SeqCst);
+        state.queue.stand_down();
     }
 }
 
@@ -1400,7 +1499,7 @@ fn main() {
             journal,
             conflicts: ConflictChannel::default(),
             cancel: Arc::new(Stop::new()),
-            running: AtomicBool::new(false),
+            queue: RunQueue::new(),
         })
         .invoke_handler(tauri::generate_handler![
             list_links,
@@ -1718,5 +1817,123 @@ mod tests {
     fn one_direction_has_nothing_to_overlap_with() {
         let r = request(vec![leg("/tmp/left", "/tmp/right")]);
         assert!(overlapping_names(&r.legs).is_empty());
+    }
+
+    // ---------------------------------------------------------------------
+    // RunQueue: adding work to a transfer that is already going
+
+    #[test]
+    fn the_first_submission_starts_a_worker_and_later_ones_do_not() {
+        let queue = RunQueue::new();
+        assert!(
+            queue.submit(["a"]),
+            "nobody is running, so somebody must start"
+        );
+        assert!(
+            !queue.submit(["b"]),
+            "a worker exists, so a second one would race it over the same files"
+        );
+        assert_eq!(queue.waiting(), 2);
+
+        assert_eq!(queue.next(), Some("a"));
+        assert_eq!(queue.next(), Some("b"));
+        // Draining is what ends the worker, and only then may one start again.
+        assert_eq!(queue.next(), None);
+        assert!(queue.submit(["c"]));
+    }
+
+    #[test]
+    fn work_added_while_the_worker_is_mid_run_is_picked_up_without_a_new_worker() {
+        let queue = RunQueue::new();
+        assert!(queue.submit(["a"]));
+        let first = queue.next();
+        assert_eq!(first, Some("a"));
+
+        // The worker is between files here: it has taken one and not yet asked
+        // for another. This is the whole feature.
+        assert!(!queue.submit(["b"]), "the running worker should take it");
+        assert_eq!(queue.next(), Some("b"));
+    }
+
+    #[test]
+    fn a_stop_empties_the_queue_but_leaves_the_worker_to_finish_reporting() {
+        let queue = RunQueue::new();
+        queue.submit(["a", "b", "c"]);
+        assert_eq!(queue.next(), Some("a"));
+        queue.clear();
+        assert_eq!(queue.waiting(), 0);
+        // Still the worker until it says otherwise, so a Move arriving now
+        // does not start a second one alongside the one winding down.
+        assert!(!queue.submit(["d"]));
+    }
+
+    #[test]
+    fn standing_down_leaves_the_work_for_whoever_comes_next() {
+        // The panic path. Losing the queue would be worse than running it
+        // late, and the flag has to clear or the window refuses everything
+        // for the rest of the session.
+        let queue = RunQueue::new();
+        queue.submit(["a", "b"]);
+        queue.next();
+        queue.stand_down();
+
+        assert_eq!(queue.waiting(), 1);
+        assert!(queue.submit(["c"]), "a new worker is needed");
+        assert_eq!(queue.next(), Some("b"));
+        assert_eq!(queue.next(), Some("c"));
+    }
+
+    #[test]
+    fn no_submission_is_ever_accepted_by_nobody() {
+        // The race the lock exists for. A worker deciding it is finished and a
+        // submission deciding somebody is already running must never both
+        // conclude "not my problem", or that work sits there for ever.
+        //
+        // Run as a real contest rather than as an argument: submitters hammer
+        // a worker that is constantly draining to empty, and every item has to
+        // come out exactly once.
+        const SUBMITTERS: usize = 4;
+        const EACH: usize = 250;
+
+        let queue: Arc<RunQueue<usize>> = Arc::new(RunQueue::new());
+        let taken = Arc::new(Mutex::new(Vec::new()));
+        let done = Arc::new(AtomicBool::new(false));
+
+        std::thread::scope(|scope| {
+            for worker in 0..SUBMITTERS {
+                let queue = Arc::clone(&queue);
+                let taken = Arc::clone(&taken);
+                let done = Arc::clone(&done);
+                scope.spawn(move || {
+                    for i in 0..EACH {
+                        let item = worker * EACH + i;
+                        if queue.submit([item]) {
+                            // We are the worker. Drain until empty, exactly as
+                            // the real one does, then stop being the worker.
+                            while let Some(got) = queue.next() {
+                                lock(&taken).push(got);
+                            }
+                        }
+                    }
+                    if worker == 0 {
+                        done.store(true, Ordering::SeqCst);
+                    }
+                });
+            }
+        });
+
+        // Whatever the interleaving left behind belongs to nobody now, so
+        // drain it the way a fresh submission would.
+        if queue.submit(std::iter::empty()) {
+            while let Some(got) = queue.next() {
+                lock(&taken).push(got);
+            }
+        }
+        assert!(done.load(Ordering::SeqCst));
+
+        let mut got = lock(&taken).clone();
+        got.sort_unstable();
+        let expected: Vec<usize> = (0..SUBMITTERS * EACH).collect();
+        assert_eq!(got, expected, "every submission must be taken exactly once");
     }
 }
