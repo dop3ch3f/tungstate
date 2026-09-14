@@ -466,7 +466,10 @@ fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, Str
         connection.root.clone()
     };
     tungstate_backend_opendal::probe(&connection, &state.journal, &secrets())
-        .map(|entries| ProbeView { entries, root })
+        .map(|found| ProbeView {
+            entries: found.len(),
+            root,
+        })
         .map_err(describe)
 }
 

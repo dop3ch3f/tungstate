@@ -141,17 +141,22 @@ pub fn open(
 /// What `tungstate connection test` runs. Deliberately a listing of the root
 /// rather than a write: proving we can reach a NAS must not leave a file in it.
 ///
+/// Returns what is in the root rather than just how much, because a count on
+/// its own cannot answer the question people actually have. "reachable, 10
+/// entries" reads as success whether those ten are the folders you meant or
+/// the server's own `/bin` and `/etc` because the connection has no root.
+///
 /// # Errors
 /// [`OpenError`] as [`open`], or if the root cannot be listed.
 pub fn probe(
     connection: &Connection,
     journal: &Journal,
     secrets: &dyn SecretStore,
-) -> Result<usize> {
+) -> Result<Vec<tungstate_backend::Entry>> {
     let endpoint = Endpoint::remote(connection.id, PathBuf::new());
     let backend = open(&endpoint, journal, secrets)?;
     match backend.read_dir(std::path::Path::new("")) {
-        Ok(entries) => Ok(entries.len()),
+        Ok(entries) => Ok(entries),
         Err(error) => Err(OpenError::Backend(classify(connection, error))),
     }
 }

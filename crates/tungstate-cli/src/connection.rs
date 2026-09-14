@@ -422,9 +422,24 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
         &connection.root
     };
     match tungstate_backend_opendal::probe(&connection, journal, secrets) {
-        Ok(count) => {
+        Ok(entries) => {
             println!("`{name}` is reachable");
-            println!("  {root} holds {count} entries");
+            println!("  {root} holds {} entries", entries.len());
+            // Named, not just counted. Whether those entries are your folders
+            // or the server's own `/bin` is the whole question, and a number
+            // cannot answer it.
+            for entry in entries.iter().take(8) {
+                let name = entry
+                    .path
+                    .file_name()
+                    .unwrap_or(entry.path.as_os_str())
+                    .to_string_lossy();
+                let mark = if entry.meta.is_dir { "/" } else { "" };
+                println!("    {name}{mark}");
+            }
+            if entries.len() > 8 {
+                println!("    and {} more", entries.len() - 8);
+            }
             if let Some(warning) = connection.scheme.rootless_warning(&connection.root) {
                 println!("  note: {warning}");
             }
