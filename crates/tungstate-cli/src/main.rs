@@ -73,10 +73,43 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Keep, clear and bring back what tungstate remembers.
+    Storage {
+        #[command(subcommand)]
+        action: StorageAction,
+    },
     /// Check and inspect policies.
     Policy {
         #[command(subcommand)]
         action: PolicyAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum StorageAction {
+    /// Write everything out as a JSON document.
+    Export {
+        /// Where to write it. Omit for standard output.
+        path: Option<PathBuf>,
+    },
+    /// Read a document back into an empty journal.
+    Import {
+        /// The document to read.
+        path: PathBuf,
+    },
+    /// Archive everything and start again empty.
+    Reset,
+    /// List what has been archived.
+    Archives,
+    /// Bring an archive back, archiving what is here first.
+    Restore {
+        /// The archive's name, as `storage archives` lists it.
+        name: String,
+    },
+    /// Delete an archive for good. The only thing here that loses anything.
+    Forget {
+        /// The archive's name.
+        name: String,
     },
 }
 
@@ -230,6 +263,7 @@ fn main() -> std::process::ExitCode {
         } => {
             return explain::explain(&target, policy.as_deref(), json);
         }
+        Command::Storage { action } => return storage(action),
         Command::Policy { action } => match action {
             PolicyAction::Validate { policy } => return explain::validate(policy.as_deref()),
         },
@@ -271,6 +305,113 @@ pub(crate) fn secret_store() -> Box<dyn SecretStore> {
 
 fn is_hash(target: &str) -> bool {
     target.len() == 64 && target.chars().all(|c| c.is_ascii_hexdigit())
+}
+
+/// Handle the `storage` subcommands.
+fn storage(action: StorageAction) -> std::process::ExitCode {
+    let journal = match open_journal() {
+        Ok(journal) => journal,
+        Err(error) => return fail(&error),
+    };
+
+    match action {
+        StorageAction::Export { path } => {
+            let document = match journal.export() {
+                Ok(document) => document,
+                Err(error) => return fail(&error),
+            };
+            let text = serde_json::to_string_pretty(&document)
+                .expect("an export is plain data and always prints");
+            match path {
+                None => println!("{text}"),
+                Some(path) => {
+                    if let Err(error) = std::fs::write(&path, text) {
+                        eprintln!("error: could not write `{}`: {error}", path.display());
+                        return std::process::ExitCode::FAILURE;
+                    }
+                    println!("wrote {}", path.display());
+                    println!("it carries no passwords; those stay in the keychain");
+                }
+            }
+            std::process::ExitCode::SUCCESS
+        }
+
+        StorageAction::Import { path } => {
+            let raw = match std::fs::read_to_string(&path) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    eprintln!("error: could not read `{}`: {error}", path.display());
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+            let document = match serde_json::from_str(&raw) {
+                Ok(document) => document,
+                Err(error) => {
+                    eprintln!("error: `{}` is not readable JSON: {error}", path.display());
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+            match journal.import(&document) {
+                Ok(rows) => {
+                    println!("read {rows} row(s) from {}", path.display());
+                    println!(
+                        "re-enter any connection passwords with: tungstate connection password <NAME>"
+                    );
+                    std::process::ExitCode::SUCCESS
+                }
+                Err(error) => fail(&error),
+            }
+        }
+
+        StorageAction::Reset => match journal.reset() {
+            Ok(name) => {
+                println!("archived everything as `{name}` and started again empty");
+                println!("bring it back with: tungstate storage restore {name}");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(&error),
+        },
+
+        StorageAction::Archives => match journal.archives() {
+            Ok(archives) if archives.is_empty() => {
+                println!("nothing has been archived");
+                std::process::ExitCode::SUCCESS
+            }
+            Ok(archives) => {
+                for archive in &archives {
+                    println!("{}  {}", archive.name, human_bytes(archive.size));
+                    match &archive.summary {
+                        Some(summary) => println!(
+                            "  {} link(s), {} connection(s), {} operation(s)",
+                            summary.links, summary.connections, summary.operations
+                        ),
+                        // Shown rather than hidden: an archive that will not
+                        // open is exactly what somebody needs to know about.
+                        None => println!("  (this one cannot be read)"),
+                    }
+                }
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(&error),
+        },
+
+        StorageAction::Restore { name } => match journal.restore(&name) {
+            Ok(put_aside) => {
+                println!("restored `{name}`");
+                println!("what was here is archived as `{put_aside}`, so this is reversible");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(&error),
+        },
+
+        StorageAction::Forget { name } => match journal.forget_archive(&name) {
+            Ok(()) => {
+                println!("deleted archive `{name}`");
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(&error),
+        },
+    }
 }
 
 /// Open the machine journal, run a query, and print the rows.

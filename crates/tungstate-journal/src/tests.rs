@@ -1120,3 +1120,266 @@ fn windows_spellings_are_normalised_and_unix_ones_are_left_alone() {
             .unwrap_or_else(|e| panic!("the {platform} clause is not valid SQL: {e}\n{clause}"));
     }
 }
+
+// ---------------------------------------------------------------------------
+// Export, import, archive and reset
+
+/// A journal with something in every table, so a round trip has work to do.
+fn populated(path: &std::path::Path) -> Journal {
+    let journal = Journal::open(path).expect("journal");
+    let connection = journal
+        .create_connection(&NewConnection {
+            name: "nas".to_string(),
+            scheme: Scheme::Ftp,
+            host: Some("192.168.1.2".to_string()),
+            port: Some(21),
+            username: Some("me".to_string()),
+            root: "/volume1".to_string(),
+            options: std::collections::BTreeMap::from([("passive".into(), "true".into())]),
+        })
+        .expect("connection");
+    let link = journal
+        .create_link(&NewLink {
+            name: "drain".to_string(),
+            source: Endpoint::local("/Users/me/Videos"),
+            destination: Endpoint::remote(connection, std::path::PathBuf::from("inbox")),
+            source_policy: SourcePolicy::Delete,
+            verify: VerifyLevel::Readback,
+            order: Order::OldestFirst,
+            on_conflict: ConflictAction::Rename,
+            cooldown: std::time::Duration::from_secs(45),
+            saved: true,
+        })
+        .expect("link");
+    journal
+        .set_files(link, &[std::path::PathBuf::from("a.mp4")])
+        .expect("selection");
+    let op = journal
+        .begin(&NewOp {
+            link_id: Some(link),
+            ..drain_op()
+        })
+        .expect("op");
+    journal
+        .finish(
+            op,
+            &Outcome::Committed {
+                hash: Some("abc".into()),
+            },
+        )
+        .expect("finish");
+    journal
+}
+
+#[test]
+fn an_export_carries_every_column_the_database_has() {
+    // Reflection in the implementation rather than a hand-written list, so a
+    // column added in some later slice cannot be silently left out of an
+    // archive. This test is what says so out loud.
+    let dir = tempfile::tempdir().unwrap();
+    let journal = populated(&dir.path().join("journal.db"));
+    let document = journal.export().unwrap();
+
+    for table in ["ops", "links", "connections", "link_files"] {
+        let columns: Vec<String> = {
+            let conn = journal.lock();
+            let statement = conn
+                .prepare(&format!("SELECT * FROM {table} LIMIT 0"))
+                .unwrap();
+            statement
+                .column_names()
+                .into_iter()
+                .map(str::to_string)
+                .collect()
+        };
+        let row = document[table]
+            .as_array()
+            .and_then(|rows| rows.first())
+            .unwrap_or_else(|| panic!("`{table}` should have a row to compare"));
+        for column in columns {
+            assert!(
+                row.get(&column).is_some(),
+                "`{table}.{column}` is in the database and missing from the export"
+            );
+        }
+    }
+    assert_eq!(document["tungstate_export"], crate::storage::EXPORT_VERSION);
+}
+
+#[test]
+fn an_export_carries_no_passwords() {
+    // They live in the keychain under a key derived from the connection name,
+    // and an archive is a file that gets copied around.
+    let dir = tempfile::tempdir().unwrap();
+    let journal = populated(&dir.path().join("journal.db"));
+    let text = serde_json::to_string(&journal.export().unwrap()).unwrap();
+    for forbidden in ["password", "secret", "passwd"] {
+        assert!(
+            !text.contains(forbidden),
+            "`{forbidden}` appears in an export"
+        );
+    }
+}
+
+#[test]
+fn a_journal_survives_a_round_trip_through_json() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = populated(&dir.path().join("journal.db"));
+    let document = original.export().unwrap();
+
+    let restored = Journal::open(&dir.path().join("other.db")).unwrap();
+    let loaded = restored.import(&document).unwrap();
+    assert!(loaded >= 4, "every table should have contributed a row");
+
+    // The parts a person would notice, by value rather than by id.
+    let before = original.links().unwrap();
+    let after = restored.links().unwrap();
+    assert_eq!(before.len(), after.len());
+    assert_eq!(before[0].name, after[0].name);
+    assert_eq!(before[0].verify, after[0].verify);
+    assert_eq!(before[0].order, after[0].order);
+    assert_eq!(before[0].cooldown, after[0].cooldown);
+    assert_eq!(before[0].destination, after[0].destination);
+
+    // The reference that would break if ids were not preserved.
+    let op = restored.recent(10).unwrap().pop().unwrap();
+    let link = restored
+        .link_by_id(op.link_id.expect("the op knows its link"))
+        .unwrap();
+    assert_eq!(link.name, "drain");
+
+    // And the selection, which lives in its own table.
+    assert_eq!(restored.files_for(after[0].id).unwrap().len(), 1);
+    assert_eq!(
+        restored
+            .connection_by_name("nas")
+            .unwrap()
+            .options
+            .get("passive"),
+        Some(&"true".to_string())
+    );
+}
+
+#[test]
+fn an_import_refuses_to_merge_into_a_journal_that_holds_something() {
+    let dir = tempfile::tempdir().unwrap();
+    let original = populated(&dir.path().join("journal.db"));
+    let document = original.export().unwrap();
+
+    // Into itself: there is already a link and a connection there.
+    let refused = original.import(&document).unwrap_err();
+    assert!(matches!(refused, JournalError::NotEmpty), "{refused}");
+    assert_eq!(original.links().unwrap().len(), 1, "nothing was touched");
+}
+
+#[test]
+fn a_document_from_somewhere_else_is_refused_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = Journal::open(&dir.path().join("journal.db")).unwrap();
+    let error = journal
+        .import(&serde_json::json!({ "links": [] }))
+        .unwrap_err();
+    assert!(matches!(error, JournalError::BadExport(_)), "{error}");
+
+    // And one from a future tungstate says so rather than half-reading it.
+    let ahead = serde_json::json!({ "tungstate_export": crate::storage::EXPORT_VERSION + 1 });
+    let error = journal.import(&ahead).unwrap_err();
+    assert!(error.to_string().contains("newer tungstate"), "{error}");
+}
+
+#[test]
+fn a_reset_archives_first_and_the_archive_comes_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = populated(&dir.path().join("journal.db"));
+
+    let name = journal.reset().unwrap();
+    assert!(journal.links().unwrap().is_empty(), "the slate is clean");
+    assert!(journal.connections().unwrap().is_empty());
+
+    let archives = journal.archives().unwrap();
+    assert_eq!(archives.len(), 1);
+    assert_eq!(archives[0].name, name);
+    let summary = archives[0].summary.expect("an archive describes itself");
+    assert_eq!(summary.links, 1);
+    assert_eq!(summary.connections, 1);
+    assert_eq!(summary.operations, 1);
+
+    // Restoring puts the empty one aside in its turn, so it is reversible.
+    // The two names must differ even though both are written in the same
+    // second: an archive that overwrites another is the one way this could
+    // lose something.
+    let put_aside = journal.restore(&name).unwrap();
+    assert_ne!(
+        put_aside, name,
+        "the restore overwrote the archive it restored"
+    );
+    assert_eq!(journal.archives().unwrap().len(), 2, "both are still there");
+    assert_eq!(journal.links().unwrap().len(), 1);
+    assert_eq!(journal.links().unwrap()[0].name, "drain");
+}
+
+#[test]
+fn a_reset_is_refused_while_a_run_left_work_behind() {
+    // Those rows are the only thing that knows a part-copied file exists at
+    // the far end.
+    let dir = tempfile::tempdir().unwrap();
+    let journal = populated(&dir.path().join("journal.db"));
+    journal.begin(&drain_op()).unwrap();
+
+    let refused = journal.reset().unwrap_err();
+    assert!(
+        matches!(refused, JournalError::Unfinished { .. }),
+        "{refused}"
+    );
+    assert!(refused.to_string().contains("link unfinished"), "{refused}");
+    assert_eq!(journal.links().unwrap().len(), 1, "nothing was touched");
+    assert!(
+        journal.archives().unwrap().is_empty(),
+        "and nothing was written"
+    );
+}
+
+#[test]
+fn an_archive_name_cannot_reach_outside_its_directory() {
+    // The name arrives from a window or a command line and is joined onto a
+    // directory, so it is untrusted input.
+    let dir = tempfile::tempdir().unwrap();
+    let journal = populated(&dir.path().join("journal.db"));
+    for hostile in [
+        "../../etc/passwd.json",
+        "/etc/passwd.json",
+        "a/b.json",
+        "plain.txt",
+    ] {
+        assert!(
+            journal.restore(hostile).is_err(),
+            "`{hostile}` was accepted"
+        );
+        assert!(
+            journal.forget_archive(hostile).is_err(),
+            "`{hostile}` was accepted"
+        );
+    }
+}
+
+#[test]
+fn an_archive_can_be_forgotten_for_good() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = populated(&dir.path().join("journal.db"));
+    let name = journal.reset().unwrap();
+
+    journal.forget_archive(&name).unwrap();
+    assert!(journal.archives().unwrap().is_empty());
+    assert!(journal.forget_archive(&name).is_err(), "and it is gone");
+}
+
+#[test]
+fn an_in_memory_journal_says_it_has_nowhere_to_archive() {
+    let journal = Journal::open_in_memory().unwrap();
+    assert!(matches!(
+        journal.reset().unwrap_err(),
+        JournalError::NotOnDisk
+    ));
+    // Exporting still works: it is the file that is missing, not the data.
+    assert!(journal.export().is_ok());
+}

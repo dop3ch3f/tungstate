@@ -5,13 +5,14 @@ import SyncModal, { type Payload } from "./components/SyncModal.vue";
 import TransfersView, { type Row } from "./components/TransfersView.vue";
 import LinksView from "./components/LinksView.vue";
 import FindView from "./components/FindView.vue";
+import StorageView from "./components/StorageView.vue";
 import ActivityView from "./components/ActivityView.vue";
 import ConnectionsView from "./components/ConnectionsView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
 import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk, type Connection, type Accepted, type Preview} from "./api";
 
-type Tab = "browse" | "transfers" | "links" | "connections" | "activity" | "find";
+type Tab = "browse" | "transfers" | "links" | "connections" | "activity" | "find" | "storage";
 
 const tab = ref<Tab>("browse");
 const onboarding = ref(false);
@@ -244,6 +245,17 @@ async function go(payload: Payload) {
   } catch (e) { runError.value = String(e); }
 }
 
+/// After a reset, restore or import, nothing on screen is still true.
+async function reloadEverything() {
+  try {
+    links.value = await api.links();
+    connections.value = await api.connections();
+    await refreshInterrupted();
+    left.value?.reload();
+    right.value?.reload();
+  } catch (e) { runError.value = String(e); }
+}
+
 async function refreshLinks() {
   try { links.value = await api.links(); } catch (e) { runError.value = String(e); }
 }
@@ -331,6 +343,7 @@ function browseAt(location: string) {
         <button :aria-current="tab === 'connections'" @click="tab = 'connections'">Connections</button>
         <button :aria-current="tab === 'activity'" @click="tab = 'activity'">Activity</button>
         <button :aria-current="tab === 'find'" @click="tab = 'find'">Find</button>
+        <button :aria-current="tab === 'storage'" @click="tab = 'storage'">Storage</button>
       </nav>
       <span class="spacer"></span>
       <select v-if="links.length" class="btn small" style="max-width:190px"
@@ -385,6 +398,8 @@ function browseAt(location: string) {
                    @stop="stop" @stop-now="stopNow" @resume="resumeRun" @discard="discardRun" />
 
     <FindView v-else-if="tab === 'find'" :links="links" />
+
+    <StorageView v-else-if="tab === 'storage'" @changed="reloadEverything" />
 
     <!-- A saved link's preview. Deliberately the same words the sync dialog
          uses for the same outcomes: the two answer the same question and

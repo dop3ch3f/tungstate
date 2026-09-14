@@ -17,6 +17,7 @@ pub mod links;
 pub mod connections;
 pub mod ends;
 mod schema;
+mod storage;
 
 pub use connections::{
     Connection, ConnectionId, ConnectionSettings, Endpoint, NewConnection, Scheme,
@@ -27,6 +28,7 @@ pub use ends::{
 pub use links::{
     ConflictAction, Link, LinkId, NewLink, Order, Removal, SourcePolicy, VerifyLevel, temp_name,
 };
+pub use storage::{Archive, ArchiveSummary};
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -92,6 +94,50 @@ pub enum JournalError {
     /// A caller referred to a connection that does not exist.
     #[error("no connection named `{0}`")]
     UnknownConnection(String),
+
+    /// The journal is in memory, so there is nowhere to keep an archive.
+    #[error("this journal is held in memory and has no directory to archive into")]
+    NotOnDisk,
+
+    /// There is no archive by that name.
+    #[error("no archived journal called `{0}`")]
+    NoArchive(String),
+
+    /// An archive could not be written, read or removed.
+    #[error("could not work with `{path}`")]
+    Archive {
+        /// The file in question.
+        path: std::path::PathBuf,
+        /// Why.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A document is not a tungstate export, or is one this build cannot read.
+    #[error("{0}")]
+    BadExport(String),
+
+    /// An import refuses to merge into a journal that already holds something.
+    #[error(
+        "this journal is not empty; reset it first, so an import can never \
+         leave a half-merged state nobody can reason about"
+    )]
+    NotEmpty,
+
+    /// The journal cannot be put aside while a run has left work behind.
+    ///
+    /// Those rows are the only thing that knows a part-copied file exists at
+    /// the far end. Forgetting them strands it with nothing able to name,
+    /// find or sweep it, which is the failure the whole recovery story exists
+    /// to prevent.
+    #[error(
+        "{operations} operation(s) are unfinished; finish or clear them first, \
+         with `tungstate link unfinished` to see them"
+    )]
+    Unfinished {
+        /// How many.
+        operations: usize,
+    },
 
     /// A connection cannot be removed while a link still points at it.
     #[error("`{0}` is still used by at least one link; remove those links first")]

@@ -13,6 +13,18 @@ export interface Link {
   cooldown_secs: number;
 }
 
+/** An archived journal. Mirrors `ArchiveView` in main.rs. */
+export interface ArchiveView {
+  name: string;
+  archived_at: number;
+  size: number;
+  /** Null when the archive cannot be read, which the screen shows rather
+   *  than hides: an archive that will not open is worth knowing about. */
+  links: number | null;
+  connections: number | null;
+  operations: number | null;
+}
+
 /** What the add-a-link dialog sends. Mirrors `NewLinkForm` in main.rs. */
 export interface NewLink {
   name: string;
@@ -227,6 +239,19 @@ export const api = {
   /** At most this many files at once, or 0 to stop asking. Raises what the
    *  governor climbs towards; it never skips the handshake. */
   setAtOnce: (files: number) => invoke<void>("set_at_once", { files }),
+
+  archives: () => invoke<ArchiveView[]>("archives"),
+  /** Archives everything and empties the journal. Returns the archive's name. */
+  resetStorage: () => invoke<string>("reset_storage"),
+  /** Returns the name the current state was put under, so the window can say
+   *  this is reversible rather than merely claim it. */
+  restoreArchive: (name: string) => invoke<string>("restore_archive", { name }),
+  forgetArchive: (name: string) => invoke<void>("forget_archive", { name }),
+  exportStorage: (path: string) => invoke<void>("export_storage", { path }),
+  importStorage: (path: string) => invoke<number>("import_storage", { path }),
+  pickSaveFile: (suggested: string) =>
+    invoke<string | null>("pick_save_file", { suggested }),
+  pickOpenFile: () => invoke<string | null>("pick_open_file"),
   cancel: () => invoke<void>("cancel_run"),
   stopNow: () => invoke<void>("stop_now"),
   resolve: (action: string, applyToAll: boolean) =>

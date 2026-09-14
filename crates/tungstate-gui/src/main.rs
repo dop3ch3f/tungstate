@@ -108,6 +108,10 @@ impl<T> RunQueue<T> {
     fn waiting(&self) -> usize {
         lock(&self.waiting).len()
     }
+
+    fn is_running(&self) -> bool {
+        self.running.load(Ordering::SeqCst)
+    }
 }
 
 /// Take a lock, ignoring poisoning.
@@ -1418,6 +1422,131 @@ fn resolve_identical(
 ///
 /// Returns whether the row went or was retired, so the window can say which
 /// happened rather than implying the record is gone when it is not.
+/// An archive as the window shows it. Mirrors `Archive` in the journal.
+#[derive(Debug, Serialize)]
+struct ArchiveView {
+    name: String,
+    archived_at: i64,
+    size: u64,
+    /// `None` when the file cannot be read. Shown rather than hidden: an
+    /// archive that will not open is exactly what someone needs to know about.
+    links: Option<usize>,
+    connections: Option<usize>,
+    operations: Option<usize>,
+}
+
+impl From<tungstate_journal::Archive> for ArchiveView {
+    fn from(archive: tungstate_journal::Archive) -> Self {
+        Self {
+            name: archive.name,
+            archived_at: archive.archived_at,
+            size: archive.size,
+            links: archive.summary.map(|s| s.links),
+            connections: archive.summary.map(|s| s.connections),
+            operations: archive.summary.map(|s| s.operations),
+        }
+    }
+}
+
+#[tauri::command]
+fn archives(state: State<'_, App>) -> Result<Vec<ArchiveView>, String> {
+    state
+        .journal
+        .archives()
+        .map(|found| found.into_iter().map(Into::into).collect())
+        .map_err(describe)
+}
+
+/// Archive everything and start again empty. Returns the archive's name.
+#[tauri::command]
+fn reset_storage(state: State<'_, App>) -> Result<String, String> {
+    refuse_while_running(&state)?;
+    state.journal.reset().map_err(describe)
+}
+
+/// Bring an archive back. Returns the name the current state was put under,
+/// so the window can say that this is reversible rather than claim it.
+#[tauri::command]
+fn restore_archive(name: String, state: State<'_, App>) -> Result<String, String> {
+    refuse_while_running(&state)?;
+    state.journal.restore(&name).map_err(describe)
+}
+
+#[tauri::command]
+fn forget_archive(name: String, state: State<'_, App>) -> Result<(), String> {
+    state.journal.forget_archive(&name).map_err(describe)
+}
+
+/// Ask for a file to write an export to, or `None` if the user cancelled.
+///
+/// The picker runs in Rust rather than through the dialog plugin's JavaScript
+/// half, which would mean a new npm dependency for two calls. The plugin is
+/// already here for the Rust side.
+#[tauri::command]
+async fn pick_save_file(suggested: String, app: AppHandle) -> Result<Option<PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt as _;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .set_file_name(&suggested)
+        .add_filter("JSON", &["json"])
+        .save_file(move |chosen| {
+            let _ = tx.send(chosen);
+        });
+    let chosen = rx
+        .recv()
+        .map_err(|_| "the file picker closed unexpectedly")?;
+    Ok(chosen.and_then(|p| p.into_path().ok()))
+}
+
+/// Ask for a file to read an export from, or `None` if the user cancelled.
+#[tauri::command]
+async fn pick_open_file(app: AppHandle) -> Result<Option<PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt as _;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .pick_file(move |chosen| {
+            let _ = tx.send(chosen);
+        });
+    let chosen = rx
+        .recv()
+        .map_err(|_| "the file picker closed unexpectedly")?;
+    Ok(chosen.and_then(|p| p.into_path().ok()))
+}
+
+/// Write an export to a path the user chose.
+#[tauri::command]
+fn export_storage(path: PathBuf, state: State<'_, App>) -> Result<(), String> {
+    let document = state.journal.export().map_err(describe)?;
+    let text =
+        serde_json::to_string_pretty(&document).expect("an export is plain data and always prints");
+    std::fs::write(&path, text).map_err(|e| format!("could not write {}: {e}", path.display()))
+}
+
+/// Read an export back in. Refuses unless the journal is empty.
+#[tauri::command]
+fn import_storage(path: PathBuf, state: State<'_, App>) -> Result<usize, String> {
+    refuse_while_running(&state)?;
+    let raw = std::fs::read_to_string(&path)
+        .map_err(|e| format!("could not read {}: {e}", path.display()))?;
+    let document = serde_json::from_str(&raw)
+        .map_err(|e| format!("{} is not readable JSON: {e}", path.display()))?;
+    state.journal.import(&document).map_err(describe)
+}
+
+/// Refuse to move the ground under a run that is going.
+///
+/// The journal is what a running transfer writes its intent to; swapping it
+/// mid-flight would leave the run unable to record what it did.
+fn refuse_while_running(state: &State<'_, App>) -> Result<(), String> {
+    if state.queue.is_running() {
+        return Err("a transfer is running; wait for it or stop it first".to_string());
+    }
+    Ok(())
+}
+
 #[tauri::command]
 fn remove_link(name: String, state: State<'_, App>) -> Result<bool, String> {
     state
@@ -1656,6 +1785,14 @@ fn main() {
             run_link,
             remove_link,
             set_at_once,
+            archives,
+            reset_storage,
+            restore_archive,
+            forget_archive,
+            export_storage,
+            import_storage,
+            pick_save_file,
+            pick_open_file,
             browse,
             places,
             last_panes,

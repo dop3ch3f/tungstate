@@ -939,3 +939,142 @@ fn a_link_can_be_removed_and_its_history_survives() {
         .failure()
         .stderr(predicates::str::contains("no link named `gone`"));
 }
+
+#[test]
+fn storage_can_be_exported_reset_and_brought_back() {
+    let home = sandbox();
+    let store = home.path().join("store");
+    std::fs::create_dir_all(&store).unwrap();
+    sandboxed(&home)
+        .args(["connection", "add", "keep", "--scheme", "fs", "--root"])
+        .arg(&store)
+        .assert()
+        .success();
+    sandboxed(&home)
+        .arg("link")
+        .arg("add")
+        .arg(&store)
+        .arg("keep:inbox")
+        .args(["--name", "saved", "--copy", "--cooldown", "0"])
+        .assert()
+        .success();
+
+    // An export is a document, and it carries no passwords: it is a file that
+    // gets copied around, and the keychain is where credentials live.
+    let doc = home.path().join("export.json");
+    sandboxed(&home)
+        .args(["storage", "export"])
+        .arg(&doc)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("no passwords"));
+    let text = std::fs::read_to_string(&doc).unwrap();
+    assert!(text.contains("tungstate_export"), "it names its own format");
+    assert!(text.contains("\"saved\""), "and carries the link");
+    for forbidden in ["password", "secret"] {
+        assert!(!text.contains(forbidden), "`{forbidden}` is in an export");
+    }
+
+    // Reset archives first and leaves a clean slate.
+    sandboxed(&home)
+        .args(["storage", "reset"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("archived everything"));
+    sandboxed(&home)
+        .args(["link", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("no links configured"));
+
+    // The archive describes itself well enough to choose from.
+    let listed = sandboxed(&home)
+        .args(["storage", "archives"])
+        .output()
+        .unwrap();
+    let listing = String::from_utf8(listed.stdout).unwrap();
+    assert!(listing.contains("1 link(s), 1 connection(s)"), "{listing}");
+    let name = listing
+        .lines()
+        .next()
+        .unwrap()
+        .split_whitespace()
+        .next()
+        .unwrap();
+
+    sandboxed(&home)
+        .args(["storage", "restore", name])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("reversible"));
+    sandboxed(&home)
+        .args(["link", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("saved"));
+
+    // Importing into a journal that already holds something is refused, so
+    // there is never a half-merged state nobody can reason about.
+    sandboxed(&home)
+        .args(["storage", "import"])
+        .arg(&doc)
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("not empty"));
+}
+
+#[test]
+fn a_reset_keeps_the_history_of_a_run_that_finished() {
+    // The refusal while work is unfinished is tested in the journal, where an
+    // interrupted operation can be written directly; from out here the only
+    // way to make one is to kill a run mid-file. What this covers is the other
+    // half: a completed run's history survives a reset, in the archive.
+    let home = sandbox();
+    let source = home.path().join("src");
+    let dest = home.path().join("dst");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::write(source.join("big.bin"), vec![0_u8; 4096]).unwrap();
+
+    sandboxed(&home)
+        .arg("link")
+        .arg("add")
+        .arg(&source)
+        .arg(&dest)
+        .args(["--name", "done", "--move", "--cooldown", "0"])
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["link", "run", "done"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("1 transferred"));
+
+    sandboxed(&home)
+        .args(["storage", "reset"])
+        .assert()
+        .success();
+    // Gone from here...
+    sandboxed(&home)
+        .arg("log")
+        .arg(dest.join("big.bin"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("no matching operations"));
+    // ...and kept over there.
+    let listing = String::from_utf8(
+        sandboxed(&home)
+            .args(["storage", "archives"])
+            .output()
+            .unwrap()
+            .stdout,
+    )
+    .unwrap();
+    assert!(listing.contains("1 operation(s)"), "{listing}");
+
+    // And the file itself was never in question: a reset moves nothing.
+    assert!(
+        dest.join("big.bin").is_file(),
+        "a reset must not touch files"
+    );
+}
