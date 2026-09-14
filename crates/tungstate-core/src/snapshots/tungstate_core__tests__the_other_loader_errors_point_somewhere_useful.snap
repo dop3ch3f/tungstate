@@ -1,0 +1,21 @@
+---
+source: crates/tungstate-core/src/tests.rs
+expression: "rendered.join(\"\\n\")"
+---
+line 7, column 18: rule `a`, match.size: `big` is not a comparison or a range
+line 7, column 18: rule `a`, match.mime: `jpeg` is not a media type; expected `image/jpeg`, `image/*` or `*`
+line 7, column 19: rule `a`, match.regex: not a valid regex: regex parse error:
+    (
+    ^
+error: unclosed group
+line 7, column 33: rule `a`, vars.d: `Mars/Olympus` is not a time zone; use `local`, `utc` or an IANA name such as `Africa/Lagos`
+line 7, column 19: rule `a`, vars.d: `colour` is not an attribute; the attributes are name, stem, ext, parent, path, size, mtime, now, source, mime, hash, exif.<Tag>, plus this rule's regex captures
+line 7, column 36: rule `a`, vars.d: `bucket` only applies to `size`; use `map` for text
+line 6, column 9: rule `a`: `mtime` is a date, so `:8` must be a strftime format such as `%Y-%m-%d`
+line 6, column 9: rule `a`: `name` is text, so `:%Y` must be a length; use `|` for filters
+line 6, column 9: rule `a`: `:%Q` is not a valid date format: strftime formatting failed: %Q failed: requires IANA time zone identifier or time zone offset, but neither were present
+line 6, column 9: rule `a`: `sanitize` must be the last filter; it is applied last anyway
+line 8, column 8: rule `a` is declared twice
+line 7, column 1: unknown field `priority`, expected one of `name`, `path`, `match`, `vars`, `rename`
+line 5, column 12: [defaults].cooldown: `a while` is not a duration; expected something like `30d`
+line 4, column 1: missing field `name`

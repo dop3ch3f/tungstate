@@ -193,6 +193,28 @@ pub trait Backend: Send + Sync {
     /// As [`Backend::stat`], plus [`BackendError::Io`] if the file cannot be opened.
     fn open_read(&self, path: &Path) -> Result<Box<dyn Read + Send>>;
 
+    /// Read at most `len` bytes from the start of `path`.
+    ///
+    /// What the classifier's cost tiers rest on: "sniff the media type" is
+    /// 8 KiB, not the file. Defaulted rather than required, because a backend
+    /// that cannot ask the far side for a range still answers correctly by
+    /// truncating, and every test double keeps compiling. `LocalBackend` and
+    /// the `OpenDAL` adapter override it with a real ranged read.
+    ///
+    /// # Errors
+    /// As [`Backend::open_read`].
+    fn read_prefix(&self, path: &Path, len: u64) -> Result<Vec<u8>> {
+        let mut reader = self.open_read(path)?.take(len);
+        let mut bytes = Vec::with_capacity(usize::try_from(len).unwrap_or(0).min(1 << 20));
+        reader
+            .read_to_end(&mut bytes)
+            .map_err(|source| BackendError::Io {
+                path: path.to_path_buf(),
+                source,
+            })?;
+        Ok(bytes)
+    }
+
     /// Create or truncate `path` and open it for streaming writes.
     ///
     /// The caller must call [`WriteFinish::finish`]; dropping the writer without

@@ -1,6 +1,7 @@
 //! The `tungstate` command line interface.
 
 mod connection;
+mod explain;
 
 use std::path::{Path, PathBuf};
 
@@ -60,6 +61,32 @@ enum Command {
     Whereis {
         /// A path, or a BLAKE3 hash if you have one.
         target: String,
+    },
+    /// Show where a policy would put a file, and why.
+    Explain {
+        /// The file to explain: a path, or `connection:path`.
+        target: String,
+        /// The policy to use, instead of the nearest `.tungstate/policy.toml`.
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Emit the trace as JSON instead of text.
+        #[arg(long)]
+        json: bool,
+    },
+    /// Check and inspect policies.
+    Policy {
+        #[command(subcommand)]
+        action: PolicyAction,
+    },
+}
+
+#[derive(Subcommand)]
+enum PolicyAction {
+    /// Load a policy and report every problem with it.
+    Validate {
+        /// The policy to check, instead of the nearest `.tungstate/policy.toml`.
+        #[arg(long)]
+        policy: Option<PathBuf>,
     },
 }
 
@@ -191,6 +218,16 @@ fn main() -> std::process::ExitCode {
                 journal.whereis(&locator)
             });
         }
+        Command::Explain {
+            target,
+            policy,
+            json,
+        } => {
+            return explain::explain(&target, policy.as_deref(), json);
+        }
+        Command::Policy { action } => match action {
+            PolicyAction::Validate { policy } => return explain::validate(policy.as_deref()),
+        },
     }
 
     eprintln!("not implemented yet");
@@ -220,7 +257,7 @@ fn open_journal() -> tungstate_journal::Result<Journal> {
 /// that must not write to the real credential store. It is per-process and
 /// therefore forgets between commands, which is exactly why the environment
 /// override exists alongside it.
-fn secret_store() -> Box<dyn SecretStore> {
+pub(crate) fn secret_store() -> Box<dyn SecretStore> {
     match std::env::var("TUNGSTATE_SECRETS").as_deref() {
         Ok("memory") => Box::new(EnvOverride(MemoryStore::new())),
         _ => Box::new(EnvOverride(KeyringStore::new())),

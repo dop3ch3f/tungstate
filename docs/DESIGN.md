@@ -47,9 +47,9 @@ Second invariant: **no content is ever lost.** The multiset of content hashes in
 
 The user wants both a layout template such as `{Year}/{Month}/{Source}/{Category}/{Type}/{SizeRange}/` and Hazel-style rule lists for less technical users. These are the same thing underneath:
 
-- A **layout** is one `[[dir]]` entry whose `path` is a big template. It routes everything it matches into a computed subtree.
-- A **rule** is a `[[dir]]` entry with a narrow `match` and a mostly literal `path`.
-- A policy is an ordered list of these. Most-specific match wins, ties are a load-time error.
+- A **layout** is one `[[rule]]` entry whose `path` is a big template. It routes everything it matches into a computed subtree.
+- A **rule** is a `[[rule]]` entry with a narrow `match` and a mostly literal `path`.
+- A policy is an ordered list of these. **The first whose `match` succeeds takes the file** (see §2).
 
 So "rule list mode" is just a policy with no template variables, and "layout mode" is a policy with one or two rich entries. Same parser, same planner, same `explain`. The two skins are documentation and `init --template` presets, not two engines. This is the key simplification: **do not build two policy systems.**
 
@@ -61,7 +61,7 @@ The `{Source}` variable is worth a note: it means "which ingest link, device, or
 
 ## 2. Policy language
 
-### File format — **OPEN (Q2)**
+### File format — **DECIDED: TOML** (§12; implemented in slice 5)
 
 | Option | Pros | Cons |
 |---|---|---|
@@ -70,7 +70,7 @@ The `{Source}` variable is worth a note: it means "which ingest link, device, or
 | **YAML** | Everyone knows it | Footguns (Norway problem, indentation), weakest choice |
 | **Embedded scripting (Rhai/Lua)** | Unlimited expressiveness | You now maintain a runtime; policies aren't statically analysable; not "declarative" |
 
-Recommendation: **TOML for v1**, with a tiny expression/template language inside string values (see below). Keep a scripting escape hatch (Rhai, pure Rust, sandboxable) on the roadmap for custom classifiers, gated behind explicit opt-in. KDL is the strongest alternative and worth a look if TOML nesting gets ugly in prototyping.
+**TOML for v1**, with a tiny expression/template language inside string values (see below). Keep a scripting escape hatch (Rhai, pure Rust, sandboxable) on the roadmap for custom classifiers, gated behind explicit opt-in. KDL is the strongest alternative and worth a look if TOML nesting gets ugly in prototyping.
 
 ### Sketch of a policy
 
@@ -126,10 +126,27 @@ vars.kind = { from = "mime", map = { "application/pdf" = "PDF", "text/*" = "Text
 ### Matching semantics
 
 - Globs (`globset`), regex, mime, size ranges, age ranges, boolean composition.
-- **Precedence:** most-specific match wins; ties broken by explicit `priority`; still-tied is a policy validation error at load time, not a runtime surprise. This is the single most important design choice for avoiding Hazel-style "why did it go there" confusion.
-- `tungstate explain <file>` prints the full decision trace. Build this from day one; it's also your debugger.
+- **Precedence — DECIDED (slice 5): the first matching rule in file order wins.** There is no specificity metric and no `priority` field. File order *is* priority.
 
-### Directory strictness
+  This replaces an earlier design of most-specific-match-wins, with `priority` as a tiebreak and a load-time ambiguity error when still tied. Two things killed it. A specificity metric over globs, regexes, mime wildcards and size ranges is a heuristic dressed as a rule, and the first time it disagrees with the reader it costs more than it saves. And file order is the one ordering every reader already understands without documentation.
+
+  **The argument that makes the simpler rule safe**, and the reason to record it rather than just the decision:
+
+  > Reconciliation is convergent, so a mis-ordered rule is not a permanent mistake — reverting the rule reverts the structure, the way a revert does in git.
+
+  That is precisely what Hazel and friends cannot offer — they apply imperative actions with no desired state to converge back to — and it is why the usual objection to first-match-wins does not land here. Getting the order wrong is a *cheap, reversible* mistake, so paying for a cleverer rule to prevent it is a bad trade.
+
+- **Shadowing is a warning, not an error.** Losing the load-time ambiguity check entirely would reintroduce the silent surprise it existed to prevent, so one thing replaces it: if rule *n* can never fire because an earlier rule subsumes it, the loader says so and names both lines. A warning rather than an error, because the policy is usable and a rule that can never fire is a thing to know rather than a thing to stop on. Exact for literal `ext` and `mime` sets and for size and age intervals; **silent whenever a glob or regex is involved**, since deciding whether two regexes overlap is not something a policy loader should attempt, and a wrong warning is worse than none.
+
+- `tungstate explain <file>` prints the full decision trace — every rule in file order, whether it matched and which constraint decided it, then each variable with where its value came from and what reading it cost, then each template's working. Built in slice 5; it is also the debugger.
+
+### Directory strictness — **deferred past slice 5**
+
+`strict` and `ensure` describe **drift**, which is a statement about what is in
+a directory versus what should be. Slice 5 ships the classifier, which answers
+"where does this file belong"; there is no index to compare a directory
+against until slice 6, so these are not in the policy model yet. A
+`strict = true` that could detect nothing would be a field that lies.
 
 - `strict = true`: only files the classifier routes here may exist here. Anything else is drift.
 - `strict = false` (default): classifier routes files in, but existing unmatched files are tolerated.
@@ -416,7 +433,8 @@ Service install: `tungstate service install` writes a launchd plist / systemd us
 ```
 tungstate/
   crates/
-    tungstate-core/       # policy model, classifier, planner, journal — NO I/O, fully unit-testable
+    tungstate-core/       # policy model, classifier, planner — NO I/O, fully unit-testable
+    tungstate-attrs/      # the I/O half of classification: read a file's attributes, tier by tier
     tungstate-index/      # SQLite index
     tungstate-backend/    # Backend trait + local impl
     tungstate-backend-opendal/  # remote impls via OpenDAL, feature-gated per service
@@ -429,7 +447,13 @@ tungstate/
     tungstate-web/        # web client assets, embedded via rust-embed
   policies/               # built-in templates, include_str!'d
 ```
-`tungstate-core` having zero I/O is the load-bearing decision for testability. Everything it needs comes in as data (`Snapshot`) and goes out as data (`Plan`).
+`tungstate-core` having zero I/O is the load-bearing decision for testability. Everything it needs comes in as data (`Attributes`, `Snapshot`) and goes out as data (`Explanation`, `Plan`).
+
+The journal moved out to its own crate in slice 2, and gathering attributes moved out to `tungstate-attrs` in slice 5 — reading a file is I/O by definition, so it cannot live in a crate that promises none. What is left in core is exactly what §7 described minus the parts that moved, and the promise survives: the whole classifier is property-tested without a filesystem.
+
+**Attribute cost tiers (slice 5).** `Tier` is `Stat | Head | Meta | Whole` — free, 8 KiB, 64 KiB, everything — and `Policy::required_tier()` is the maximum over every attribute any rule references, so a policy that never mentions `exif` or `hash` never pays for them. `Backend::read_prefix` is what makes it real, and it is a *defaulted* trait method: a backend that cannot ask the far side for a range still answers correctly by truncating, so such a backend is slow rather than wrong.
+
+Measured against a 658 MB video over FTP: a `stat`-tier policy caused **no data transfer at all**, and a `head`-tier one moved 1.1 MB. The second number is not 8 KiB, and the reason is worth recording — **FTP cannot request a byte range with an end.** `REST` sets a start offset; the only way to finish a `RETR` early is to close the data connection, by which point the server has pushed whatever fit in its socket buffers. Over HTTP, S3 and WebDAV a `Range` header is exact, and over SFTP a read at offset plus length is exact. FTP is the outlier, and it is the protocol this project cares most about, so a tier is a bound on what is *requested* rather than a promise about what arrives.
 
 ### Config and state locations
 `directories` crate for platform-correct paths. Global config `~/.config/tungstate/config.toml` lists folders. Per-folder policy at the root (local) or in the config dir (remote).
@@ -611,6 +635,8 @@ Slices 0–4b are "v0.1: the drain works and I trust it, over a mount and over F
 - **DECIDED** Drain first (§11). Verify levels `size` / `hash` / `readback`, default `hash` (§4b). Vue 3 web GUI, small, embedded (§8). User is new to Rust, strong elsewhere; sync engine, async only in the daemon (§7).
 - **DECIDED** NAS via Finder mount and FTP; FTP backend becomes slice 4b (§11). Noun is `folder` (§1). `MIT OR Apache-2.0` on GitHub (§11). Sync engine confirmed, with the performance reasoning recorded (§7).
 - **DECIDED** Tungstate runs on every machine as a node; NAS self-governs; peer transfer protocol in v0.3 (§6b). Source handling is an explicit `--move` / `--move --trash` / `--copy` choice per link, no silent default (§4b). `[[rule]]` noun; policy at `<folder>/.tungstate/policy.toml` (§2). Rename filters, `adopt` intent, notification rules, stub option, LAN auth (§2, §8).
+
+- **DECIDED (slice 5)** Precedence is **first match in file order**; `priority` is removed and the load-time ambiguity error becomes a shadowing *warning* (§2). The reason it is safe to be this simple is that reconciliation is convergent, so a mis-ordered rule reverts with the rule. `tungstate-attrs` is its own crate so `tungstate-core` stays I/O-free (§7). Attributes have cost tiers and `Backend` gains a defaulted `read_prefix` (§7). `--json` is established on `explain` and nowhere else yet.
 
 Every part has now been brainstormed at least once. Nothing remains OPEN.
 

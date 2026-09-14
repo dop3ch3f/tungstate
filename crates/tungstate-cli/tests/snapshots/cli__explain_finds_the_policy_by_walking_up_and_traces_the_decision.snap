@@ -1,0 +1,32 @@
+---
+source: crates/tungstate-cli/tests/cli.rs
+expression: trace
+---
+IMG_0001.JPG
+  policy .tungstate/policy.toml (folder "downloads"), reads every file in full (tier: whole)
+
+rules, in file order
+   1. media-by-origin  (line 12)   matched
+   2. archives         (line 21)   no: ext — `jpg` is not one of `zip`, `tar`, `gz`, `7z`
+
+variables for `media-by-origin`
+  date        = 2023-12-25T08:30:00      from exif.DateTimeOriginal (meta), tz utc
+  category    = Photos                   from mime (head), = image/jpeg, map `image/*` = "Photos"
+  size_range  = under-10MiB              from size (stat), = 78, bucket `under-10MiB`
+  hash        = ce57a60f9c7d93ce3704972c6946823… from hash (whole)
+  ext         = JPG                      from ext (stat)
+
+path    {date:%Y}/{date:%m}/{category}/{size_range}
+        {date:%Y}     -> 2023
+        {date:%m}     -> 12
+        {category}    -> Photos
+        {size_range}  -> under-10MiB
+        = 2023/12/Photos/under-10MiB
+
+rename  {date:%Y%m%d_%H%M%S}_{hash:8}.{ext|lower}
+        {date:%Y%m%d_%H%M%S}  -> 20231225_083000
+        {hash:8}              -> ce57a60f
+        {ext|lower}           -> jpg   (lower: JPG -> jpg)
+        = 20231225_083000_ce57a60f.jpg
+
+destination  2023/12/Photos/under-10MiB/20231225_083000_ce57a60f.jpg

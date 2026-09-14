@@ -23,7 +23,14 @@ tungstate-backend-opendal = { path = "../tungstate-backend-opendal" }
 tungstate-secret = { path = "../tungstate-secret" }
 tungstate-journal = { path = "../tungstate-journal" }
 tungstate-transfer = { path = "../tungstate-transfer" }
+tungstate-core = { path = "../tungstate-core" }
+tungstate-attrs = { path = "../tungstate-attrs" }
 clap = { workspace = true }
+# The one place in the workspace that draws a policy span. Libraries carry
+# spans as data; only the edge knows how to render them (DESIGN.md §7).
+miette = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }

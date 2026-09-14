@@ -424,3 +424,70 @@ fn begin_interrupted_op(home: &tempfile::TempDir, link: &str) {
         })
         .expect("intended op");
 }
+
+/// A policy that needs nothing past a name and a size, and one that needs the
+/// media type. The pair is what makes the tier a measurable thing rather than
+/// a claim.
+#[test]
+fn explain_over_ftp_reads_a_prefix_rather_than_the_file() {
+    let home = tempfile::tempdir().unwrap();
+    connect(&home, &server().password);
+
+    // Eight megabytes, so "did it read the whole thing?" is answerable from
+    // the clock as well as from the server.
+    let end = unique_end("explain");
+    let remote = format!("{end}/big.mp4");
+    let mut body = vec![0_u8; 8 * 1024 * 1024];
+    body[..4].copy_from_slice(&[0x00, 0x00, 0x00, 0x18]);
+    body[4..12].copy_from_slice(b"ftypmp42");
+    put(&remote, &body);
+
+    let stat_only = home.path().join("stat.toml");
+    std::fs::write(
+        &stat_only,
+        "[folder]\nname = \"nas\"\n[[rule]]\nname = \"v\"\npath = \"Videos\"\n\
+         match = { ext = \"mp4\", size = \"> 1MiB\" }\n",
+    )
+    .unwrap();
+    cli(&home)
+        .args(["explain", &format!("nas:{remote}"), "--policy"])
+        .arg(&stat_only)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("tier: stat"))
+        .stdout(predicates::str::contains("destination  Videos/big.mp4"));
+
+    // The media type comes from magic bytes, which means a read — but a
+    // ranged one. If the tier were decorative this would pull 8 MiB.
+    let sniffing = home.path().join("head.toml");
+    std::fs::write(
+        &sniffing,
+        "[folder]\nname = \"nas\"\n[[rule]]\nname = \"v\"\npath = \"Videos/{ext|lower}\"\n\
+         match = { mime = \"video/*\" }\n",
+    )
+    .unwrap();
+    let started = std::time::Instant::now();
+    cli(&home)
+        .args(["explain", &format!("nas:{remote}"), "--policy"])
+        .arg(&sniffing)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("tier: head"))
+        .stdout(predicates::str::contains("destination  Videos/mp4/big.mp4"));
+    let elapsed = started.elapsed();
+
+    // Deliberately loose. The exact byte count is not assertable from this
+    // side: FTP has no "stop after N bytes", so ending a RETR early means
+    // closing the data connection once the server has already pushed its
+    // socket buffers, and how much that is belongs to the kernel. What is
+    // assertable is that the file did not come across, and against loopback
+    // an 8 MiB transfer plus its BLAKE3 is not something that finishes in a
+    // couple of seconds.
+    assert!(
+        elapsed < std::time::Duration::from_secs(5),
+        "a head-tier explain took {elapsed:?}, which looks like a whole-file read"
+    );
+
+    // And the file is still only on the server: explain moves nothing.
+    assert!(exists(&remote));
+}

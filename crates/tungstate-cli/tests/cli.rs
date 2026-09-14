@@ -436,3 +436,402 @@ fn a_whole_drain_runs_through_a_connection() {
         "the original should have been reclaimed"
     );
 }
+
+// ---------------------------------------------------------------------------
+// `explain` and `policy validate`
+
+/// A governed folder with a policy in it and three files worth explaining.
+///
+/// The photo carries a real EXIF `DateTimeOriginal`, so the trace shows the
+/// camera's date winning over the file's modification time — the one fact
+/// this whole slice exists to make visible.
+fn governed() -> tempfile::TempDir {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(root.join(".tungstate")).unwrap();
+    std::fs::write(root.join(".tungstate/policy.toml"), POLICY).unwrap();
+
+    std::fs::write(
+        root.join("IMG_0001.JPG"),
+        tungstate_attrs::jpeg_with_exif_date("2023:12:25 08:30:00"),
+    )
+    .unwrap();
+    // 12 MiB, so it lands in the middle size bucket rather than the small one.
+    let mut clip = vec![0_u8; 12 * 1024 * 1024];
+    clip[..4].copy_from_slice(&[0x00, 0x00, 0x00, 0x18]);
+    clip[4..12].copy_from_slice(b"ftypmp42");
+    std::fs::write(root.join("holiday.mp4"), &clip).unwrap();
+    std::fs::write(root.join("papers.zip"), b"PK\x03\x04not really a zip").unwrap();
+    std::fs::write(root.join(".DS_Store"), b"junk").unwrap();
+    home
+}
+
+const POLICY: &str = r#"# The two skins on one model: one layout template, one narrow rule.
+[folder]
+name = "downloads"
+inbox = "_inbox"
+ignore = [".DS_Store", "*.part"]
+
+[defaults]
+on_conflict = "quarantine"
+cooldown = "30s"
+
+[[rule]]
+name = "media-by-origin"
+path = "{date:%Y}/{date:%m}/{category}/{size_range}"
+match = { mime = ["image/*", "video/*"] }
+vars.date       = { from = ["exif.DateTimeOriginal", "mtime"], tz = "utc" }
+vars.category   = { from = "mime", map = { "image/*" = "Photos", "video/*" = "Videos" } }
+vars.size_range = { from = "size", bucket = ["<10MiB", "10MiB-1GiB", ">1GiB"] }
+rename = "{date:%Y%m%d_%H%M%S}_{hash:8}.{ext|lower}"
+
+[[rule]]
+name = "archives"
+path = "Archives/{ext|upper}"
+match = { ext = ["zip", "tar", "gz", "7z"] }
+"#;
+
+fn explain(home: &tempfile::TempDir, file: &str) -> assert_cmd::Command {
+    let mut command = sandboxed(home);
+    command
+        .arg("explain")
+        .arg(home.path().join("Downloads").join(file));
+    command
+}
+
+#[test]
+fn explain_finds_the_policy_by_walking_up_and_traces_the_decision() {
+    let home = governed();
+    let output = explain(&home, "IMG_0001.JPG")
+        .output()
+        .expect("explain runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let trace = String::from_utf8(output.stdout).expect("the trace is utf-8");
+    insta::assert_snapshot!(trace);
+}
+
+#[test]
+fn explain_routes_a_photo_by_its_camera_date_not_its_mtime() {
+    let home = governed();
+    // The file was written seconds ago, so an mtime-derived path would be
+    // this year. The EXIF date is 2023, and that is what must win.
+    explain(&home, "IMG_0001.JPG")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "destination  2023/12/Photos/under-10MiB/20231225_083000_",
+        ))
+        .stdout(predicates::str::contains(
+            "from exif.DateTimeOriginal (meta)",
+        ));
+}
+
+#[test]
+fn explain_reads_the_other_two_files_the_way_the_policy_says() {
+    let home = governed();
+    explain(&home, "holiday.mp4")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Videos/10MiB-1GiB"))
+        // No EXIF in an MP4, so the chain falls through to the file's own time.
+        .stdout(predicates::str::contains("exif.DateTimeOriginal absent"))
+        .stdout(predicates::str::contains("from mtime (stat)"));
+
+    explain(&home, "papers.zip")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "destination  Archives/ZIP/papers.zip",
+        ))
+        .stdout(predicates::str::contains("no: mime"));
+
+    explain(&home, ".DS_Store")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("ignored"))
+        .stdout(predicates::str::contains(".DS_Store"));
+}
+
+#[test]
+fn explain_emits_the_same_trace_as_json() {
+    let home = governed();
+    let output = explain(&home, "IMG_0001.JPG")
+        .arg("--json")
+        .output()
+        .expect("explain --json runs");
+    assert!(output.status.success());
+    let json: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("--json emits valid JSON");
+
+    assert_eq!(json["policy"], ".tungstate/policy.toml");
+    assert_eq!(json["folder"], "downloads");
+    assert_eq!(json["file"], "IMG_0001.JPG");
+    assert_eq!(json["tier"], "whole");
+
+    let rules = json["rules"].as_array().expect("rules is a list");
+    assert_eq!(rules.len(), 2);
+    // The line a rule is reported at is the line its `name` sits on.
+    assert_eq!(rules[0]["name"], "media-by-origin");
+    assert_eq!(rules[0]["result"]["kind"], "matched");
+    assert_eq!(rules[0]["line"], 12);
+    assert_eq!(rules[1]["name"], "archives");
+    assert_eq!(rules[1]["result"]["kind"], "failed");
+    assert_eq!(rules[1]["result"]["constraint"], "ext");
+    assert_eq!(rules[1]["line"], 21);
+
+    let outcome = &json["outcome"];
+    assert_eq!(outcome["kind"], "routed");
+    assert_eq!(outcome["rule"], "media-by-origin");
+    assert_eq!(outcome["in_place"], false);
+    let destination = outcome["destination"].as_str().expect("a destination");
+    assert!(
+        destination.starts_with("2023/12/Photos/under-10MiB/20231225_083000_"),
+        "{destination}"
+    );
+
+    let date = &outcome["vars"][0];
+    assert_eq!(date["name"], "date");
+    assert_eq!(date["source"], "exif.DateTimeOriginal");
+    assert_eq!(date["tier"], "meta");
+    assert_eq!(date["tz"], "utc");
+    assert_eq!(date["skipped"].as_array().unwrap().len(), 0);
+    // ISO-8601, not the camera's own `2023:12:25 08:30:00`: the trace showing
+    // a parsed instant is how you can tell tungstate read it as a date rather
+    // than as a string it failed to understand.
+    assert_eq!(date["raw"], "2023-12-25T08:30:00");
+
+    let category = outcome["vars"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|v| v["name"] == "category")
+        .expect("category is traced");
+    assert_eq!(category["raw"], "image/jpeg");
+    assert_eq!(category["value"], "Photos");
+    assert_eq!(category["via"], "map `image/*` = \"Photos\"");
+
+    assert_eq!(
+        outcome["path"]["template"],
+        "{date:%Y}/{date:%m}/{category}/{size_range}"
+    );
+    assert_eq!(outcome["path"]["text"], "2023/12/Photos/under-10MiB");
+    let rename = &outcome["rename"];
+    assert_eq!(rename["steps"][2]["variable"], "ext");
+    assert_eq!(rename["steps"][2]["filters"][0]["filter"], "lower");
+    assert_eq!(rename["steps"][2]["filters"][0]["result"], "jpg");
+    assert_eq!(json["warnings"].as_array().unwrap().len(), 0);
+}
+
+#[test]
+fn reordering_two_rules_changes_where_a_file_goes() {
+    let home = governed();
+    let policy = home.path().join("Downloads/.tungstate/policy.toml");
+
+    // A zip is not media, so it starts in `archives`. Give the first rule a
+    // reach that covers it, and the first-match-wins order takes it instead.
+    let wide = POLICY.replace(
+        r#"match = { mime = ["image/*", "video/*"] }"#,
+        r#"match = { mime = "*" }"#,
+    );
+    std::fs::write(&policy, &wide).unwrap();
+    explain(&home, "papers.zip")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("no rule matched").not())
+        .stdout(predicates::str::contains("archives"));
+
+    // Put `archives` above it and the zip goes back to the archive shelf,
+    // which is the demonstration that file order is the precedence.
+    let head = wide.split("[[rule]]").next().unwrap().to_string();
+    let rules: Vec<&str> = wide.split("[[rule]]").skip(1).collect();
+    let swapped = format!("{head}[[rule]]{}[[rule]]{}", rules[1], rules[0]);
+    std::fs::write(&policy, &swapped).unwrap();
+    explain(&home, "papers.zip")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "destination  Archives/ZIP/papers.zip",
+        ));
+
+    // And back: reverting the reorder reverts the answer.
+    std::fs::write(&policy, &wide).unwrap();
+    explain(&home, "papers.zip")
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("destination  Archives/ZIP/papers.zip").not());
+}
+
+#[test]
+fn explain_takes_a_policy_that_is_not_in_the_folder() {
+    let home = governed();
+    let elsewhere = home.path().join("other.toml");
+    std::fs::write(
+        &elsewhere,
+        "[folder]\nname = \"flat\"\n\n[[rule]]\nname = \"everything\"\npath = \"All/{ext|upper}\"\n",
+    )
+    .unwrap();
+
+    explain(&home, "papers.zip")
+        .arg("--policy")
+        .arg(&elsewhere)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("destination  All/ZIP/papers.zip"));
+}
+
+#[test]
+fn explain_without_a_policy_anywhere_says_so() {
+    let home = sandbox();
+    std::fs::write(home.path().join("loose.txt"), b"x").unwrap();
+    sandboxed(&home)
+        .arg("explain")
+        .arg(home.path().join("loose.txt"))
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains(".tungstate/policy.toml"));
+}
+
+#[test]
+fn policy_validate_accepts_a_good_policy_and_reports_a_bad_one() {
+    let home = governed();
+    let policy = home.path().join("Downloads/.tungstate/policy.toml");
+
+    sandboxed(&home)
+        .args(["policy", "validate", "--policy"])
+        .arg(&policy)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("2 rule(s)"))
+        .stdout(predicates::str::contains("reads every file in full"));
+
+    // Four ways to break it, each of which must point at its own line.
+    for (broken, line, needle) in [
+        ("mode = \"aggressive\"\n", 4, "unknown variant"),
+        (
+            "[[rule]]\nname = \"z\"\npath = \"{name|shout}\"\n",
+            27,
+            "not a filter",
+        ),
+        (
+            "[[rule]]\nname = \"z\"\npath = \"{date:%Y\"\n",
+            27,
+            "never closed",
+        ),
+        (
+            "[[rule]]\nname = \"z\"\npath = \"{year}\"\n",
+            27,
+            "unknown variable",
+        ),
+    ] {
+        let text = if broken.starts_with("[[rule]]") {
+            format!("{POLICY}\n{broken}")
+        } else {
+            POLICY.replacen("inbox =", &format!("{broken}inbox ="), 1)
+        };
+        std::fs::write(&policy, &text).unwrap();
+        let output = sandboxed(&home)
+            .args(["policy", "validate", "--policy"])
+            .arg(&policy)
+            .output()
+            .expect("validate runs");
+        assert_eq!(
+            output.status.code(),
+            Some(1),
+            "a broken policy must exit 1: {broken}"
+        );
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(stderr.contains(needle), "expected `{needle}` in:\n{stderr}");
+        assert!(
+            stderr.contains(&format!("policy.toml:{line}:")),
+            "expected line {line} in:\n{stderr}"
+        );
+    }
+}
+
+#[test]
+fn a_shadowed_rule_is_a_warning_not_a_failure() {
+    let home = governed();
+    let policy = home.path().join("Downloads/.tungstate/policy.toml");
+    std::fs::write(
+        &policy,
+        "[folder]\nname = \"x\"\n\n[[rule]]\nname = \"images\"\npath = \"Images\"\n\
+         match = { mime = \"image/*\" }\n\n[[rule]]\nname = \"pngs\"\npath = \"PNG\"\n\
+         match = { mime = \"image/png\" }\n",
+    )
+    .unwrap();
+
+    sandboxed(&home)
+        .args(["policy", "validate", "--policy"])
+        .arg(&policy)
+        .assert()
+        // A warning does not fail the load: the policy is usable, and the
+        // rule that can never fire is a thing to know, not a thing to stop on.
+        .success()
+        .stderr(predicates::str::contains("can never fire"))
+        .stderr(predicates::str::contains("`pngs`"))
+        .stderr(predicates::str::contains("`images`"));
+}
+
+#[test]
+fn explain_reaches_a_file_through_a_connection() {
+    // The `fs` scheme goes through the same OpenDAL factory a NAS does, with
+    // no server and no network, so the remote path is exercised on every
+    // platform rather than only on the Linux FTP job.
+    let home = sandbox();
+    let store = home.path().join("store");
+    std::fs::create_dir_all(store.join("incoming")).unwrap();
+    std::fs::write(
+        store.join("incoming/IMG_0002.JPG"),
+        tungstate_attrs::jpeg_with_exif_date("2019:07:04 17:05:00"),
+    )
+    .unwrap();
+
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "fs", "--root"])
+        .arg(&store)
+        .assert()
+        .success();
+
+    let policy = home.path().join("nas.toml");
+    std::fs::write(
+        &policy,
+        "[folder]\nname = \"nas\"\n\n[[rule]]\nname = \"photos\"\n\
+         path = \"{d:%Y}/{d:%m}/{parent}\"\n\
+         vars.d = { from = [\"exif.DateTimeOriginal\", \"mtime\"], tz = \"utc\" }\n",
+    )
+    .unwrap();
+
+    // The connection's own root stands in for the governed folder, so
+    // `{parent}` means what it means locally.
+    sandboxed(&home)
+        .args(["explain", "nas:incoming/IMG_0002.JPG", "--policy"])
+        .arg(&policy)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "destination  2019/07/incoming/IMG_0002.JPG",
+        ))
+        .stdout(predicates::str::contains(
+            "from exif.DateTimeOriginal (meta)",
+        ));
+
+    // Without a policy there is nothing to walk up to on the far side, and
+    // saying so beats a confusing "no policy found" about a local directory.
+    sandboxed(&home)
+        .args(["explain", "nas:incoming/IMG_0002.JPG"])
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("--policy"));
+
+    // A name that reads as a connection and is not one is a typo, not a file.
+    sandboxed(&home)
+        .args(["explain", "nsa:incoming/IMG_0002.JPG", "--policy"])
+        .arg(&policy)
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("no connection named `nsa`"));
+}

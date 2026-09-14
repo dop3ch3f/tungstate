@@ -1,0 +1,28 @@
+[package]
+name = "tungstate-attrs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# The I/O half of classification, kept out of tungstate-core so core's
+# zero-I/O promise survives. Reads exactly as much of a file as the policy's
+# tier asks for, through the Backend trait, and hands back plain data.
+[dependencies]
+tungstate-core = { path = "../tungstate-core" }
+tungstate-backend = { path = "../tungstate-backend" }
+thiserror = { workspace = true }
+infer = { workspace = true }
+kamadak-exif = { workspace = true }
+blake3 = { workspace = true }
+jiff = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tungstate-backend-opendal = { path = "../tungstate-backend-opendal" }
+tungstate-journal = { path = "../tungstate-journal" }
+tungstate-secret = { path = "../tungstate-secret" }
+
+[lints]
+workspace = true

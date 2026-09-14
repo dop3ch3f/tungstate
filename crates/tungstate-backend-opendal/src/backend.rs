@@ -283,6 +283,26 @@ impl Backend for OpendalBackend {
         }))
     }
 
+    fn read_prefix(&self, path: &Path, len: u64) -> Result<Vec<u8>> {
+        let operator = self.operator.clone();
+        let owned = self.key(path)?;
+        // A real ranged request: on FTP that is `REST 0` and a `RETR` the
+        // client closes after `len` bytes, so classifying a 4 GB video costs
+        // 8 KiB of transfer rather than 4 GB.
+        let buffer = dispatch(async move {
+            match operator.read_with(&owned).range(0..len).await {
+                // A range past the end means the file is shorter than the
+                // prefix, so reading it whole costs fewer bytes than asked.
+                Err(error) if error.kind() == ErrorKind::RangeNotSatisfied => {
+                    operator.read(&owned).await
+                }
+                other => other,
+            }
+        })
+        .map_err(|error| self.failure("read", path, error))?;
+        Ok(buffer.to_vec())
+    }
+
     fn create_write(&self, path: &Path) -> Result<Box<dyn WriteFinish>> {
         let operator = self.operator.clone();
         let owned = self.key(path)?;

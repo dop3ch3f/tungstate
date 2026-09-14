@@ -1,0 +1,5 @@
+---
+source: crates/tungstate-core/src/tests.rs
+expression: failure(text)
+---
+line 7, column 11: rule `a`: `{` is never closed

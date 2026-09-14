@@ -1,0 +1,5 @@
+---
+source: crates/tungstate-core/src/tests.rs
+expression: failure(text)
+---
+line 6, column 9: rule `a`: unknown variable `year`; the attributes are name, stem, ext, parent, path, size, mtime, now, source, mime, hash, exif.<Tag>, plus this rule's own: date

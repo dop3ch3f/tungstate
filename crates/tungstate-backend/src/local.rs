@@ -230,6 +230,17 @@ impl Backend for LocalBackend {
         Ok(Box::new(file))
     }
 
+    fn read_prefix(&self, path: &Path, len: u64) -> Result<Vec<u8>> {
+        use std::io::Read as _;
+        let full = self.guarded(path, Tail::MustNotBeLink)?;
+        let file = std::fs::File::open(&full).map_err(io_at(&full))?;
+        let mut bytes = Vec::new();
+        file.take(len)
+            .read_to_end(&mut bytes)
+            .map_err(io_at(&full))?;
+        Ok(bytes)
+    }
+
     fn create_write(&self, path: &Path) -> Result<Box<dyn WriteFinish>> {
         let full = self.guarded(path, Tail::MustNotBeLink)?;
         let file = std::fs::File::create(&full).map_err(io_at(&full))?;

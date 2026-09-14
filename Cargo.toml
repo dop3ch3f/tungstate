@@ -38,6 +38,19 @@ proptest = "1.11"
 tempfile = "3.27"
 assert_cmd = "2.2"
 predicates = "3.1"
+# The policy language. `toml` 1.x for `Spanned`, so a diagnostic can point at
+# the line that caused it; `miette` draws those spans and lives in the CLI
+# only (DESIGN.md §7: thiserror in libraries, miette at the edge).
+toml = "1"
+miette = { version = "7", features = ["fancy"] }
+globset = "0.4"
+# Promoted from transitive to direct: already compiled for tauri and opendal.
+regex = "1"
+infer = "0.19"
+# Bundles a tzdb, so `tz = "Africa/Lagos"` means the same thing on every
+# platform rather than whatever the host happens to have installed.
+jiff = "0.2"
+kamadak-exif = "0.6"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

@@ -1,0 +1,5 @@
+---
+source: crates/tungstate-core/src/tests.rs
+expression: failure(text)
+---
+line 6, column 17: rule `a`: `shout` is not a filter; the filters are lower, upper, slug, sanitize, trunc:N, pad:N, hash:N and default:"x"

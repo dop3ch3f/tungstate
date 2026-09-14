@@ -20,8 +20,20 @@ prerelease, rebuilt from the same pipeline every time the test suite passes on
 the branch. It moves without warning — use a numbered release for anything you
 want to stay put.
 
-Status: early construction. The durable drain works: `tungstate link add <from> <to> --name x --move` then `tungstate link run x`, resumable after a crash. Governance is next. See `docs/DESIGN.md` for the full design and
-`docs/SYLLABUS.md` for the build order.
+Status: early construction, and two halves work.
+
+**The durable drain.** `tungstate link add <from> <to> --name x --move` then
+`tungstate link run x`, over a mounted volume or over FTP, resumable after a
+crash and drivable from the desktop app.
+
+**The policy model.** Declare the shape a folder should have in
+`.tungstate/policy.toml`, then `tungstate explain <file>` says where that file
+belongs and why — every rule in order, every variable's provenance, and what
+reading it cost. Nothing is moved yet; the planner and the executor are the
+next two slices.
+
+See `docs/DESIGN.md` for the full design and `docs/SYLLABUS.md` for the build
+order.
 
 Licensed under either of Apache License, Version 2.0 or MIT license at your option.
 

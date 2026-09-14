@@ -1,0 +1,5 @@
+---
+source: crates/tungstate-core/src/tests.rs
+expression: failure(text)
+---
+line 3, column 8: unknown variant `aggressive`, expected one of `observe`, `suggest`, `enforce`
