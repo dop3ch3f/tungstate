@@ -161,6 +161,57 @@ pub fn probe(
     }
 }
 
+/// Whether the connection's root will accept a file, answered by writing one
+/// and taking it away again.
+///
+/// [`probe`] deliberately only lists, on the principle that proving you can
+/// reach a NAS must not leave anything in it. This is the other half of the
+/// question and it cannot be answered by reading, because listing a directory
+/// and writing to it are different permissions — and on a Synology the root
+/// is a virtual list of shared folders that lists perfectly and accepts
+/// nothing.
+///
+/// It has to be the *root* rather than the folder being drained into, because
+/// `OpenDAL`'s FTP writer puts its temporary file at the root whatever the
+/// destination is (see `create_write`). A root that refuses writes fails every
+/// file in a run, one at a time, with an error that names neither the root nor
+/// the reason.
+///
+/// The probe file is named so a leftover is obviously ours and obviously junk,
+/// and it is removed whether or not the write succeeded.
+///
+/// # Errors
+/// [`OpenError`] if the connection cannot be opened at all. A refused write is
+/// `Ok(false)`, not an error: it is an answer.
+pub fn probe_writable(
+    connection: &Connection,
+    journal: &Journal,
+    secrets: &dyn SecretStore,
+) -> Result<bool> {
+    use std::io::Write as _;
+
+    let endpoint = Endpoint::remote(connection.id, PathBuf::new());
+    let backend = open(&endpoint, journal, secrets)?;
+    let name = PathBuf::from(format!(".tungstate-writable-{}", std::process::id()));
+
+    let wrote = backend
+        .create_write(&name)
+        .and_then(|mut sink| {
+            sink.write_all(b"tungstate")
+                .map_err(|source| tungstate_backend::BackendError::Io {
+                    path: name.clone(),
+                    source,
+                })?;
+            sink.finish()
+        })
+        .is_ok();
+
+    // Unconditional: a write that failed at `finish` may still have left
+    // something behind, and this must never be the thing that litters.
+    let _ = backend.remove_file(&name);
+    Ok(wrote)
+}
+
 /// Turn a failed first contact into the most useful error we can justify.
 ///
 /// `OpenDAL` does not classify a rejected FTP login: `format_ftp_error` maps

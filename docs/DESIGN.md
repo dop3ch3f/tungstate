@@ -366,6 +366,38 @@ The planner consults `capabilities()` to decide between `rename` (atomic) and `c
 
 Recommendation: **OpenDAL behind your own trait**, with `local` implemented natively (you need inode/file-id, xattrs, hardlink, reflink, and `notify`, none of which OpenDAL gives you). Hand-roll a backend only when OpenDAL's semantics prove wrong for it.
 
+### A known defect in `OpenDAL`'s FTP writer (found 2026-09-14, by using it)
+
+`OpenDAL`'s FTP service writes every file through a temporary name of its own
+and renames on close. The temporary name comes from `build_tmp_path_of`, which
+is `get_basename(path)` plus a random suffix — **the directory is dropped and
+never put back**. So the temporary file is created at the *connection root*,
+whatever the intended destination was, and only the closing rename puts the
+content where it belongs.
+
+Invisible on a server whose root is writable, which is why the Docker-based
+integration tests never caught it. Fatal on a Synology, whose FTP root is the
+virtual list of shared folders: it lists perfectly and accepts nothing, so
+every file fails with `553 <name>: Permission denied` — naming only the
+basename, because the basename is all that was sent.
+
+Append mode would use the path as given, and the service advertises it
+(`write_can_append: true`), but it is unusable: the writer's `close` returns
+`MetadataBuilder::unknown()`, and `CompleteWriter` rejects an append whose
+result carries no content length. **Both routes through the `Operator` API are
+wrong.**
+
+Three consequences, all recorded in the code:
+
+- The connection root must be writable even when nothing is ever meant to land
+  there. `probe_writable` asks that question once, and `connection test`
+  answers it, rather than letting a run discover it one file at a time.
+- `sweep_orphans` exists because of this behaviour and has to stay while it
+  does.
+- The real fix is upstream, or a hand-rolled FTP write path on `suppaftp` of
+  the kind §6 already plans for SFTP. Worth a patch to `OpenDAL`: the fix is to
+  rejoin the directory in `build_tmp_path_of`'s caller.
+
 ### SFTP is the exception — **DECIDED (slice 4b): hand-rolled on `russh` + `russh-sftp`**
 
 Investigated while building slice 4b, before writing any SFTP code. OpenDAL's SFTP service is:

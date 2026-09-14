@@ -491,3 +491,51 @@ fn explain_over_ftp_reads_a_prefix_rather_than_the_file() {
     // And the file is still only on the server: explain moves nothing.
     assert!(exists(&remote));
 }
+
+#[test]
+fn a_connection_test_reports_whether_the_root_accepts_files() {
+    // Listing and writing are different permissions, and a drain needs the
+    // second. Answered once here rather than by every file in a run failing
+    // separately, which is how it presented the first time: 63 files refused
+    // one at a time, with an error naming neither the root nor the reason.
+    let home = tempfile::tempdir().unwrap();
+    connect(&home, &server().password);
+
+    cli(&home)
+        .args(["connection", "test", "nas"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("is reachable"))
+        .stdout(predicates::str::contains("accepts files"));
+
+    // And it leaves nothing behind, whichever way it went. Asserted by the
+    // count being unchanged across a second probe rather than by looking for
+    // the file: the name carries the writing process's pid, which this one
+    // does not know.
+    let count_of = |out: &[u8]| {
+        String::from_utf8_lossy(out)
+            .lines()
+            .find_map(|line| {
+                line.trim()
+                    .strip_suffix(" entries")?
+                    .rsplit(' ')
+                    .next()?
+                    .parse::<usize>()
+                    .ok()
+            })
+            .expect("the probe reports how many entries it saw")
+    };
+    let first = cli(&home)
+        .args(["connection", "test", "nas"])
+        .output()
+        .expect("test runs");
+    let second = cli(&home)
+        .args(["connection", "test", "nas"])
+        .output()
+        .expect("test runs");
+    assert_eq!(
+        count_of(&first.stdout),
+        count_of(&second.stdout),
+        "the probe left something behind"
+    );
+}

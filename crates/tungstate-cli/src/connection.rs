@@ -428,7 +428,10 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
             // Named, not just counted. Whether those entries are your folders
             // or the server's own `/bin` is the whole question, and a number
             // cannot answer it.
-            for entry in entries.iter().take(8) {
+            // Twenty, not a handful: a connection root is the shared-folder
+            // list on most NAS boxes, and the entry you are looking for is as
+            // likely to be last as first.
+            for entry in entries.iter().take(20) {
                 let name = entry
                     .path
                     .file_name()
@@ -437,11 +440,31 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
                 let mark = if entry.meta.is_dir { "/" } else { "" };
                 println!("    {name}{mark}");
             }
-            if entries.len() > 8 {
-                println!("    and {} more", entries.len() - 8);
+            if entries.len() > 20 {
+                println!("    and {} more", entries.len() - 20);
             }
             if let Some(warning) = connection.scheme.rootless_warning(&connection.root) {
                 println!("  note: {warning}");
+            }
+            // Listing and writing are different permissions, and only one of
+            // them is what a drain needs. Asked here so it is answered once,
+            // rather than by every file in a run failing separately.
+            if connection.scheme.is_networked() {
+                match tungstate_backend_opendal::probe_writable(&connection, journal, secrets) {
+                    Ok(true) => println!("  {root} accepts files"),
+                    Ok(false) => {
+                        println!("  {root} REFUSES files, so every transfer here would fail");
+                        println!(
+                            "  set the root to a directory this account can write to:\n    \
+                             tungstate connection update {name} --root /<folder>\n  \
+                             and make the link's path relative to it. The root has to accept\n  \
+                             files even when nothing is meant to land there, because the FTP\n  \
+                             library writes each temporary file at the root before moving it."
+                        );
+                        return ExitCode::FAILURE;
+                    }
+                    Err(error) => return fail(&error),
+                }
             }
             if !connection.scheme.is_encrypted() {
                 println!("  (this connection is not encrypted)");

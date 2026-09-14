@@ -306,6 +306,21 @@ impl Backend for OpendalBackend {
     fn create_write(&self, path: &Path) -> Result<Box<dyn WriteFinish>> {
         let operator = self.operator.clone();
         let owned = self.key(path)?;
+        // Plain, despite `OpenDAL`'s FTP writer doing a temp-and-rename of its
+        // own underneath: it streams to `build_tmp_path_of(path)` and renames
+        // on close, and that helper is `get_basename(path)` plus a random
+        // suffix — **the directory is dropped and never put back**. So the
+        // temporary file is written at the connection root whatever the real
+        // destination was, which is why the connection root has to be writable
+        // even when nothing is ever written there on purpose. `probe_writable`
+        // is where that stops being a mystery.
+        //
+        // Append would use the path as given and is advertised
+        // (`write_can_append: true`), but is unusable: the FTP writer's `close`
+        // returns `MetadataBuilder::unknown()`, and `CompleteWriter` rejects an
+        // append whose result carries no content length. Both routes through
+        // the `Operator` API are wrong, so the real fix is upstream or a
+        // hand-rolled FTP write path, and neither belongs in this slice.
         let writer = dispatch(async move { operator.writer(&owned).await })
             .map_err(|error| self.failure("write", path, error))?;
 
