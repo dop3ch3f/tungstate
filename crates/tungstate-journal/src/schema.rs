@@ -94,6 +94,18 @@ const MIGRATIONS: &[&str] = &[
          path    TEXT    NOT NULL,
          PRIMARY KEY (link_id, path)
      ) WITHOUT ROWID;",
+    // v6: a link can be put away without being destroyed.
+    //
+    // An op refers to its link by id, so deleting a link that has ever run
+    // would leave `log` and `whereis` naming an id nothing can resolve — the
+    // history would survive and stop making sense, which is worse than not
+    // being able to delete at all.
+    //
+    // `deleted_at` rather than reusing `saved`: `saved` already answers a
+    // different question (a named pair, or the one-off a browser transfer
+    // makes), and a column that answers two questions answers neither. NULL
+    // means live, which is what every existing row is without backfilling.
+    "ALTER TABLE links ADD COLUMN deleted_at INTEGER;",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

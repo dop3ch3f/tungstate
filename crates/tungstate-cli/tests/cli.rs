@@ -868,3 +868,74 @@ fn a_networked_connection_saved_without_a_root_says_what_that_means() {
         .success()
         .stdout(predicates::str::contains("server's own `/`").not());
 }
+
+#[test]
+fn a_link_can_be_removed_and_its_history_survives() {
+    let home = sandbox();
+    let source = home.path().join("src");
+    let dest = home.path().join("dst");
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::create_dir_all(&dest).unwrap();
+    std::fs::write(source.join("a.mp4"), b"a video").unwrap();
+
+    sandboxed(&home)
+        .arg("link")
+        .arg("add")
+        .arg(&source)
+        .arg(&dest)
+        .args(["--name", "gone", "--move", "--cooldown", "0"])
+        .assert()
+        .success();
+
+    // Never run, so nothing refers to it and it goes outright.
+    sandboxed(&home)
+        .args(["link", "remove", "gone"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("removed link `gone`"))
+        .stdout(predicates::str::contains("record is kept").not());
+    sandboxed(&home)
+        .args(["link", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("no links configured"));
+
+    // The same name again, then a run, then removal keeps the history.
+    sandboxed(&home)
+        .arg("link")
+        .arg("add")
+        .arg(&source)
+        .arg(&dest)
+        .args(["--name", "gone", "--move", "--cooldown", "0"])
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["link", "run", "gone"])
+        .assert()
+        .success();
+
+    sandboxed(&home)
+        .args(["link", "remove", "gone"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("record is kept"));
+
+    // Gone from the list, and its history still reads.
+    sandboxed(&home)
+        .args(["link", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("no links configured"));
+    sandboxed(&home)
+        .arg("log")
+        .arg(dest.join("a.mp4"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("ok"));
+
+    sandboxed(&home)
+        .args(["link", "remove", "gone"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("no link named `gone`"));
+}

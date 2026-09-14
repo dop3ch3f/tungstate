@@ -115,6 +115,13 @@ pub struct Link {
     pub cooldown: Duration,
     /// False for a one-off transfer started from the browser.
     pub saved: bool,
+    /// When this link was put away, in milliseconds since the Unix epoch.
+    ///
+    /// `None` for a live link. A retired one is no longer offered or runnable,
+    /// but its row stays so the operations that refer to it by id keep
+    /// resolving: history that outlives its link and stops making sense is
+    /// worse than not being able to remove one.
+    pub deleted_at: Option<i64>,
 }
 
 /// The fields needed to create a link.
@@ -226,7 +233,9 @@ impl Journal {
     pub fn link_by_name(&self, name: &str) -> Result<Link> {
         let conn = self.lock();
         conn.query_row(
-            "SELECT * FROM links WHERE name = ?1",
+            // Live only. A retired link is not runnable, and resolving its
+            // name would put it back in reach of every command that takes one.
+            "SELECT * FROM links WHERE name = ?1 AND deleted_at IS NULL",
             rusqlite::params![name],
             row_to_link,
         )
@@ -249,7 +258,7 @@ impl Journal {
     pub fn links(&self) -> Result<Vec<Link>> {
         let conn = self.lock();
         let mut stmt = conn
-            .prepare("SELECT * FROM links WHERE saved = 1 ORDER BY id")
+            .prepare("SELECT * FROM links WHERE saved = 1 AND deleted_at IS NULL ORDER BY id")
             .map_err(query("listing links"))?;
         let links = stmt
             .query_map([], row_to_link)
@@ -313,6 +322,10 @@ impl Journal {
     }
 
     /// Look a link up by id.
+    ///
+    /// Deliberately finds retired links too. An operation refers to its link
+    /// by id, and this is what keeps that reference resolving after the link
+    /// has been put away.
     ///
     /// # Errors
     /// [`JournalError::UnknownLink`] if there is no such link, or
@@ -384,9 +397,92 @@ impl Journal {
     }
 }
 
+/// What removing a link actually did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Removal {
+    /// The row is gone. Only for a link that never ran, so nothing refers to it.
+    Deleted,
+    /// The row stays, marked with the time it was put away, so the operations
+    /// that name it by id keep resolving. Its name is released.
+    Retired,
+}
+
+impl Journal {
+    /// Remove a link, keeping any history that refers to it.
+    ///
+    /// Deletes outright only when nothing ever referred to the link. Otherwise
+    /// it is retired: `deleted_at` is set, and the name is freed so it can be
+    /// used again, while the row stays for [`Journal::link_by_id`] to find.
+    ///
+    /// # Errors
+    /// [`JournalError::UnknownLink`] if there is no live link of that name,
+    /// [`JournalError::LinkUnfinished`] if a run left work behind, or
+    /// [`JournalError::Query`] if the rows cannot be written.
+    pub fn remove_link(&self, name: &str) -> Result<Removal> {
+        let conn = self.lock();
+        let (id, _): (i64, String) = conn
+            .query_row(
+                "SELECT id, name FROM links WHERE name = ?1 AND deleted_at IS NULL",
+                rusqlite::params![name],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .map_err(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => JournalError::UnknownLink(name.to_string()),
+                other => JournalError::Query {
+                    context: "finding a link to remove",
+                    source: other,
+                },
+            })?;
+
+        // Refused rather than handled, for the same reason `connection remove`
+        // is refused while a link points at a connection: removing this now
+        // would strand a part-copied file at the destination with nothing left
+        // able to name it. `link run` or `link discard` first.
+        let unfinished: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ops WHERE link_id = ?1 AND status = 'intended'",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .map_err(query("counting a link's unfinished work"))?;
+        if unfinished > 0 {
+            return Err(JournalError::LinkUnfinished {
+                name: name.to_string(),
+                operations: usize::try_from(unfinished).unwrap_or(usize::MAX),
+            });
+        }
+
+        let history: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ops WHERE link_id = ?1",
+                rusqlite::params![id],
+                |row| row.get(0),
+            )
+            .map_err(query("counting a link's history"))?;
+
+        if history == 0 {
+            conn.execute("DELETE FROM links WHERE id = ?1", rusqlite::params![id])
+                .map_err(query("deleting a link"))?;
+            return Ok(Removal::Deleted);
+        }
+
+        // The name is released along with the retirement. Keeping it reserved
+        // would mean an invisible row refusing a name the user can see is
+        // free, which is a worse surprise than a retired link reading as
+        // `nas#3` in the one place retired links are ever shown.
+        conn.execute(
+            "UPDATE links SET deleted_at = ?2, name = name || '#' || id WHERE id = ?1",
+            rusqlite::params![id, crate::now_millis()],
+        )
+        .map_err(query("retiring a link"))?;
+        Ok(Removal::Retired)
+    }
+}
+
 fn row_to_link(row: &rusqlite::Row<'_>) -> rusqlite::Result<Link> {
     let text = |name: &str| -> rusqlite::Result<String> { row.get(name) };
     Ok(Link {
+        deleted_at: row.get("deleted_at")?,
         id: LinkId(row.get("id")?),
         name: text("name")?,
         source: Endpoint {

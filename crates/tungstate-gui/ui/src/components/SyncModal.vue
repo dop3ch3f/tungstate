@@ -16,12 +16,18 @@ export interface Payload {
   source_policy: string;
   verify: string;
   on_conflict: string;
+  order: string;
+  cooldown_secs: number;
   save_as: string | null;
 }
 
 const policy = ref(props.intent === "move" ? "delete" : "keep");
 const verify = ref("hash");
 const conflict = ref("quarantine");
+// Largest-first and no wait are what this was hard-coded to before the dialog
+// could say, so nobody who ignores these two gets different behaviour.
+const order = ref("largest-first");
+const cooldown = ref(0);
 const remember = ref(false);
 const name = ref("");
 
@@ -41,6 +47,8 @@ async function look() {
       source_policy: policy.value,
       verify: verify.value,
       on_conflict: conflict.value,
+      order: order.value,
+      cooldown_secs: cooldown.value,
       save_as: null,
     });
     previewError.value = "";
@@ -67,6 +75,8 @@ function start() {
     source_policy: policy.value,
     verify: verify.value,
     on_conflict: conflict.value,
+    order: order.value,
+    cooldown_secs: cooldown.value,
     save_as: remember.value && name.value.trim() ? name.value.trim() : null,
   });
 }
@@ -158,6 +168,36 @@ function start() {
               ? "Strongest, and reads every file a second time."
               : verify === "size" ? "Weakest: catches truncation only."
               : "Good default. Trusts the far end to store what it acknowledged." }}</span>
+          </div>
+        </div>
+
+        <div class="pair">
+          <div class="opt">
+            <label for="order">Take files in this order</label>
+            <select id="order" v-model="order">
+              <option value="largest-first">Largest first</option>
+              <option value="smallest-first">Smallest first</option>
+              <option value="oldest-first">Oldest first</option>
+              <option value="discovered">As found</option>
+            </select>
+            <span class="note">{{ order === "largest-first"
+              ? "Reclaims the most space soonest, which is usually what you want."
+              : order === "smallest-first" ? "Gets the file count down fastest."
+              : order === "oldest-first" ? "Oldest by modification time."
+              : "Whatever order the folder lists them in." }}</span>
+          </div>
+
+          <div class="opt">
+            <label for="cooldown">Leave alone if written within</label>
+            <select id="cooldown" v-model.number="cooldown">
+              <option :value="0">No wait</option>
+              <option :value="30">30 seconds</option>
+              <option :value="300">5 minutes</option>
+              <option :value="3600">1 hour</option>
+            </select>
+            <span class="note">{{ cooldown === 0
+              ? "You picked these files, so nothing is held back."
+              : "Skips anything still being written, and takes it next run instead." }}</span>
           </div>
         </div>
 

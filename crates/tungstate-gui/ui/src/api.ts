@@ -13,6 +13,44 @@ export interface Link {
   cooldown_secs: number;
 }
 
+/** What the add-a-link dialog sends. Mirrors `NewLinkForm` in main.rs. */
+export interface NewLink {
+  name: string;
+  source: string;
+  destination: string;
+  source_policy: string;
+  verify: string;
+  order: string;
+  on_conflict: string;
+  cooldown_secs: number;
+}
+
+/** The choices a link is made of, offered the same way on both surfaces. */
+export const CHOICES = {
+  source_policy: [
+    ["delete", "move, deleting each original once verified"],
+    ["trash", "move, sending each original to the trash"],
+    ["keep", "copy, leaving every original alone"],
+  ],
+  verify: [
+    ["hash", "hash — compare fingerprints"],
+    ["size", "size — fastest, weakest"],
+    ["readback", "readback — read it back from the far side"],
+  ],
+  order: [
+    ["largest-first", "largest first — reclaims space soonest"],
+    ["smallest-first", "smallest first — most files soonest"],
+    ["oldest-first", "oldest first"],
+    ["discovered", "as found"],
+  ],
+  on_conflict: [
+    ["quarantine", "quarantine — set it aside for you"],
+    ["rename", "rename — keep both"],
+    ["skip", "skip — leave it here"],
+    ["replace", "replace — move the existing one aside"],
+  ],
+} as const;
+
 export interface Op {
   id: number;
   status: string;
@@ -101,7 +139,17 @@ export interface ConnectionForm {
 }
 
 /** What a reachability check found. Mirrors `ProbeView` in main.rs. */
-export interface Probe { entries: number; root: string }
+export interface Probe {
+  entries: number;
+  root: string;
+  /** The first few names. A count alone cannot say whether those entries are
+   *  your folders or the server's own, which is the question being asked. */
+  names: string[];
+  /** Whether the root will accept a file. Null for a place on this machine,
+   *  which has no far side to refuse one. Listing and writing are different
+   *  permissions and only the second is what a drain needs. */
+  accepts_files: boolean | null;
+}
 
 export interface InterruptedRun {
   link: string;
@@ -123,6 +171,11 @@ export interface TransferRequest {
   source_policy: string;
   verify: string;
   on_conflict: string;
+  /** Absent means largest-first, which is what this was before the dialog
+   *  could say, so nobody who ignores it sees different behaviour. */
+  order?: string;
+  /** Absent means no wait: you picked these files, so nothing is held back. */
+  cooldown_secs?: number;
   save_as: string | null;
 }
 
@@ -166,8 +219,14 @@ export const api = {
     invoke<void>("remember_panes", { panes }),
   startTransfer: (request: TransferRequest) => invoke<string>("start_transfer", { request }),
   links: () => invoke<Link[]>("list_links"),
-  createLink: (form: Omit<Link, never>) => invoke<void>("create_link", { form }),
+  createLink: (form: NewLink) => invoke<void>("create_link", { form }),
   run: (name: string) => invoke<Accepted>("run_link", { name }),
+  /** True when the link was retired rather than deleted, its history kept. */
+  removeLink: (name: string) => invoke<boolean>("remove_link", { name }),
+  previewLink: (name: string) => invoke<Preview>("preview_link", { name }),
+  /** At most this many files at once, or 0 to stop asking. Raises what the
+   *  governor climbs towards; it never skips the handshake. */
+  setAtOnce: (files: number) => invoke<void>("set_at_once", { files }),
   cancel: () => invoke<void>("cancel_run"),
   stopNow: () => invoke<void>("stop_now"),
   resolve: (action: string, applyToAll: boolean) =>

@@ -3,13 +3,15 @@ import { ref, computed, onMounted, onUnmounted, useTemplateRef } from "vue";
 import Pane from "./components/Pane.vue";
 import SyncModal, { type Payload } from "./components/SyncModal.vue";
 import TransfersView, { type Row } from "./components/TransfersView.vue";
+import LinksView from "./components/LinksView.vue";
+import FindView from "./components/FindView.vue";
 import ActivityView from "./components/ActivityView.vue";
 import ConnectionsView from "./components/ConnectionsView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
-import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk, type Connection, type Accepted} from "./api";
+import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk, type Connection, type Accepted, type Preview} from "./api";
 
-type Tab = "browse" | "transfers" | "connections" | "activity";
+type Tab = "browse" | "transfers" | "links" | "connections" | "activity" | "find";
 
 const tab = ref<Tab>("browse");
 const onboarding = ref(false);
@@ -64,6 +66,15 @@ const summary = ref<Summary | null>(null);
 const runError = ref("");
 /// How many transfers are waiting behind the one running, when any are.
 const queued = ref(0);
+/// A saved link's preview, shown until dismissed. Nothing has happened yet.
+const savedPreview = ref<{ name: string; preview: Preview } | null>(null);
+/// The same words the sync dialog uses, for the same outcomes.
+const previewWord: Record<string, string> = {
+  move: "will move",
+  check: "same size there",
+  clash: "name taken",
+  hold: "too recent",
+};
 const liveFile = ref<string | null>(null);
 const stopping = ref(false);
 const conflict = ref<ConflictAsk | null>(null);
@@ -233,6 +244,18 @@ async function go(payload: Payload) {
   } catch (e) { runError.value = String(e); }
 }
 
+async function refreshLinks() {
+  try { links.value = await api.links(); } catch (e) { runError.value = String(e); }
+}
+
+/// Preview a saved link, in the same dialog a browser transfer uses.
+async function previewSaved(name: string) {
+  runError.value = "";
+  try {
+    savedPreview.value = { name, preview: await api.previewLink(name) };
+  } catch (e) { runError.value = String(e); }
+}
+
 async function runSaved(name: string) {
   tab.value = "transfers";
   try { began(await api.run(name)); } catch (e) { runError.value = String(e); }
@@ -302,8 +325,12 @@ function browseAt(location: string) {
         <button :aria-current="tab === 'transfers'" @click="tab = 'transfers'">
           Transfers<span v-if="running" class="badge">●</span>
         </button>
+        <button :aria-current="tab === 'links'" @click="tab = 'links'">
+          Links<span v-if="links.length" class="badge">{{ links.length }}</span>
+        </button>
         <button :aria-current="tab === 'connections'" @click="tab = 'connections'">Connections</button>
         <button :aria-current="tab === 'activity'" @click="tab = 'activity'">Activity</button>
+        <button :aria-current="tab === 'find'" @click="tab = 'find'">Find</button>
       </nav>
       <span class="spacer"></span>
       <select v-if="links.length" class="btn small" style="max-width:190px"
@@ -356,6 +383,63 @@ function browseAt(location: string) {
                    :interrupted="interrupted" :busy="busy" :note="discarded" :shape="shape"
                    :at-once="atOnce" :halting="halting" :queued="queued"
                    @stop="stop" @stop-now="stopNow" @resume="resumeRun" @discard="discardRun" />
+
+    <FindView v-else-if="tab === 'find'" :links="links" />
+
+    <!-- A saved link's preview. Deliberately the same words the sync dialog
+         uses for the same outcomes: the two answer the same question and
+         should not read as different features. -->
+    <div v-if="savedPreview" class="veil" @click.self="savedPreview = null">
+      <div class="modal" role="dialog" aria-modal="true">
+        <div class="cap">
+          <h2>{{ savedPreview.name }}</h2>
+          <p class="why">What running this would do. Nothing has happened yet.</p>
+        </div>
+        <div class="body">
+          <div class="prospect">
+            <div class="tallies">
+              <div><b>{{ savedPreview.preview.fresh }}</b><span>will move</span></div>
+              <div v-if="savedPreview.preview.same_size">
+                <b>{{ savedPreview.preview.same_size }}</b><span>same size there</span>
+              </div>
+              <div v-if="savedPreview.preview.clashes">
+                <b class="warn">{{ savedPreview.preview.clashes }}</b><span>name taken</span>
+              </div>
+              <div v-if="savedPreview.preview.too_recent">
+                <b>{{ savedPreview.preview.too_recent }}</b><span>too recent</span>
+              </div>
+              <div><b>{{ bytes(savedPreview.preview.bytes) }}</b><span>to move</span></div>
+            </div>
+            <ul class="lines">
+              <li v-for="(item, i) in savedPreview.preview.items.slice(0, 60)"
+                  :key="item.path + i" :class="item.outcome">
+                <span class="p">{{ item.path }}</span>
+                <span class="w">{{ previewWord[item.outcome] }}</span>
+                <span class="s">{{ bytes(item.size) }}</span>
+              </li>
+            </ul>
+            <p v-if="savedPreview.preview.items.length > 60" class="note">
+              and {{ savedPreview.preview.items.length - 60 }} more
+            </p>
+            <p class="note">
+              {{ savedPreview.preview.removes_originals
+                ? "Each original here is removed only after its copy passes the check."
+                : "Nothing here is removed." }}
+            </p>
+          </div>
+        </div>
+        <div class="feet">
+          <span class="spacer"></span>
+          <button class="btn" @click="savedPreview = null">Close</button>
+          <button class="btn primary" :disabled="running"
+                  @click="runSaved(savedPreview.name); savedPreview = null">Run it</button>
+        </div>
+      </div>
+    </div>
+
+    <LinksView v-else-if="tab === 'links'" :links="links" :busy="running"
+               :places="places.map((p) => p.path)"
+               @changed="refreshLinks" @run="runSaved" @preview="previewSaved" />
 
     <ConnectionsView v-else-if="tab === 'connections'" :connections="connections"
                      @changed="refreshConnections" @browse="browseAt" />

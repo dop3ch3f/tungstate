@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from "vue";
-import { bytes, type Began, type InterruptedRun, type Summary } from "../api";
+import { computed, ref } from "vue";
+import { api, bytes, type Began, type InterruptedRun, type Summary } from "../api";
 
 export interface Row {
   path: string;
@@ -32,6 +32,17 @@ const props = defineProps<{
   /// accepted now rather than refused, and without this the click looks lost.
   queued: number;
 }>();
+
+/// A ceiling on how many files move at once.
+///
+/// The governor decides the real number by asking the destination; this only
+/// raises what it is allowed to climb towards. Offered because a slow link is
+/// the one case where the sensed answer can be too eager, and there was no way
+/// to say so from here.
+const ceiling = ref(0);
+async function setCeiling() {
+  try { await api.setAtOnce(ceiling.value); } catch { /* shown on the next run */ }
+}
 const emit = defineEmits<{
   stop: []; stopNow: []; resume: [link: string]; discard: [link: string];
 }>();
@@ -151,6 +162,16 @@ const word: Record<string, string> = {
                a time?" was otherwise unanswerable from the window. -->
           <div v-if="props.atOnce" class="note">
             {{ props.atOnce === 1 ? "one at a time" : props.atOnce + " at a time" }}
+          </div>
+          <div class="note">
+            <label for="ceiling">at most</label>
+            <select id="ceiling" v-model.number="ceiling" @change="setCeiling">
+              <option :value="0">as many as it can</option>
+              <option :value="1">one at a time</option>
+              <option :value="2">2 at a time</option>
+              <option :value="4">4 at a time</option>
+              <option :value="8">8 at a time</option>
+            </select>
           </div>
           <div v-if="props.queued" class="note">
             {{ props.queued === 1 ? "1 more transfer queued" : props.queued + " more transfers queued" }}

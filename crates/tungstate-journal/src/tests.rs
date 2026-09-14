@@ -934,3 +934,106 @@ fn two_journals_on_one_file_do_not_collide() {
 
     assert_eq!(one.recent(1000).unwrap().len(), 100);
 }
+
+/// A link with the given name, and whether it has ever run.
+fn link_named(journal: &Journal, name: &str) -> LinkId {
+    journal
+        .create_link(&NewLink {
+            name: name.to_string(),
+            source: Endpoint::local("/Users/x/Videos"),
+            destination: Endpoint::local("/Volumes/nas/inbox"),
+            source_policy: SourcePolicy::Delete,
+            verify: VerifyLevel::Hash,
+            order: Order::LargestFirst,
+            on_conflict: ConflictAction::Quarantine,
+            cooldown: std::time::Duration::from_secs(30),
+            saved: true,
+        })
+        .expect("link")
+}
+
+#[test]
+fn a_link_that_never_ran_is_deleted_outright() {
+    let journal = Journal::open_in_memory().unwrap();
+    link_named(&journal, "fresh");
+
+    assert_eq!(journal.remove_link("fresh").unwrap(), Removal::Deleted);
+    assert!(journal.links().unwrap().is_empty());
+    // The name is free, which is the whole point of deleting rather than
+    // retiring when nothing refers to the row.
+    link_named(&journal, "fresh");
+    assert_eq!(journal.links().unwrap().len(), 1);
+}
+
+#[test]
+fn a_link_with_history_is_retired_so_its_history_still_resolves() {
+    let journal = Journal::open_in_memory().unwrap();
+    let id = link_named(&journal, "nas");
+    let op = journal
+        .begin(&NewOp {
+            link_id: Some(id),
+            ..drain_op()
+        })
+        .unwrap();
+    journal
+        .finish(op, &Outcome::Committed { hash: None })
+        .unwrap();
+
+    assert_eq!(journal.remove_link("nas").unwrap(), Removal::Retired);
+
+    // Gone from everything that offers a link to run.
+    assert!(journal.links().unwrap().is_empty());
+    assert!(journal.link_by_name("nas").is_err());
+
+    // But the operation still knows what it belonged to, which is the reason
+    // the row is kept at all: history that outlives its link and stops making
+    // sense is worse than not being able to remove one.
+    let still_there = journal
+        .link_by_id(id)
+        .expect("a retired link resolves by id");
+    assert!(still_there.deleted_at.is_some());
+
+    // And the name is released, so it can be used again.
+    link_named(&journal, "nas");
+    assert_eq!(journal.links().unwrap().len(), 1);
+}
+
+#[test]
+fn a_link_with_unfinished_work_is_refused_rather_than_removed() {
+    // Removing it would strand a part-copied file at the destination with
+    // nothing left able to name it.
+    let journal = Journal::open_in_memory().unwrap();
+    let id = link_named(&journal, "busy");
+    journal
+        .begin(&NewOp {
+            link_id: Some(id),
+            ..drain_op()
+        })
+        .unwrap();
+
+    let refused = journal.remove_link("busy").unwrap_err();
+    let message = refused.to_string();
+    assert!(message.contains("unfinished"), "{message}");
+    assert!(message.contains("link discard busy"), "{message}");
+    assert!(journal.link_by_name("busy").is_ok(), "it is still there");
+}
+
+#[test]
+fn removing_a_link_that_is_not_there_says_so() {
+    let journal = Journal::open_in_memory().unwrap();
+    assert!(journal.remove_link("nothing").is_err());
+
+    // And a retired one is not there any more either.
+    let id = link_named(&journal, "once");
+    let op = journal
+        .begin(&NewOp {
+            link_id: Some(id),
+            ..drain_op()
+        })
+        .unwrap();
+    journal
+        .finish(op, &Outcome::Committed { hash: None })
+        .unwrap();
+    journal.remove_link("once").unwrap();
+    assert!(journal.remove_link("once").is_err());
+}

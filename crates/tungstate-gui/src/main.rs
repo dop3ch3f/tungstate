@@ -17,7 +17,7 @@ mod bridge;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -44,6 +44,12 @@ struct App {
     /// exists to reach it. Shared rather than moved into the worker, which is
     /// the whole of what lets a transfer be added to one already in flight.
     queue: RunQueue<Link>,
+    /// A ceiling on how many files move at once, when one has been asked for.
+    ///
+    /// Raises the number the governor climbs towards; it does not skip the
+    /// handshake, and it does not stop tungstate backing off if the far side
+    /// objects. Zero means "no ceiling asked for", which is the normal case.
+    at_once_ceiling: AtomicUsize,
 }
 
 /// Work waiting for a worker, and whether a worker is there to take it.
@@ -435,6 +441,13 @@ struct ProbeView {
     /// useless when the 18 are the server's own `/bin` because the root was
     /// left at its default, so the count never travels without it.
     root: String,
+    /// The first few names, for the same reason the count travels with the
+    /// root: whether those entries are your folders or the server's own is the
+    /// question, and a number cannot answer it.
+    names: Vec<String>,
+    /// Whether the root will accept a file. `None` for a connection on this
+    /// machine, where there is no far side to refuse one.
+    accepts_files: Option<bool>,
 }
 
 #[tauri::command]
@@ -537,12 +550,40 @@ fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, Str
     } else {
         connection.root.clone()
     };
-    tungstate_backend_opendal::probe(&connection, &state.journal, &secrets())
-        .map(|found| ProbeView {
-            entries: found.len(),
-            root,
+    let found = tungstate_backend_opendal::probe(&connection, &state.journal, &secrets())
+        .map_err(describe)?;
+    let names = found
+        .iter()
+        .take(12)
+        .map(|entry| {
+            let name = entry
+                .path
+                .file_name()
+                .unwrap_or(entry.path.as_os_str())
+                .to_string_lossy();
+            if entry.meta.is_dir {
+                format!("{name}/")
+            } else {
+                name.into_owned()
+            }
         })
-        .map_err(describe)
+        .collect();
+    // Listing and writing are different permissions, and only one of them is
+    // what a drain needs. Asked once here rather than by every file in a run.
+    let accepts_files = if connection.scheme.is_networked() {
+        Some(
+            tungstate_backend_opendal::probe_writable(&connection, &state.journal, &secrets())
+                .map_err(describe)?,
+        )
+    } else {
+        None
+    };
+    Ok(ProbeView {
+        entries: found.len(),
+        root,
+        names,
+        accepts_files,
+    })
 }
 
 /// Forget a connection, and the password that went with it.
@@ -782,6 +823,14 @@ struct TransferRequest {
     source_policy: String,
     verify: String,
     on_conflict: String,
+    /// The order files are taken in. Absent means largest-first, which is what
+    /// this was hard-coded to before the dialog could say.
+    #[serde(default)]
+    order: Option<String>,
+    /// Seconds a file must have been untouched. Absent means none: the user is
+    /// looking at these files and chose them, so there is nothing to wait for.
+    #[serde(default)]
+    cooldown_secs: Option<u64>,
     /// When set, the pair is remembered and can be run again later.
     save_as: Option<String>,
 }
@@ -793,6 +842,8 @@ struct Plan {
     source_policy: SourcePolicy,
     verify: VerifyLevel,
     on_conflict: ConflictAction,
+    order: Order,
+    cooldown: Duration,
 }
 
 /// The parts of a transfer only the journal can answer: which places the two
@@ -885,6 +936,11 @@ fn plan_transfer(
     let verify = VerifyLevel::parse(&request.verify).ok_or("unknown verification level")?;
     let on_conflict =
         ConflictAction::parse(&request.on_conflict).ok_or("unknown conflict action")?;
+    let order = match request.order.as_deref() {
+        None => Order::LargestFirst,
+        Some(text) => Order::parse(text).ok_or("unknown order")?,
+    };
+    let cooldown = Duration::from_secs(request.cooldown_secs.unwrap_or(0));
 
     if leg.names.is_empty() {
         return Err("nothing is selected".to_string());
@@ -922,6 +978,8 @@ fn plan_transfer(
         source_policy,
         verify,
         on_conflict,
+        order,
+        cooldown,
     })
 }
 
@@ -948,6 +1006,43 @@ struct ProspectView {
     existing: Option<u64>,
     /// Which leg this belongs to, so an exchange can be read at a glance.
     towards: &'static str,
+}
+
+/// What running a saved link would do, without doing any of it.
+///
+/// Its own command rather than a case inside `preview_transfer`: that one
+/// takes the ticked files and the settings from the dialog, and a saved link
+/// is the opposite — it already carries both, and the selection it remembers
+/// is the one to honour.
+#[tauri::command]
+fn preview_link(name: String, state: State<'_, App>) -> Result<PreviewView, String> {
+    let link = state.journal.link_by_name(&name).map_err(describe)?;
+    let source = backend_for(&link.source, &state.journal)?;
+    let destination = backend_for(&link.destination, &state.journal)?;
+
+    // The batch it was asked to move, where it has one. No rows means the
+    // whole root, which is what a saved folder-pair means.
+    let chosen = state.journal.files_for(link.id).map_err(describe)?;
+    let only = (!chosen.is_empty()).then_some(chosen);
+
+    let preview = tungstate_transfer::preview(
+        &link,
+        source.as_ref(),
+        destination.as_ref(),
+        only.as_deref(),
+    )
+    .map_err(describe)?;
+
+    Ok(PreviewView {
+        overlapping: Vec::new(),
+        fresh: preview.fresh,
+        same_size: preview.same_size,
+        clashes: preview.clashes,
+        too_recent: preview.too_recent,
+        bytes: preview.bytes,
+        removes_originals: preview.removes_originals,
+        items: preview.items.iter().map(prospect_view).collect(),
+    })
 }
 
 #[tauri::command]
@@ -979,10 +1074,11 @@ fn preview_transfer(
             destination: plan.destination.clone(),
             source_policy: plan.source_policy,
             verify: plan.verify,
-            order: Order::LargestFirst,
+            order: plan.order,
             on_conflict: plan.on_conflict,
-            cooldown: Duration::ZERO,
+            cooldown: plan.cooldown,
             saved: false,
+            deleted_at: None,
         };
 
         let source = backend_for(&plan.source, &state.journal)?;
@@ -1020,6 +1116,26 @@ fn preview_transfer(
     }
 
     Ok(view)
+}
+
+/// One prospect as the window shows it.
+///
+/// `towards` is "forward" here: a saved link has one direction, and the
+/// distinction only means something for the two legs of an exchange.
+fn prospect_view(item: &tungstate_transfer::Prospective) -> ProspectView {
+    let (outcome, existing) = match item.prospect {
+        tungstate_transfer::Prospect::Fresh => ("move", None),
+        tungstate_transfer::Prospect::SameSize { existing } => ("check", Some(existing)),
+        tungstate_transfer::Prospect::Clash { existing } => ("clash", Some(existing)),
+        tungstate_transfer::Prospect::TooRecent => ("hold", None),
+    };
+    ProspectView {
+        path: item.path.display().to_string(),
+        size: item.size,
+        outcome,
+        existing,
+        towards: "forward",
+    }
 }
 
 /// Names ticked on both sides at once.
@@ -1085,11 +1201,12 @@ fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<Stri
                 destination: plan.destination.clone(),
                 source_policy: plan.source_policy,
                 verify: plan.verify,
-                order: Order::LargestFirst,
+                order: plan.order,
                 on_conflict: plan.on_conflict,
-                // The user is looking at these files and chose them, so there is
-                // no reason to hold back something written moments ago.
-                cooldown: Duration::ZERO,
+                // Defaults to none when the dialog does not say: the user is
+                // looking at these files and chose them, so there is no reason
+                // to hold back something written moments ago.
+                cooldown: plan.cooldown,
                 saved,
             })
             .map_err(describe)?;
@@ -1297,6 +1414,33 @@ fn resolve_identical(
     }
 }
 
+/// Remove a link, keeping any history that refers to it.
+///
+/// Returns whether the row went or was retired, so the window can say which
+/// happened rather than implying the record is gone when it is not.
+#[tauri::command]
+fn remove_link(name: String, state: State<'_, App>) -> Result<bool, String> {
+    state
+        .journal
+        .remove_link(&name)
+        .map(|removal| removal == tungstate_journal::Removal::Retired)
+        .map_err(describe)
+}
+
+/// Ask for at most `files` at once, or `0` to stop asking.
+///
+/// Deliberately a property of the window rather than of a link: it is a
+/// judgement about this network right now, the same way `--parallel` is a flag
+/// on a run rather than a field on a link.
+#[tauri::command]
+fn set_at_once(files: usize, state: State<'_, App>) {
+    // Capped rather than refused. A number nobody could have meant is a slip,
+    // and the governor would reject it by handshake anyway.
+    state
+        .at_once_ceiling
+        .store(files.min(64), Ordering::Relaxed);
+}
+
 #[tauri::command]
 fn run_link(name: String, app: AppHandle) -> Result<Accepted, String> {
     spawn_run(&app, vec![name])
@@ -1379,6 +1523,10 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
                 &mut progress,
             )
             .cancellable(Arc::clone(&cancel));
+            let ceiling = state.at_once_ceiling.load(Ordering::Relaxed);
+            if ceiling > 0 {
+                transfer = transfer.parallel(ceiling);
+            }
 
             match transfer.run() {
                 Ok(summary) => {
@@ -1500,17 +1648,21 @@ fn main() {
             conflicts: ConflictChannel::default(),
             cancel: Arc::new(Stop::new()),
             queue: RunQueue::new(),
+            at_once_ceiling: AtomicUsize::new(0),
         })
         .invoke_handler(tauri::generate_handler![
             list_links,
             create_link,
             run_link,
+            remove_link,
+            set_at_once,
             browse,
             places,
             last_panes,
             remember_panes,
             start_transfer,
             preview_transfer,
+            preview_link,
             cancel_run,
             stop_now,
             resolve_conflict,
@@ -1551,6 +1703,8 @@ mod tests {
             source_policy: "delete".to_string(),
             verify: "hash".to_string(),
             on_conflict: "quarantine".to_string(),
+            order: None,
+            cooldown_secs: None,
             save_as: None,
         }
     }

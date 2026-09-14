@@ -21,14 +21,21 @@ async function test(name: string) {
   probes.value = { ...probes.value, [name]: { state: "waiting", detail: "Reaching it…" } };
   try {
     const found = await api.testConnection(name);
+    // The root travels with the count for the same reason the CLI prints
+    // both: "18 entries" is reassuring and useless when the 18 are the
+    // server's own /bin. The names settle which of those it is.
+    const held = `${found.root} holds ${found.entries} ${found.entries === 1 ? "entry" : "entries"}`;
+    const listed = found.names.length ? `: ${found.names.join(", ")}` : "";
+    // A root that lists and refuses is the failure that cost an afternoon:
+    // every file in a drain refused separately, one at a time.
+    const refuses = found.accepts_files === false;
     probes.value = {
       ...probes.value,
       [name]: {
-        state: "ok",
-        // The root travels with the count for the same reason the CLI prints
-        // both: "18 entries" is reassuring and useless when the 18 are the
-        // server's own /bin.
-        detail: `${found.root} holds ${found.entries} ${found.entries === 1 ? "entry" : "entries"}`,
+        state: refuses ? "failed" : "ok",
+        detail: refuses
+          ? `${held}, but REFUSES files, so every transfer here would fail. Set the root to a folder this account can write to.`
+          : held + listed,
       },
     };
   } catch (e) {

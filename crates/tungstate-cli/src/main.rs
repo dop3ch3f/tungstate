@@ -159,6 +159,11 @@ enum LinkAction {
         /// The link name.
         name: String,
     },
+    /// Remove a link. Its history is kept.
+    Remove {
+        /// The link name.
+        name: String,
+    },
     /// Run a link, resuming anything a previous run left unfinished.
     Run {
         /// The link name.
@@ -488,6 +493,24 @@ fn link(action: LinkAction) -> std::process::ExitCode {
         LinkAction::Unfinished => unfinished(&journal),
 
         LinkAction::Discard { name } => discard_link(&journal, &name),
+
+        LinkAction::Remove { name } => match journal.remove_link(&name) {
+            Ok(tungstate_journal::Removal::Deleted) => {
+                println!("removed link `{name}`");
+                std::process::ExitCode::SUCCESS
+            }
+            Ok(tungstate_journal::Removal::Retired) => {
+                // Said plainly rather than reported as a plain delete: the row
+                // is still there, and somebody reading `log` later should not
+                // be surprised that it still names this link.
+                println!("removed link `{name}`");
+                println!(
+                    "it had run before, so its record is kept and `tungstate log` still \n                       resolves it. The name is free to use again."
+                );
+                std::process::ExitCode::SUCCESS
+            }
+            Err(error) => fail(&error),
+        },
 
         LinkAction::Preview { name } => preview_link(&journal, &name),
 

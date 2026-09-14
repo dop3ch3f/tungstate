@@ -25,7 +25,7 @@ pub use ends::{
     EndError, connection_prefix, describe, join_display, parent_display, parse_end, place,
 };
 pub use links::{
-    ConflictAction, Link, LinkId, NewLink, Order, SourcePolicy, VerifyLevel, temp_name,
+    ConflictAction, Link, LinkId, NewLink, Order, Removal, SourcePolicy, VerifyLevel, temp_name,
 };
 
 use std::path::{Path, PathBuf};
@@ -96,6 +96,22 @@ pub enum JournalError {
     /// A connection cannot be removed while a link still points at it.
     #[error("`{0}` is still used by at least one link; remove those links first")]
     ConnectionInUse(String),
+
+    /// A link cannot be removed while a run has left work behind.
+    ///
+    /// Refused rather than handled: removing it now would strand a part-copied
+    /// file at the destination with nothing left able to name it, which is the
+    /// one thing this project's recovery story exists to prevent.
+    #[error(
+        "`{name}` has {operations} unfinished operation(s); finish them with \
+         `tungstate link run {name}` or clear them with `tungstate link discard {name}` first"
+    )]
+    LinkUnfinished {
+        /// The link.
+        name: String,
+        /// How much it left behind.
+        operations: usize,
+    },
 
     /// The journal file was written by a newer tungstate than this one.
     ///
