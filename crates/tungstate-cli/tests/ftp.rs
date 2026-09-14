@@ -366,32 +366,6 @@ mod raw {
             assert!(done.starts_with('2'), "STOR {path} did not finish: {done}");
         }
 
-        /// The names in `path`, via `NLST`.
-        pub fn names(&mut self, path: &str) -> Vec<String> {
-            let mut data = self.passive();
-            let reply = self.command(&format!("NLST {path}"));
-            if reply.starts_with('5') {
-                // An empty directory answers 550 on some servers, and empty is
-                // a perfectly good answer.
-                drop(data);
-                return Vec::new();
-            }
-            let mut text = String::new();
-            data.read_to_string(&mut text).expect("ftp nlst");
-            drop(data);
-            self.read_reply();
-            text.lines()
-                .map(|line| {
-                    line.trim()
-                        .rsplit('/')
-                        .next()
-                        .unwrap_or_default()
-                        .to_string()
-                })
-                .filter(|name| !name.is_empty())
-                .collect()
-        }
-
         pub fn retrieve(&mut self, path: &str) -> Option<Vec<u8>> {
             let mut data = self.passive();
             let reply = self.command(&format!("RETR {path}"));
@@ -429,12 +403,18 @@ mod raw {
 
 fn client() -> raw::Ftp {
     let server = server();
-    raw::Ftp::connect(
+    let mut ftp = raw::Ftp::connect(
         &server.host,
         server.port.parse().expect("port"),
         &server.user,
         &server.password,
-    )
+    );
+    // Every path this client is given is relative to the connection root, the
+    // same way `OpenDAL` treats one. A no-op against the documented container,
+    // whose login already lands there, and required against a real NAS, whose
+    // login lands at the list of shared folders instead.
+    ftp.command(&format!("CWD {}", server.root));
+    ftp
 }
 
 fn put(path: &str, bytes: &[u8]) {
@@ -544,9 +524,14 @@ fn a_connection_test_reports_whether_the_root_accepts_files() {
     // one at a time, with an error naming neither the root nor the reason.
     let home = tempfile::tempdir().unwrap();
     // Its own root, so no other test's probe can be in flight inside it.
-    let own = format!("{}/{}", server().root, unique_end("writable"));
+    //
+    // Relative for `put` and `names`, which resolve against the directory the
+    // login lands in, and absolute only for the connection, which `OpenDAL`
+    // does a `CWD` to. Mixing those up makes `parents` build a path relative
+    // to the login directory and the directory never gets created.
+    let own = unique_end("writable");
     put(&format!("{own}/.keep"), b"x");
-    connect_rooted(&home, &own);
+    connect_rooted(&home, &format!("{}/{}", server().root, own));
 
     cli(&home)
         .args(["connection", "test", "nas"])
@@ -559,10 +544,10 @@ fn a_connection_test_reports_whether_the_root_accepts_files() {
     // than by counting: this suite shares one server, so the number of
     // entries in the root moves for reasons that are nothing to do with
     // this test.
-    let leftovers: Vec<String> = client()
-        .names(&own)
-        .into_iter()
-        .filter(|name| name.starts_with(".tungstate-writable-"))
-        .collect();
-    assert!(leftovers.is_empty(), "the probe littered: {leftovers:?}");
+    // That the probe cleans up after itself is asserted in
+    // `tungstate-backend-opendal`, over the `fs` service and a real temp
+    // directory, where `std::fs::read_dir` can see every entry including
+    // dotfiles. Asking an FTP server the same question depends on whether its
+    // listing shows dotfiles at all, and one that hides them would make the
+    // assertion pass without meaning anything.
 }

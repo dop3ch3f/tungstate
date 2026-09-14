@@ -464,3 +464,63 @@ fn a_vanished_connection_stops_a_drain_even_though_the_end_is_only_a_prefix() {
         "the root must not have been recreated"
     );
 }
+
+/// The connection behind a rig, for the calls that take one.
+fn connection_of(journal: &Journal) -> tungstate_journal::Connection {
+    journal.connection_by_name("scratch").expect("connection")
+}
+
+#[test]
+fn a_writable_root_says_so_and_is_left_exactly_as_it_was() {
+    // Over `fs` rather than FTP on purpose: the question is whether the probe
+    // tidies up after itself, and only a real directory read can see every
+    // entry including the dotfile the probe writes. An FTP listing that hides
+    // dotfiles would answer "nothing there" either way.
+    let (dir, journal, _backend) = rig();
+    std::fs::write(dir.path().join("already-here.txt"), b"x").unwrap();
+    let before = entries(dir.path());
+
+    let writable =
+        crate::probe_writable(&connection_of(&journal), &journal, &MemoryStore::new()).unwrap();
+
+    assert!(writable, "a temp directory should accept a file");
+    assert_eq!(
+        entries(dir.path()),
+        before,
+        "the probe left something behind"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+fn a_root_that_refuses_files_answers_false_rather_than_failing() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    // "cannot write here" is an answer, not an error: it is the whole thing
+    // `connection test` exists to report, and an error would make the caller
+    // guess whether the connection was unreachable instead.
+    let (dir, journal, _backend) = rig();
+    let before = entries(dir.path());
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
+
+    let answer = crate::probe_writable(&connection_of(&journal), &journal, &MemoryStore::new());
+
+    // Restore first, so a failed assertion does not leave an undeletable dir.
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();
+    assert!(!answer.unwrap(), "a read-only directory refuses files");
+    assert_eq!(
+        entries(dir.path()),
+        before,
+        "the probe left something behind"
+    );
+}
+
+/// Every name in `dir`, sorted. `read_dir` shows dotfiles, which is the point.
+fn entries(dir: &Path) -> Vec<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .expect("read_dir")
+        .map(|e| e.expect("entry").file_name().to_string_lossy().into_owned())
+        .collect();
+    names.sort();
+    names
+}
