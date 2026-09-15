@@ -40,6 +40,9 @@
       "icons/icon.ico"
     ],
     "shortDescription": "Keep folders in the shape you declared.",
-    "longDescription": "Move files between machines durably, and keep folders organised."
+    "longDescription": "Move files between machines durably, and keep folders organised.",
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }

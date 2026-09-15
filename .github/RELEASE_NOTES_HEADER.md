@@ -21,6 +21,14 @@ chmod +x tungstate && ./tungstate --version
 
 - **macOS** — open the `.dmg`, drag Tungstate to Applications, then
   **right-click → Open** the first time. Double-clicking will just refuse.
+  On Sonoma and later the right-click may not offer it either; in that case
+  open it once, then go to **System Settings → Privacy & Security** and press
+  **Open Anyway** next to the message about Tungstate.
+
+  If macOS says the app is **damaged**, that is a different problem and this
+  is not it — download again from a release built after 2026-09-15. Before
+  then the bundle went out without a signature of its own, which is the state
+  macOS reports as damage rather than as an unknown developer.
 - **Windows** — run the installer. SmartScreen will say "Windows protected
   your PC"; choose **More info → Run anyway**.
 - **Linux** — `.AppImage` (`chmod +x`, then run) or `.deb`
