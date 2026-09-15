@@ -401,6 +401,17 @@ function browseAt(location: string) {
 
     <StorageView v-else-if="tab === 'storage'" @changed="reloadEverything" />
 
+    <LinksView v-else-if="tab === 'links'" :links="links" :busy="running"
+               :places="places.map((p) => p.path)"
+               @changed="refreshLinks" @run="runSaved" @preview="previewSaved" />
+
+    <ConnectionsView v-else-if="tab === 'connections'" :connections="connections"
+                     @changed="refreshConnections" @browse="browseAt" />
+
+    <!-- Last, and deliberately a bare `v-else`: it is the fallback, so a new
+         tab value without its own branch above renders Activity in silence. -->
+    <ActivityView v-else />
+
     <!-- A saved link's preview. Deliberately the same words the sync dialog
          uses for the same outcomes: the two answer the same question and
          should not read as different features. -->
@@ -451,17 +462,6 @@ function browseAt(location: string) {
         </div>
       </div>
     </div>
-
-    <LinksView v-else-if="tab === 'links'" :links="links" :busy="running"
-               :places="places.map((p) => p.path)"
-               @changed="refreshLinks" @run="runSaved" @preview="previewSaved" />
-
-    <ConnectionsView v-else-if="tab === 'connections'" :connections="connections"
-                     @changed="refreshConnections" @browse="browseAt" />
-
-    <!-- Last, and deliberately a bare `v-else`: it is the fallback, so a new
-         tab value without its own branch above renders Activity in silence. -->
-    <ActivityView v-else />
 
     <SyncModal v-if="syncing" :legs="legs" :count="count" :total-bytes="selectionBytes"
                :intent="intent" @cancel="syncing = false" @start="go" />

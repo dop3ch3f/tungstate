@@ -56,6 +56,16 @@ Slices 0–4g are "v0.1: the drain works and I trust it, over a mount and over F
 
 ## Scope changes made during the build
 
+- **Three UI bugs that shipped because nobody looked (2026-09-15).** Slice 5b's screens compiled, type-checked and passed every test, and all three of these were visible within a minute of actually opening the window. The 4d lesson, restated: *compiles and launches is not a done bar for anything with a screen* — and this time it was not even launched.
+
+  **A `v-if` in the middle of a `v-if`/`v-else-if` chain.** The saved-link preview modal was inserted between `StorageView` and `LinksView`, which silently re-chained `LinksView` and `ConnectionsView` to the modal instead of to the onboarding branch. Both then rendered *underneath* the welcome panel rather than instead of it. Vue cannot warn, because a `v-if` is a legal neighbour for a `v-else-if`. Overlays now sit after the tab chain beside the other modals, where they always belonged.
+
+  **A field with no `type` attribute is not `input[type="text"]`.** The stylesheet listed the types it wanted; an `<input>` written without one is a text field in every browser and matched nothing, so the Find screen drew a white box on a dark sheet and three more in the add-a-link dialog. The selector now excludes the two types that must not look like text boxes rather than listing the ones that must, which is the form that cannot be forgotten at a call site. Second time this exact rule has bitten: slice 4e fixed `input[type="password"]` the same way and did not generalise it.
+
+  **`.opt` is a grid that stretched its rows.** Two side by side in a `.pair` grow to the taller one, and the spare height was shared between label and field, so a column without a note under it sat its dropdown lower than its neighbour. `align-content: start` holds the rows to their own height.
+
+  Found by running the app against a throwaway journal and reading screenshots, tab by tab. Worth doing before saying a screen works, and worth doing again next slice.
+
 - **A conflict prompt stalled the whole run, and narrowing had made that worse (2026-09-15).** Both found by using it. Two bugs that compounded, and the second is the interesting one.
 
   `WindowResolver::resolve` always emitted a prompt, treating the transfer dialog's conflict setting as a *fallback* for when nobody answered. But the dialog labels those options as decisions — "keep both, renaming the arriving file", "leave that one here" — and only quarantine as "ask me, and set aside if I am away". So choosing an action and then being asked about it contradicted the words on screen, and because every prompt holds a worker until it is answered, an unattended drain stopped at the first clash and waited. The command line had the same hole from the other side: `link run x` on a terminal prompted regardless of the link's stored rule. The rule now lives on `ConflictAction::wants_asking`, in the journal, read by both, so they cannot come to different conclusions about one setting.

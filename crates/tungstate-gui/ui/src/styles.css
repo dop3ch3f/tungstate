@@ -375,12 +375,19 @@ button, .chrome { user-select: none; }
 }
 .route .arrow { color: var(--fluoresce); font-size: 17px; }
 
-.opt { display: grid; gap: 5px; margin-bottom: 14px; }
+/* `align-content: start` so the rows keep their own height. Two `.opt` boxes
+   side by side in a `.pair` stretch to the taller one, and without this the
+   spare height is shared out between label and field — so the column without
+   a note underneath sits its dropdown lower than its neighbour. */
+.opt { display: grid; align-content: start; gap: 5px; margin-bottom: 14px; }
 .opt > label { font-size: 12px; color: var(--dust); }
-/* `password` alongside `text`: without it a password field falls back to the
-   browser's own chrome and is the one box on screen that does not look like
-   the others. */
-.opt select, .opt input[type="text"], .opt input[type="password"] {
+/* Every field, by exclusion rather than by listing the types that count.
+   `input[type="text"]` silently misses an `<input>` written without a type,
+   which is a text field in every browser — that is how the Find screen got a
+   white box on a dark sheet with nothing failing. A password field needs the
+   same treatment or it falls back to the browser's own chrome. */
+.opt select,
+.opt input:not([type="checkbox"]):not([type="radio"]) {
   font: inherit; font-size: 12.5px;
   background: var(--ore-sink); border: 1px solid var(--seam);
   border-radius: var(--r); color: var(--light); padding: 6px 9px;
