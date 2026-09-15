@@ -43,6 +43,19 @@ pub struct Limits {
     pub floor: usize,
     /// Where it will stop climbing however willing the far side seems.
     pub ceiling: usize,
+    /// How far a measurement may narrow the run.
+    ///
+    /// Two, not one, and not for throughput. A run with a single worker has no
+    /// redundancy: any one thing that blocks — a conflict waiting on an
+    /// answer most obviously, but equally a slow rename or a stalled socket —
+    /// halts the entire run rather than one file of it. The governor compares
+    /// bytes per second and cannot see that cost, so it will narrow to one
+    /// whenever the link is saturated anyway and be measurably right and
+    /// practically wrong.
+    ///
+    /// An explicit `--parallel 1` still means one: asking for it is different
+    /// from arriving at it.
+    pub minimum: usize,
 }
 
 impl Limits {
@@ -57,6 +70,7 @@ impl Limits {
         Self {
             floor: 4,
             ceiling: 4,
+            minimum: 2,
         }
     }
 
@@ -71,6 +85,7 @@ impl Limits {
         Self {
             floor: 2,
             ceiling: 4,
+            minimum: 2,
         }
     }
 
@@ -85,6 +100,9 @@ impl Limits {
         Self {
             floor: self.floor.min(requested),
             ceiling: requested,
+            // Asking for one is different from narrowing into one, so an
+            // explicit request is honoured where a measurement is not.
+            minimum: self.minimum.min(requested),
         }
     }
 }
@@ -250,9 +268,10 @@ impl Governor {
         let rate = (moved - sample.from) as f64 / elapsed.as_secs_f64();
         let width = self.limit();
 
+        let floor = self.limits.minimum;
         match sample.previous {
             // Nothing to compare against yet. Try one fewer and find out.
-            None if width > 1 => {
+            None if width > floor => {
                 self.set(width - 1);
                 tracing::info!(from = width, to = width - 1, rate, "trying a narrower run");
             }
@@ -261,7 +280,7 @@ impl Governor {
             // The narrowing held up. Equal speed on fewer connections is the
             // better arrangement, so keep going down while that stays true.
             Some(before) if rate >= before * KEEP_RATIO => {
-                if width > 1 {
+                if width > floor {
                     self.set(width - 1);
                     tracing::info!(
                         from = width,
@@ -644,11 +663,20 @@ mod narrowing {
         let mut total = 0;
         assert_eq!(after(&governor, window, &mut total, 1_000), Some(3));
         assert_eq!(after(&governor, window, &mut total, 2_000), Some(2));
-        assert_eq!(after(&governor, window, &mut total, 4_000), Some(1));
+        // And no further. Two is where narrowing stops, because a run with one
+        // worker has no redundancy: anything that blocks halts all of it
+        // rather than one file of it, and bytes per second cannot see that.
+        assert_eq!(after(&governor, window, &mut total, 4_000), None);
+        assert_eq!(governor.limit(), 2);
     }
 
     #[test]
-    fn it_stops_at_one_rather_than_below_it() {
+    fn it_stops_at_two_however_long_narrowing_looks_free() {
+        // Changed deliberately from stopping at one. On a saturated link
+        // narrowing always looks free, because the measurement is bytes per
+        // second and the radio is the constraint either way — so it walks all
+        // the way down. One worker then means a single conflict prompt stalls
+        // the whole run instead of one file of it, which is what the user hit.
         let window = Duration::from_millis(40);
         let governor = Governor::sampling_every(Limits::local(), window);
         governor.agree();
@@ -659,7 +687,22 @@ mod narrowing {
             after(&governor, window, &mut total, bytes);
             bytes *= 2;
         }
-        assert_eq!(governor.limit(), 1, "a run always has at least one worker");
+        assert_eq!(governor.limit(), 2, "a run keeps a second worker in hand");
+    }
+
+    #[test]
+    fn asking_for_one_is_honoured_where_narrowing_into_one_is_not() {
+        // The distinction the minimum rests on. Somebody who types
+        // `--parallel 1` has said what they want; a measurement arriving at
+        // one has only observed that the link was busy.
+        let window = Duration::from_millis(40);
+        let governor = Governor::sampling_every(Limits::networked().overridden(1), window);
+        governor.agree();
+        assert_eq!(governor.limit(), 1);
+
+        let mut total = 0;
+        assert_eq!(after(&governor, window, &mut total, 1_000), None);
+        assert_eq!(governor.limit(), 1, "an explicit one stays one");
     }
 
     #[test]
@@ -688,17 +731,25 @@ mod narrowing {
 
     #[test]
     fn it_never_climbs_back_past_what_the_far_side_granted() {
-        // A rebuffed run agreed to two. A measurement must not use the
-        // optimistic ceiling to hand back a connection the server refused.
+        // A measurement must not use the optimistic ceiling to hand back a
+        // connection the server refused.
+        //
+        // Started from three rather than two, so there is room to narrow at
+        // all: two is now where narrowing stops, and a run already there has
+        // nothing to give back.
         let window = Duration::from_millis(40);
         let governor = Governor::sampling_every(Limits::networked(), window);
+        governor.set(3);
         governor.agree();
-        assert_eq!(governor.agreed(), 2);
+        assert_eq!(governor.agreed(), 3);
 
         let mut total = 0;
-        assert_eq!(after(&governor, window, &mut total, 4_000), Some(1));
-        assert_eq!(after(&governor, window, &mut total, 1_000), Some(2));
+        assert_eq!(after(&governor, window, &mut total, 4_000), Some(2));
+        // Two turns out to be much slower, so the third comes back...
+        assert_eq!(after(&governor, window, &mut total, 1_000), Some(3));
         assert_eq!(after(&governor, window, &mut total, 4_000), None);
+        // ...and never a fourth, which the far side never granted.
         assert!(governor.limit() <= governor.agreed());
+        assert_eq!(governor.limit(), 3);
     }
 }

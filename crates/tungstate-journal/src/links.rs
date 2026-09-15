@@ -71,6 +71,23 @@ pub enum ConflictAction {
     Quarantine,
 }
 
+impl ConflictAction {
+    /// Whether a person should be asked, rather than this simply applied.
+    ///
+    /// Only `Quarantine`, which is the one both surfaces describe as *ask me,
+    /// and set aside if I am away*. The others are decisions: someone who
+    /// chose "keep both, renaming" has said what they want and asking again
+    /// contradicts the words they read.
+    ///
+    /// It matters more than a nicety. Every prompt holds a worker until it is
+    /// answered, so asking about a settled question turns an unattended drain
+    /// into one that stops at the first clash and waits.
+    #[must_use]
+    pub fn wants_asking(self) -> bool {
+        matches!(self, Self::Quarantine)
+    }
+}
+
 /// One link's unfinished work.
 #[derive(Debug, Clone)]
 pub struct Interrupted {

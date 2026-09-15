@@ -249,19 +249,23 @@ pub struct WindowResolver {
     /// The same, for the identical-copy question. Separate because answering
     /// every conflict one way says nothing about whether originals may go.
     sticky_identical: Option<IdenticalAction>,
-    /// Used when the window never answers.
+    /// What the run was told to do about a clash.
+    ///
+    /// Doing double duty on purpose: it is the answer when the window never
+    /// replies, *and* the reason not to ask in the first place unless it is
+    /// `Quarantine`, which is the one the dialog labels "ask me".
     fallback: ConflictAction,
 }
 
 impl WindowResolver {
-    /// Change what an unanswered question falls back to.
+    /// Take this link's rule for clashes.
     ///
     /// The window's queue can grow while it is running, so there is no first
-    /// link whose conflict rule can speak for every link after it. A sticky
-    /// answer the user gave is deliberately left alone: "do this for all of
-    /// them" was said about the run, not about one leg of it.
-    pub fn answer_unheard_with(&mut self, fallback: ConflictAction) {
-        self.fallback = fallback;
+    /// link whose rule can speak for every link after it. A sticky answer the
+    /// user gave is deliberately left alone: "do this for all of them" was
+    /// said about the run, not about one leg of it.
+    pub fn follow_conflict_rule(&mut self, rule: ConflictAction) {
+        self.fallback = rule;
     }
 
     pub fn new(app: AppHandle, replies: Receiver<Reply>, fallback: ConflictAction) -> Self {
@@ -286,6 +290,13 @@ impl ConflictResolver for WindowResolver {
     fn resolve(&mut self, conflict: &Conflict) -> ConflictAction {
         if let Some(action) = self.sticky {
             return action;
+        }
+
+        // A choice already made is not a question. The rule lives on
+        // `ConflictAction` so the window and the command line cannot come to
+        // different conclusions about the same setting.
+        if !self.fallback.wants_asking() {
+            return self.fallback;
         }
 
         let sent = self.app.emit(

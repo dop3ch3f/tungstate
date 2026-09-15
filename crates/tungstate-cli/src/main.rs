@@ -835,11 +835,16 @@ fn run_link(
         Err(error) => return fail(error.as_ref()),
     };
 
-    // Prompt only when there is actually someone there. A backgrounded or piped
-    // run falls back to the link's configured action so the drain never stalls
-    // waiting for an answer nobody is going to give.
-    let interactive =
-        !yes && on_conflict.is_none() && std::io::IsTerminal::is_terminal(&std::io::stdin());
+    // Prompt only when there is someone there *and* the question is open. A
+    // backgrounded or piped run falls back to the configured action so the
+    // drain never stalls waiting for an answer nobody will give; and a link
+    // whose rule is `rename` or `skip` has already answered, so asking would
+    // hold a worker over a settled question. `wants_asking` is the same rule
+    // the window reads, so the two cannot disagree about one setting.
+    let interactive = !yes
+        && on_conflict.is_none()
+        && unattended.wants_asking()
+        && std::io::IsTerminal::is_terminal(&std::io::stdin());
     let mut prompting;
     let mut fixed;
     let resolver: &mut dyn ConflictResolver = if interactive {

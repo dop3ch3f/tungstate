@@ -1383,3 +1383,25 @@ fn an_in_memory_journal_says_it_has_nowhere_to_archive() {
     // Exporting still works: it is the file that is missing, not the data.
     assert!(journal.export().is_ok());
 }
+
+#[test]
+fn only_quarantine_is_a_question() {
+    // The rule both surfaces read, so they cannot disagree about one setting.
+    // Every prompt holds a worker until it is answered, so asking about a
+    // decision somebody already made turns an unattended drain into one that
+    // stops at the first clash and waits.
+    assert!(
+        ConflictAction::Quarantine.wants_asking(),
+        "the one labelled ask me"
+    );
+    for decided in [
+        ConflictAction::Rename,
+        ConflictAction::Skip,
+        ConflictAction::Replace,
+    ] {
+        assert!(
+            !decided.wants_asking(),
+            "{decided:?} is a decision, not a question"
+        );
+    }
+}

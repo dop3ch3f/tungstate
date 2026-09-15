@@ -1631,7 +1631,7 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
         while let Some(link) = state.queue.next() {
             // Per link rather than per run: a queue that can grow has no
             // meaningful "first link" whose conflict rule speaks for the rest.
-            resolver.answer_unheard_with(link.on_conflict);
+            resolver.follow_conflict_rule(link.on_conflict);
 
             let ends = backend_for(&link.source, &state.journal).and_then(|source| {
                 backend_for(&link.destination, &state.journal).map(|dest| (source, dest))
