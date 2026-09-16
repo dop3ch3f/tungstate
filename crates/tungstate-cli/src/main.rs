@@ -404,8 +404,8 @@ fn storage(action: StorageAction) -> std::process::ExitCode {
                     println!("{}  {}", archive.name, human_bytes(archive.size));
                     match &archive.summary {
                         Some(summary) => println!(
-                            "  {} link(s), {} connection(s), {} operation(s)",
-                            summary.links, summary.connections, summary.operations
+                            "  {} link(s), {} connection(s), {} operation(s), {} plan(s)",
+                            summary.links, summary.connections, summary.operations, summary.plans
                         ),
                         // Shown rather than hidden: an archive that will not
                         // open is exactly what somebody needs to know about.

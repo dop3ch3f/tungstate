@@ -106,6 +106,31 @@ const MIGRATIONS: &[&str] = &[
     // makes), and a column that answers two questions answers neither. NULL
     // means live, which is what every existing row is without backfilling.
     "ALTER TABLE links ADD COLUMN deleted_at INTEGER;",
+    // v7: a reorganisation is a thing that happened, not just a pile of
+    // operations that happen to share a moment.
+    //
+    // Three questions need the row and none is answerable from a bare id on
+    // the operations: what were the last few reorganisations (`undo --last`),
+    // which folder was this (the operations only know paths), and has this one
+    // already been taken back. `undone_at` is NULL until it is, the same
+    // tombstone shape as `links.deleted_at`.
+    //
+    // `snapshot` is the fingerprint the plan was built from, so a saved
+    // plan.json applied later can be refused when the folder has moved on.
+    //
+    // Additive: `plan_id IS NULL` on every existing row, which reads as "a
+    // drain did this, not a reorganisation", and is exactly true.
+    "CREATE TABLE plans (
+         id         INTEGER PRIMARY KEY,
+         folder     TEXT    NOT NULL,
+         snapshot   TEXT    NOT NULL,
+         applied_at INTEGER NOT NULL,
+         undone_at  INTEGER
+     );
+
+     ALTER TABLE ops ADD COLUMN plan_id INTEGER REFERENCES plans (id);
+
+     CREATE INDEX ops_plan ON ops (plan_id) WHERE plan_id IS NOT NULL;",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

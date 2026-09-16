@@ -38,7 +38,7 @@ const ARCHIVE_DIR: &str = "archives";
 
 /// Imported and exported in this order: a row may reference one earlier in the
 /// list, never one later.
-const TABLES: [&str; 4] = ["connections", "links", "link_files", "ops"];
+const TABLES: [&str; 5] = ["connections", "links", "link_files", "plans", "ops"];
 
 /// One archived journal, described well enough to choose between.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -67,6 +67,8 @@ pub struct ArchiveSummary {
     pub connections: usize,
     /// Operations of every status.
     pub operations: usize,
+    /// Reorganisations applied to a folder.
+    pub plans: usize,
     /// When the earliest operation began, if there is one.
     pub first_op: Option<i64>,
     /// When the latest operation began, if there is one.
@@ -456,6 +458,7 @@ fn summarise(path: &Path) -> Option<ArchiveSummary> {
         links: count("links"),
         connections: count("connections"),
         operations: count("ops"),
+        plans: count("plans"),
         first_op: started.iter().min().copied(),
         last_op: started.iter().max().copied(),
     })

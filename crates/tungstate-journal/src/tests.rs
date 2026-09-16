@@ -1168,6 +1168,25 @@ fn populated(path: &std::path::Path) -> Journal {
             },
         )
         .expect("finish");
+    // A reorganisation as well as a drain, so the fixture is a journal that
+    // has done both of the things tungstate does.
+    let plan = journal
+        .begin_plan("/Users/me/Downloads", "fingerprint")
+        .expect("plan");
+    let tidy = journal
+        .begin(&NewOp {
+            kind: OpKind::Rename,
+            source: Some(Location::new("/Users/me/Downloads", "a.txt")),
+            destination: Some(Location::new("/Users/me/Downloads", "Text/a.txt")),
+            size: Some(12),
+            link: None,
+            link_id: None,
+        })
+        .expect("op");
+    journal.attach_to_plan(tidy, plan).expect("attach");
+    journal
+        .finish(tidy, &Outcome::Committed { hash: None })
+        .expect("finish");
     journal
 }
 
@@ -1180,7 +1199,7 @@ fn an_export_carries_every_column_the_database_has() {
     let journal = populated(&dir.path().join("journal.db"));
     let document = journal.export().unwrap();
 
-    for table in ["ops", "links", "connections", "link_files"] {
+    for table in ["ops", "links", "connections", "link_files", "plans"] {
         let columns: Vec<String> = {
             let conn = journal.lock();
             let statement = conn
@@ -1302,7 +1321,9 @@ fn a_reset_archives_first_and_the_archive_comes_back() {
     let summary = archives[0].summary.expect("an archive describes itself");
     assert_eq!(summary.links, 1);
     assert_eq!(summary.connections, 1);
-    assert_eq!(summary.operations, 1);
+    // A drain's operation and a reorganisation's, since the fixture does both.
+    assert_eq!(summary.operations, 2);
+    assert_eq!(summary.plans, 1);
 
     // Restoring puts the empty one aside in its turn, so it is reversible.
     // The two names must differ even though both are written in the same
@@ -1404,4 +1425,152 @@ fn only_quarantine_is_a_question() {
             "{decided:?} is a decision, not a question"
         );
     }
+}
+
+// --- plans (v7) -----------------------------------------------------------
+
+use crate::plans::PlanId;
+
+/// A journal with one applied plan carrying two operations.
+fn with_plan(journal: &Journal) -> PlanId {
+    let plan = journal
+        .begin_plan("/Users/me/Downloads", "abc123")
+        .expect("plan");
+    for (from, to) in [("a.txt", "Text/a.txt"), ("b.txt", "Text/b.txt")] {
+        let op = journal
+            .begin(&NewOp {
+                kind: OpKind::Rename,
+                source: Some(Location::new("/Users/me/Downloads", from)),
+                destination: Some(Location::new("/Users/me/Downloads", to)),
+                size: Some(10),
+                link: None,
+                link_id: None,
+            })
+            .expect("op");
+        journal.attach_to_plan(op, plan).expect("attach");
+        journal
+            .finish(op, &Outcome::Committed { hash: None })
+            .expect("finish");
+    }
+    plan
+}
+
+#[test]
+fn a_plan_collects_the_operations_that_belong_to_it() {
+    let journal = Journal::open_in_memory().expect("journal");
+    let plan = with_plan(&journal);
+    let ops = journal.ops_for_plan(plan).expect("ops");
+    assert_eq!(ops.len(), 2);
+    // Oldest first, which is the order it was applied in -- so reversing it is
+    // what undo wants and `.rev()` is the whole of the difference.
+    assert_eq!(
+        ops[0].source.as_ref().unwrap().display_path(),
+        "/Users/me/Downloads/a.txt"
+    );
+}
+
+#[test]
+fn a_drains_operations_belong_to_no_plan() {
+    // `plan_id IS NULL` reads as "a drain did this, not a reorganisation",
+    // which is what makes the migration additive and every existing row right.
+    let journal = Journal::open_in_memory().expect("journal");
+    let op = journal
+        .begin(&NewOp {
+            kind: OpKind::Move,
+            source: Some(Location::new("/src", "a.mp4")),
+            destination: Some(Location::new("/dst", "a.mp4")),
+            size: Some(1),
+            link: None,
+            link_id: None,
+        })
+        .expect("op");
+    journal
+        .finish(op, &Outcome::Committed { hash: None })
+        .expect("finish");
+    let plan = journal.begin_plan("/elsewhere", "zzz").expect("plan");
+    assert!(journal.ops_for_plan(plan).expect("ops").is_empty());
+}
+
+#[test]
+fn recent_plans_are_newest_first_and_include_undone_ones() {
+    // "Undo the last three" has to be able to say *that one is already back*
+    // rather than silently counting past it.
+    let journal = Journal::open_in_memory().expect("journal");
+    let first = journal.begin_plan("/a", "1").expect("plan");
+    let second = journal.begin_plan("/b", "2").expect("plan");
+    journal.mark_undone(first).expect("undo");
+
+    let recent = journal.recent_plans(10).expect("recent");
+    assert_eq!(
+        recent.iter().map(|p| p.id).collect::<Vec<_>>(),
+        [second, first]
+    );
+    assert!(recent[1].is_undone());
+    assert!(!recent[0].is_undone());
+}
+
+#[test]
+fn recent_plans_honours_its_limit() {
+    let journal = Journal::open_in_memory().expect("journal");
+    for n in 0..5 {
+        journal.begin_plan(&format!("/{n}"), "x").expect("plan");
+    }
+    assert_eq!(journal.recent_plans(2).expect("recent").len(), 2);
+}
+
+#[test]
+fn a_plan_cannot_be_undone_twice() {
+    let journal = Journal::open_in_memory().expect("journal");
+    let plan = with_plan(&journal);
+    journal.mark_undone(plan).expect("first undo");
+    assert!(matches!(
+        journal.mark_undone(plan),
+        Err(JournalError::PlanAlreadyUndone(_))
+    ));
+}
+
+#[test]
+fn an_unknown_plan_is_named_rather_than_silently_empty() {
+    let journal = Journal::open_in_memory().expect("journal");
+    assert!(matches!(
+        journal.plan_by_id(PlanId(99)),
+        Err(JournalError::UnknownPlan(99))
+    ));
+}
+
+#[test]
+fn a_plan_remembers_the_folder_and_the_snapshot_it_was_built_from() {
+    // The folder because operations only know paths; the snapshot because a
+    // saved plan.json applied later has to be refusable as stale.
+    let journal = Journal::open_in_memory().expect("journal");
+    let plan = journal
+        .begin_plan("/Users/me/Downloads", "abc123")
+        .expect("plan");
+    let stored = journal.plan_by_id(plan).expect("read back");
+    assert_eq!(stored.folder, "/Users/me/Downloads");
+    assert_eq!(stored.snapshot, "abc123");
+    assert!(stored.applied_at > 0);
+    assert!(stored.undone_at.is_none());
+}
+
+#[test]
+fn rmdir_survives_a_round_trip_through_the_journal() {
+    // Added in v7 alongside MkDir, which had been defined since slice 2 and
+    // written by nothing until the planner.
+    let journal = Journal::open_in_memory().expect("journal");
+    let op = journal
+        .begin(&NewOp {
+            kind: OpKind::RmDir,
+            source: Some(Location::new("/root", "old")),
+            destination: None,
+            size: None,
+            link: None,
+            link_id: None,
+        })
+        .expect("op");
+    journal
+        .finish(op, &Outcome::Committed { hash: None })
+        .expect("finish");
+    let found = journal.recent(1).expect("recent");
+    assert_eq!(found[0].kind, OpKind::RmDir);
 }

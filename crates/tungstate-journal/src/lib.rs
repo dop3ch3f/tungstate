@@ -16,6 +16,7 @@
 pub mod links;
 pub mod connections;
 pub mod ends;
+pub mod plans;
 mod schema;
 mod storage;
 
@@ -28,6 +29,7 @@ pub use ends::{
 pub use links::{
     ConflictAction, Link, LinkId, NewLink, Order, Removal, SourcePolicy, VerifyLevel, temp_name,
 };
+pub use plans::{AppliedPlan, PlanId};
 pub use storage::{Archive, ArchiveSummary};
 
 use std::path::{Path, PathBuf};
@@ -86,6 +88,17 @@ pub enum JournalError {
     /// A caller referred to an operation that is not in the journal.
     #[error("no operation with id {0}")]
     UnknownOp(i64),
+
+    /// A caller referred to a reorganisation that is not in the journal.
+    #[error("no plan with id {0}")]
+    UnknownPlan(i64),
+
+    /// The reorganisation has already been reversed.
+    ///
+    /// Refused rather than repeated: undoing an undo is a redo wearing the
+    /// wrong name, and a caller that meant that should say so.
+    #[error("plan {0} has already been undone")]
+    PlanAlreadyUndone(i64),
 
     /// A connection name is already taken.
     #[error("a connection named `{0}` already exists")]
@@ -201,6 +214,8 @@ pub enum OpKind {
     Remove,
     /// Directory created.
     MkDir,
+    /// Empty directory removed.
+    RmDir,
 }
 
 /// How an operation ended, or that it has not ended yet.
@@ -224,6 +239,7 @@ impl OpKind {
             Self::Rename => "rename",
             Self::Remove => "remove",
             Self::MkDir => "mkdir",
+            Self::RmDir => "rmdir",
         }
     }
 
@@ -234,6 +250,7 @@ impl OpKind {
             "rename" => Some(Self::Rename),
             "remove" => Some(Self::Remove),
             "mkdir" => Some(Self::MkDir),
+            "rmdir" => Some(Self::RmDir),
             _ => None,
         }
     }
