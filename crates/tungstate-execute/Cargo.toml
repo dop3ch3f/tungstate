@@ -1,0 +1,28 @@
+[package]
+name = "tungstate-execute"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Carrying out a plan, and taking one back. Its own crate rather than part of
+# tungstate-transfer: that crate is about links -- two backends, a verify
+# level, a resume, a conflict policy per link -- and this is one folder, one
+# backend, and a plan somebody already approved. They share a discipline and
+# almost no code.
+[dependencies]
+tungstate-core = { path = "../tungstate-core" }
+tungstate-backend = { path = "../tungstate-backend" }
+tungstate-journal = { path = "../tungstate-journal" }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+jiff = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+tungstate-attrs = { path = "../tungstate-attrs" }
+proptest = { workspace = true }
+
+[lints]
+workspace = true

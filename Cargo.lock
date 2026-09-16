@@ -5441,6 +5441,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tungstate-execute"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "jiff",
+ "proptest",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tracing",
+ "tungstate-attrs",
+ "tungstate-backend",
+ "tungstate-core",
+ "tungstate-journal",
+]
+
+[[package]]
 name = "tungstate-gui"
 version = "0.1.0-alpha.2"
 dependencies = [

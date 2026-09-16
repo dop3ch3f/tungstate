@@ -915,7 +915,12 @@ fn break_one(ops: &mut Vec<Op>, cyclic: &BTreeSet<usize>) -> Option<bool> {
 
 /// A fingerprint of what the snapshot saw, so `apply` can tell the folder has
 /// moved on since the plan was made and replan rather than act on stale facts.
-fn fingerprint(snap: &Snapshot) -> String {
+///
+/// Public because the executor has to compute it over a *fresh* snapshot and
+/// compare, and two implementations of "what counts as the same folder" is
+/// exactly the kind of disagreement that ends with a stale plan being applied.
+#[must_use]
+pub fn fingerprint(snap: &Snapshot) -> String {
     let mut hasher = blake3::Hasher::new();
     for entry in &snap.entries {
         hasher.update(entry.relative_path().as_bytes());
@@ -978,6 +983,21 @@ impl Plan {
     /// # Errors
     /// [`PlanError::OutOfOrder`] if an op is reached when it cannot run.
     pub fn apply_to(&self, before: &Snapshot) -> Result<Snapshot, PlanError> {
+        replay(&self.ops, before)
+    }
+}
+
+/// Carry out any ordered list of operations on paper.
+///
+/// [`Plan::apply_to`] is this over a plan's own ops. It is separate because
+/// `undo` needs exactly the same question asked of an *inverted* list — is
+/// this order executable against this folder? — and two implementations of
+/// that question is two answers waiting to disagree.
+///
+/// # Errors
+/// [`PlanError::OutOfOrder`] if an operation is reached when it cannot run.
+pub fn replay(ops: &[Op], before: &Snapshot) -> Result<Snapshot, PlanError> {
+    {
         let mut files: BTreeMap<String, Attributes> = before
             .entries
             .iter()
@@ -997,7 +1017,7 @@ impl Plan {
             why: why.to_string(),
         };
 
-        for op in &self.ops {
+        for op in ops {
             match op {
                 Op::MkDir { path } => {
                     if files.contains_key(path) {
