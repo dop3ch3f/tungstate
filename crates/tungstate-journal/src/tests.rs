@@ -1463,9 +1463,22 @@ fn a_plan_collects_the_operations_that_belong_to_it() {
     assert_eq!(ops.len(), 2);
     // Oldest first, which is the order it was applied in -- so reversing it is
     // what undo wants and `.rev()` is the whole of the difference.
+    //
+    // Compared on the path within the root rather than on `display_path`,
+    // which joins the two with the *platform's* separator: on Windows this
+    // fixture's Unix-shaped root comes back as `/Users/me/Downloads\a.txt`,
+    // and asserting a spelling is asserting on the machine rather than on the
+    // ordering this test is about.
+    let paths: Vec<_> = ops
+        .iter()
+        .map(|op| op.source.as_ref().unwrap().path.clone())
+        .collect();
     assert_eq!(
-        ops[0].source.as_ref().unwrap().display_path(),
-        "/Users/me/Downloads/a.txt"
+        paths,
+        [
+            std::path::PathBuf::from("a.txt"),
+            std::path::PathBuf::from("b.txt")
+        ]
     );
 }
 
