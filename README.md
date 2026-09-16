@@ -45,6 +45,12 @@ never settles. `tungstate plan --json` is the same answer for a script.
 recorded, so `tungstate undo` puts the folder back exactly as it was — and
 refuses rather than overwriting anything you have changed since.
 
+**And all of it in the window.** A Folders tab: add a folder, pick one of four
+starting layouts if it has none, and see your folder as it is beside your folder
+as it would be, with what moves marked in both. One button tidies it and one
+puts it back. No terminal, and no TOML unless you want to edit the rules by
+hand — which is still the only way to change them.
+
 See `docs/DESIGN.md` for the full design and `docs/SYLLABUS.md` for the build
 order.
 
