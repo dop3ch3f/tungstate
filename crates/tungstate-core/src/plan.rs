@@ -971,6 +971,33 @@ fn measure(snap: &Snapshot, ops: &[Op]) -> Blast {
 }
 
 impl Plan {
+    /// How many files have nothing wrong with them except that they are too
+    /// recent to touch.
+    ///
+    /// The difference between *this folder is tidy* and *this folder is not
+    /// tidy yet*, which are the same empty list of operations and very
+    /// different sentences. Both surfaces ask, so the counting is here.
+    #[must_use]
+    pub fn waiting(&self) -> usize {
+        self.untouched
+            .iter()
+            .filter(|u| matches!(u.reason, Reason::Cooling { .. }))
+            .count()
+    }
+
+    /// The longest any file still has to wait, in seconds.
+    #[must_use]
+    pub fn longest_wait(&self) -> u64 {
+        self.untouched
+            .iter()
+            .filter_map(|u| match u.reason {
+                Reason::Cooling { seconds_left } => Some(seconds_left),
+                _ => None,
+            })
+            .max()
+            .unwrap_or(0)
+    }
+
     /// The plan's meaning, as a pure function: the snapshot this would produce
     /// if every op succeeded, in the order given.
     ///

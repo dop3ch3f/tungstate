@@ -61,10 +61,25 @@ pub fn apply(target: Option<&str>, saved: Option<&Path>, yes: bool) -> ExitCode 
     };
 
     if plan.ops.is_empty() {
-        println!(
-            "nothing to do: `{}` already matches its policy",
-            plan.folder
-        );
+        // "Tidy" and "not tidy yet" are the same empty list of operations and
+        // very different sentences. Saying the first when the second is true
+        // is how somebody concludes the thing does not work.
+        if plan.waiting() > 0 {
+            println!(
+                "nothing to do yet: {} file(s) in `{}` were written too recently to touch.",
+                plan.waiting(),
+                plan.folder
+            );
+            println!(
+                "The longest has {}s to wait. Run this again after that.",
+                plan.longest_wait()
+            );
+        } else {
+            println!(
+                "nothing to do: `{}` already matches its policy",
+                plan.folder
+            );
+        }
         return ExitCode::SUCCESS;
     }
 

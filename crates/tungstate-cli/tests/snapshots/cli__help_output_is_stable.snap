@@ -8,6 +8,7 @@ Usage: tungstate <COMMAND>
 
 Commands:
   folder      Manage governed folders
+  init        Give a folder a starting set of rules
   link        Manage transfer links between folders
   connection  Manage connections to places other than this machine
   log         Show everything that ever happened to a path

@@ -20,6 +20,7 @@ pub mod plan;
 pub mod policy;
 pub mod snapshot;
 pub mod template;
+pub mod templates;
 pub mod vars;
 
 pub use attrs::{Attributes, Tier, Value};
@@ -28,6 +29,7 @@ pub use error::{PolicyError, Warning, line_of};
 pub use plan::{Because, Blast, Op, Parked, Plan, PlanError, Reason, Untouched};
 pub use policy::{Loaded, Mode, Policy, Rule, Symlinks};
 pub use snapshot::Snapshot;
+pub use templates::{TEMPLATES, Template};
 
 #[cfg(test)]
 mod plan_tests;

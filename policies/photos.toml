@@ -1,0 +1,28 @@
+# Photos, filed by when they were taken.
+#
+# Uses the camera's own date where the file has one, and falls back to the
+# file's modification time where it does not -- so a photo keeps its real date
+# even after being copied about.
+
+[folder]
+name = "photos"
+ignore = [".DS_Store", "Thumbs.db", "*.part", "*.crdownload"]
+opaque = ["*.photoslibrary", "*.app"]
+
+[defaults]
+# Leave a file alone until it has been still for half a minute, so a download
+# that is still arriving is not filed half-written.
+cooldown = "30s"
+on_conflict = "quarantine"
+
+[[rule]]
+name = "photos"
+path = "{date:%Y}/{date:%m}"
+match = { mime = "image/*" }
+vars.date = { from = ["exif.DateTimeOriginal", "mtime"] }
+
+[[rule]]
+name = "videos"
+path = "Videos/{date:%Y}"
+match = { mime = "video/*" }
+vars.date = { from = "mtime" }

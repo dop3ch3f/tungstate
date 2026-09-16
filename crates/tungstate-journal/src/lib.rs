@@ -16,6 +16,7 @@
 pub mod links;
 pub mod connections;
 pub mod ends;
+pub mod folders;
 pub mod plans;
 mod schema;
 mod storage;
@@ -26,6 +27,7 @@ pub use connections::{
 pub use ends::{
     EndError, connection_prefix, describe, join_display, parent_display, parse_end, place,
 };
+pub use folders::{Folder, FolderId};
 pub use links::{
     ConflictAction, Link, LinkId, NewLink, Order, Removal, SourcePolicy, VerifyLevel, temp_name,
 };
@@ -88,6 +90,14 @@ pub enum JournalError {
     /// A caller referred to an operation that is not in the journal.
     #[error("no operation with id {0}")]
     UnknownOp(i64),
+
+    /// A folder with that root is already governed.
+    #[error("`{0}` is already a governed folder")]
+    DuplicateFolder(String),
+
+    /// A caller referred to a folder that is not governed.
+    #[error("`{0}` is not a governed folder")]
+    UnknownFolder(String),
 
     /// A caller referred to a reorganisation that is not in the journal.
     #[error("no plan with id {0}")]

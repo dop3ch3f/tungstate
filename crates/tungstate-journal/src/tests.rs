@@ -1168,6 +1168,9 @@ fn populated(path: &std::path::Path) -> Journal {
             },
         )
         .expect("finish");
+    journal
+        .add_folder("/Users/me/Downloads", "Downloads")
+        .expect("folder");
     // A reorganisation as well as a drain, so the fixture is a journal that
     // has done both of the things tungstate does.
     let plan = journal
@@ -1199,7 +1202,14 @@ fn an_export_carries_every_column_the_database_has() {
     let journal = populated(&dir.path().join("journal.db"));
     let document = journal.export().unwrap();
 
-    for table in ["ops", "links", "connections", "link_files", "plans"] {
+    for table in [
+        "ops",
+        "links",
+        "connections",
+        "link_files",
+        "plans",
+        "folders",
+    ] {
         let columns: Vec<String> = {
             let conn = journal.lock();
             let statement = conn
@@ -1610,4 +1620,86 @@ fn an_undo_is_a_plan_but_never_one_that_undo_offers() {
 
     assert!(journal.plan_by_id(reversal).unwrap().is_an_undo());
     assert!(!journal.plan_by_id(original).unwrap().is_an_undo());
+}
+
+// --- governed folders (v8) ------------------------------------------------
+
+#[test]
+fn a_folder_round_trips_and_is_listed_oldest_first() {
+    let journal = Journal::open_in_memory().expect("journal");
+    journal
+        .add_folder("/a/Downloads", "Downloads")
+        .expect("add");
+    journal.add_folder("/b/Photos", "Photos").expect("add");
+
+    let folders = journal.folders().expect("list");
+    assert_eq!(
+        folders.iter().map(|f| f.name.as_str()).collect::<Vec<_>>(),
+        ["Downloads", "Photos"]
+    );
+    assert_eq!(folders[0].root, "/a/Downloads");
+    assert!(folders[0].added_at > 0);
+}
+
+#[test]
+fn the_same_root_cannot_be_governed_twice() {
+    // The root is the identity. Adding a folder you already have is one
+    // folder, not two rows that disagree about its name.
+    let journal = Journal::open_in_memory().expect("journal");
+    journal
+        .add_folder("/a/Downloads", "Downloads")
+        .expect("add");
+    assert!(matches!(
+        journal.add_folder("/a/Downloads", "Something else"),
+        Err(JournalError::DuplicateFolder(_))
+    ));
+}
+
+#[test]
+fn a_name_may_repeat_because_it_is_only_for_reading() {
+    let journal = Journal::open_in_memory().expect("journal");
+    journal.add_folder("/one/Photos", "Photos").expect("add");
+    journal.add_folder("/two/Photos", "Photos").expect("add");
+    assert_eq!(journal.folders().expect("list").len(), 2);
+}
+
+#[test]
+fn forgetting_a_folder_keeps_what_was_done_to_it() {
+    // Forgetting a folder is forgetting to watch it, not forgetting what was
+    // done to it -- so `log` and `undo --plan` keep working afterwards.
+    let journal = Journal::open_in_memory().expect("journal");
+    journal
+        .add_folder("/a/Downloads", "Downloads")
+        .expect("add");
+    let plan = with_plan(&journal);
+
+    journal.remove_folder("/a/Downloads").expect("forget");
+    assert!(journal.folders().expect("list").is_empty());
+    assert_eq!(journal.ops_for_plan(plan).expect("ops").len(), 2);
+    assert!(journal.plan_by_id(plan).is_ok());
+}
+
+#[test]
+fn forgetting_a_folder_that_is_not_governed_says_so() {
+    let journal = Journal::open_in_memory().expect("journal");
+    assert!(matches!(
+        journal.remove_folder("/nowhere"),
+        Err(JournalError::UnknownFolder(_))
+    ));
+}
+
+#[test]
+fn a_folder_can_be_found_by_its_root() {
+    let journal = Journal::open_in_memory().expect("journal");
+    journal
+        .add_folder("/a/Downloads", "Downloads")
+        .expect("add");
+    assert_eq!(
+        journal.folder_by_root("/a/Downloads").expect("found").name,
+        "Downloads"
+    );
+    assert!(matches!(
+        journal.folder_by_root("/elsewhere"),
+        Err(JournalError::UnknownFolder(_))
+    ));
 }

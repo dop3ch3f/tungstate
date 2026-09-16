@@ -1,0 +1,49 @@
+# A Downloads folder, sorted by what each file actually is.
+#
+# Reads the first few bytes to tell a real PDF from something merely named
+# `.pdf`, so a mislabelled file still lands in the right place.
+
+[folder]
+name = "downloads"
+inbox = "Other"
+ignore = [".DS_Store", "Thumbs.db", "*.part", "*.crdownload", "*.download"]
+opaque = ["*.app"]
+
+[defaults]
+cooldown = "30s"
+on_conflict = "rename"
+
+[[rule]]
+name = "images"
+path = "Images"
+match = { mime = "image/*" }
+
+[[rule]]
+name = "video"
+path = "Video"
+match = { mime = "video/*" }
+
+[[rule]]
+name = "audio"
+path = "Audio"
+match = { mime = "audio/*" }
+
+[[rule]]
+name = "documents"
+path = "Documents"
+match = { ext = ["pdf", "doc", "docx", "odt", "rtf", "txt", "md", "pages"] }
+
+[[rule]]
+name = "spreadsheets"
+path = "Spreadsheets"
+match = { ext = ["xls", "xlsx", "csv", "ods", "numbers"] }
+
+[[rule]]
+name = "archives"
+path = "Archives"
+match = { ext = ["zip", "tar", "gz", "bz2", "7z", "rar", "dmg", "pkg"] }
+
+[[rule]]
+name = "installers"
+path = "Installers"
+match = { ext = ["exe", "msi", "deb", "rpm", "appimage"] }

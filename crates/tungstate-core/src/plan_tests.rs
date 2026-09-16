@@ -744,3 +744,87 @@ fn an_ordinary_policy_settles() {
     assert!(plan.settles);
     assert!(plan.unsettled.is_empty());
 }
+
+// --- the starter layouts --------------------------------------------------
+//
+// These are somebody's first impression of the whole second half, so they are
+// held to a higher bar than a policy someone wrote themselves: they must load
+// without complaint, and they must settle.
+
+#[test]
+fn every_starter_layout_loads_without_a_warning() {
+    for template in crate::templates::TEMPLATES {
+        let loaded = Policy::parse(template.body)
+            .unwrap_or_else(|e| panic!("`{}` does not parse: {e}", template.name));
+        assert!(
+            loaded.warnings.is_empty(),
+            "`{}` loads with warnings: {:?}",
+            template.name,
+            loaded.warnings
+        );
+        assert!(
+            !loaded.policy.rules.is_empty(),
+            "`{}` has no rules",
+            template.name
+        );
+    }
+}
+
+#[test]
+fn every_starter_layout_describes_itself() {
+    // The picker shows these, so an empty one is a blank row in a list
+    // somebody is choosing from.
+    for template in crate::templates::TEMPLATES {
+        assert!(!template.summary.is_empty(), "{}", template.name);
+        assert!(!template.detail.is_empty(), "{}", template.name);
+        assert!(
+            template.summary.len() < 46,
+            "`{}` summary is too long for one line: {}",
+            template.name,
+            template.summary
+        );
+    }
+}
+
+#[test]
+fn every_starter_layout_settles_on_a_messy_folder() {
+    // The worst possible first impression is a layout that tidies your folder
+    // and then wants to tidy it again for ever. Held here rather than hoped.
+    let snap = folder(&[
+        "holiday.jpg",
+        "notes.txt",
+        "report.pdf",
+        "archive.zip",
+        "clip.mp4",
+        "sheet.csv",
+        "installer.dmg",
+        "no-extension",
+        "nested/deep/thing.txt",
+        "Documents/already.pdf",
+    ]);
+    for template in crate::templates::TEMPLATES {
+        let policy = Policy::parse(template.body).expect("parses").policy;
+        let plan = policy.plan(&snap);
+        assert!(
+            plan.settles,
+            "`{}` does not settle: {:?}",
+            template.name, plan.unsettled
+        );
+        // And really settles: apply it on paper and there is nothing left.
+        let after = plan
+            .apply_to(&snap)
+            .unwrap_or_else(|e| panic!("`{}` is not executable: {e}", template.name));
+        assert!(
+            policy.plan(&after).ops.is_empty(),
+            "`{}` still has work after being applied",
+            template.name
+        );
+    }
+}
+
+#[test]
+fn a_starter_layout_can_be_found_by_name_and_an_unknown_one_cannot() {
+    assert!(crate::templates::template("downloads").is_some());
+    assert!(crate::templates::template("nonsense").is_none());
+    assert!(crate::templates::names().contains(&"photos"));
+}

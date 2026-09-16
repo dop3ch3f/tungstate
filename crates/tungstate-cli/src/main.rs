@@ -4,6 +4,7 @@ mod apply;
 mod connection;
 mod explain;
 mod folder;
+mod folders;
 mod plan;
 
 use std::path::{Path, PathBuf};
@@ -45,6 +46,17 @@ enum Command {
         #[command(subcommand)]
         action: FolderAction,
     },
+    /// Give a folder a starting set of rules.
+    ///
+    /// Writes `.tungstate/policy.toml`. Never overwrites an existing one.
+    Init {
+        /// The folder. Defaults to here.
+        path: Option<String>,
+        /// Which starting layout to use. Omit to see the choices.
+        #[arg(long)]
+        template: Option<String>,
+    },
+
     /// Manage transfer links between folders.
     Link {
         #[command(subcommand)]
@@ -173,6 +185,16 @@ enum FolderAction {
     Add {
         /// Path to the folder to govern.
         path: String,
+        /// What to call it on screen. Defaults to the directory's own name.
+        #[arg(long)]
+        name: Option<String>,
+    },
+    /// Show every folder being governed.
+    List,
+    /// Stop governing a folder. Its rules and its history are untouched.
+    Remove {
+        /// Path to the folder to forget.
+        path: String,
     },
 }
 
@@ -270,64 +292,54 @@ fn main() -> std::process::ExitCode {
         .init();
     let cli = Cli::parse();
 
-    // Every subcommand is a stub until its slice lands. Exit code 2 keeps
-    // "not built yet" distinguishable from a real runtime failure (1).
+    // Every subcommand does something now. The "not implemented yet"
+    // fallthrough that stood here since slice 0 became unreachable the moment
+    // `folder` stopped being a stub, and the compiler said so -- which is also
+    // why every arm is an expression rather than a `return`. Exit code 2 still
+    // means "not built yet" where a command refuses part of its own surface,
+    // such as planning a folder on a connection.
     match cli.command {
         Command::Folder { action } => match action {
-            FolderAction::Add { path } => {
-                tracing::debug!(%path, "folder add requested");
-            }
+            FolderAction::Add { path, name } => folders::add(&path, name.as_deref()),
+            FolderAction::List => folders::list(),
+            FolderAction::Remove { path } => folders::remove(&path),
         },
-        Command::Link { action } => return link(action),
-        Command::Connection { action } => {
-            let journal = match open_journal() {
-                Ok(journal) => journal,
-                Err(error) => return fail(&error),
+        Command::Init { path, template } => folders::init(path.as_deref(), template.as_deref()),
+        Command::Link { action } => link(action),
+        Command::Connection { action } => match open_journal() {
+            Ok(journal) => connection::run(action, &journal, secret_store().as_ref()),
+            Err(error) => fail(&error),
+        },
+        Command::Log { path } => report(|journal| journal.history(&path)),
+        Command::Whereis { target } => report(|journal| {
+            // A BLAKE3 digest is 64 hex characters, and no real path looks
+            // like one, so the shape of the argument decides how to read it.
+            let locator = if is_hash(&target) {
+                Locator::Hash(&target)
+            } else {
+                Locator::Path(Path::new(&target))
             };
-            return connection::run(action, &journal, secret_store().as_ref());
-        }
-
-        Command::Log { path } => return report(|journal| journal.history(&path)),
-        Command::Whereis { target } => {
-            return report(|journal| {
-                // A BLAKE3 digest is 64 hex characters, and no real path looks
-                // like one, so the shape of the argument decides how to read it.
-                let locator = if is_hash(&target) {
-                    Locator::Hash(&target)
-                } else {
-                    Locator::Path(Path::new(&target))
-                };
-                journal.whereis(&locator)
-            });
-        }
+            journal.whereis(&locator)
+        }),
         Command::Explain {
             target,
             policy,
             json,
-        } => {
-            return explain::explain(&target, policy.as_deref(), json);
-        }
-        Command::Storage { action } => return storage(action),
+        } => explain::explain(&target, policy.as_deref(), json),
+        Command::Storage { action } => storage(action),
         Command::Plan {
             target,
             policy,
             json,
-        } => return plan::plan(target.as_deref(), policy.as_deref(), json),
-
+        } => plan::plan(target.as_deref(), policy.as_deref(), json),
         Command::Apply { target, saved, yes } => {
-            return apply::apply(target.as_deref(), saved.as_deref(), yes);
+            apply::apply(target.as_deref(), saved.as_deref(), yes)
         }
-        Command::Undo { target, last, plan } => {
-            return apply::undo(target.as_deref(), last, plan);
-        }
-
+        Command::Undo { target, last, plan } => apply::undo(target.as_deref(), last, plan),
         Command::Policy { action } => match action {
-            PolicyAction::Validate { policy } => return explain::validate(policy.as_deref()),
+            PolicyAction::Validate { policy } => explain::validate(policy.as_deref()),
         },
     }
-
-    eprintln!("not implemented yet");
-    std::process::ExitCode::from(2)
 }
 
 /// Open the machine journal, honouring the test override.

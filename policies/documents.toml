@@ -1,0 +1,31 @@
+# Documents, grouped by kind and then by year.
+#
+# The plainest of the three: no reading inside files, so it costs a directory
+# listing and nothing else however large the folder is.
+
+[folder]
+name = "documents"
+inbox = "Unsorted"
+ignore = [".DS_Store", "Thumbs.db", "*.part"]
+
+[defaults]
+cooldown = "30s"
+on_conflict = "rename"
+
+[[rule]]
+name = "pdfs"
+path = "PDF/{date:%Y}"
+match = { ext = "pdf" }
+vars.date = { from = "mtime" }
+
+[[rule]]
+name = "writing"
+path = "Writing/{date:%Y}"
+match = { ext = ["doc", "docx", "odt", "rtf", "txt", "md", "pages"] }
+vars.date = { from = "mtime" }
+
+[[rule]]
+name = "sheets"
+path = "Sheets/{date:%Y}"
+match = { ext = ["xls", "xlsx", "csv", "ods", "numbers"] }
+vars.date = { from = "mtime" }

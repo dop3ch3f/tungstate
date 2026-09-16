@@ -137,6 +137,20 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE ops ADD COLUMN plan_id INTEGER REFERENCES plans (id);
 
      CREATE INDEX ops_plan ON ops (plan_id) WHERE plan_id IS NOT NULL;",
+    // v8: governed folders, which the window needs and the command line did
+    // not. `plan` finds its folder by walking up from where it was typed; a
+    // window has no working directory to walk up from, so it has to be able to
+    // show you the folders you have.
+    //
+    // The root is the identity, so adding the same folder twice is one folder
+    // -- which is why it is UNIQUE rather than a name being unique. A name is
+    // for reading and can repeat.
+    "CREATE TABLE folders (
+         id       INTEGER PRIMARY KEY,
+         root     TEXT    NOT NULL UNIQUE,
+         name     TEXT    NOT NULL,
+         added_at INTEGER NOT NULL
+     );",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

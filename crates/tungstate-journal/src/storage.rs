@@ -38,7 +38,14 @@ const ARCHIVE_DIR: &str = "archives";
 
 /// Imported and exported in this order: a row may reference one earlier in the
 /// list, never one later.
-const TABLES: [&str; 5] = ["connections", "links", "link_files", "plans", "ops"];
+const TABLES: [&str; 6] = [
+    "connections",
+    "links",
+    "link_files",
+    "folders",
+    "plans",
+    "ops",
+];
 
 /// One archived journal, described well enough to choose between.
 #[derive(Debug, Clone, PartialEq, Eq)]

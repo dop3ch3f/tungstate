@@ -1,0 +1,14 @@
+# One directory per file extension, in upper case.
+#
+# The simplest rule there is, and a good way to see what is actually in a
+# folder before deciding how you want it arranged.
+
+[folder]
+name = "by-type"
+inbox = "No extension"
+ignore = [".DS_Store", "Thumbs.db", "*.part"]
+
+[[rule]]
+name = "by-extension"
+path = "{ext|upper}"
+match = { regex = "\\." }

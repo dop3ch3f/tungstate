@@ -18,12 +18,16 @@ fn version_flag_prints_the_api_version() {
 }
 
 #[test]
-fn folder_add_is_a_stub_for_now() {
+fn folder_add_refuses_a_path_that_is_not_there() {
+    // Was `folder_add_is_a_stub_for_now`, which pinned exit code 2 and "not
+    // implemented yet" from slice 0 until slice 7b gave the window something
+    // to iterate. The command is real now, so what is worth pinning is that a
+    // path it cannot read is refused rather than governed.
     tungstate()
-        .args(["folder", "add", "/tmp/example"])
+        .args(["folder", "add", "/tmp/definitely-not-a-real-folder-xyzzy"])
         .assert()
-        .code(2)
-        .stderr(predicates::str::contains("not implemented yet"));
+        .failure()
+        .stderr(predicates::str::contains("cannot read"));
 }
 
 #[test]
@@ -1386,4 +1390,185 @@ fn applying_an_already_tidy_folder_says_so_rather_than_doing_nothing_quietly() {
     assert!(again.status.success());
     let text = String::from_utf8(again.stdout).expect("utf-8");
     assert!(text.contains("already matches its policy"), "{text}");
+}
+
+// --- `tungstate folder` and `tungstate init` ------------------------------
+
+#[test]
+fn a_folder_added_is_a_folder_listed() {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut command = sandboxed(&home);
+    let added = command
+        .arg("folder")
+        .arg("add")
+        .arg(&root)
+        .output()
+        .expect("runs");
+    assert!(added.status.success());
+
+    let mut command = sandboxed(&home);
+    let listed = command.arg("folder").arg("list").output().expect("runs");
+    let text = String::from_utf8(listed.stdout).expect("utf-8");
+    assert!(text.contains("Downloads"), "{text}");
+}
+
+#[test]
+fn a_folder_with_no_rules_is_told_what_to_do_about_it() {
+    // A governed folder with no rules does nothing at all, and the reason is
+    // not guessable from anywhere. So it is said, with the choices.
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut command = sandboxed(&home);
+    let output = command
+        .arg("folder")
+        .arg("add")
+        .arg(&root)
+        .output()
+        .expect("runs");
+    let text = String::from_utf8(output.stdout).expect("utf-8");
+    assert!(text.contains("no rules yet"), "{text}");
+    assert!(text.contains("downloads"), "the layouts are listed: {text}");
+}
+
+#[test]
+fn the_same_folder_cannot_be_governed_twice() {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(&root).unwrap();
+
+    for expected in [true, false] {
+        let mut command = sandboxed(&home);
+        let output = command
+            .arg("folder")
+            .arg("add")
+            .arg(&root)
+            .output()
+            .expect("runs");
+        assert_eq!(output.status.success(), expected);
+    }
+}
+
+#[test]
+fn init_writes_a_starting_layout_and_says_nothing_has_moved() {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::write(root.join("a.pdf"), b"%PDF-1.4 not really").unwrap();
+
+    let mut command = sandboxed(&home);
+    let output = command
+        .arg("init")
+        .arg("--template")
+        .arg("downloads")
+        .arg(&root)
+        .output()
+        .expect("runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(root.join(".tungstate/policy.toml").is_file());
+    let text = String::from_utf8(output.stdout).expect("utf-8");
+    assert!(text.contains("nothing has moved"), "{text}");
+    // And the file it wrote is one the engine accepts.
+    assert!(root.join("a.pdf").exists(), "nothing was moved");
+}
+
+#[test]
+fn init_never_overwrites_rules_somebody_already_has() {
+    // A policy is somebody's work. This command exists to get them started,
+    // not to start them over.
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(root.join(".tungstate")).unwrap();
+    std::fs::write(root.join(".tungstate/policy.toml"), b"# mine\n").unwrap();
+
+    let mut command = sandboxed(&home);
+    let output = command
+        .arg("init")
+        .arg("--template")
+        .arg("downloads")
+        .arg(&root)
+        .output()
+        .expect("runs");
+    assert!(!output.status.success());
+    assert_eq!(
+        std::fs::read_to_string(root.join(".tungstate/policy.toml")).unwrap(),
+        "# mine\n"
+    );
+}
+
+#[test]
+fn init_with_no_template_shows_the_choices() {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut command = sandboxed(&home);
+    let output = command.arg("init").arg(&root).output().expect("runs");
+    assert!(output.status.success());
+    let text = String::from_utf8(output.stdout).expect("utf-8");
+    for name in ["downloads", "photos", "documents", "by-type"] {
+        assert!(text.contains(name), "`{name}` missing from: {text}");
+    }
+}
+
+#[test]
+fn an_unknown_layout_lists_the_real_ones() {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(&root).unwrap();
+
+    let mut command = sandboxed(&home);
+    let output = command
+        .arg("init")
+        .arg("--template")
+        .arg("nonsense")
+        .arg(&root)
+        .output()
+        .expect("runs");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf-8");
+    assert!(stderr.contains("downloads"), "{stderr}");
+}
+
+#[test]
+fn forgetting_a_folder_keeps_its_rules_on_disk() {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(&root).unwrap();
+    let mut command = sandboxed(&home);
+    command
+        .arg("folder")
+        .arg("add")
+        .arg(&root)
+        .assert()
+        .success();
+    let mut command = sandboxed(&home);
+    command
+        .arg("init")
+        .arg("--template")
+        .arg("by-type")
+        .arg(&root)
+        .assert()
+        .success();
+
+    let mut command = sandboxed(&home);
+    let output = command
+        .arg("folder")
+        .arg("remove")
+        .arg(&root)
+        .output()
+        .expect("runs");
+    assert!(output.status.success());
+    assert!(
+        root.join(".tungstate/policy.toml").is_file(),
+        "forgetting a folder is forgetting to watch it, not deleting its rules"
+    );
 }

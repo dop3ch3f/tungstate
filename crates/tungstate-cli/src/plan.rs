@@ -103,7 +103,23 @@ fn render(plan: &Plan, root: &Path, policy_name: &str, loaded: &Loaded) -> Strin
     );
 
     if plan.ops.is_empty() {
-        out.push_str("  nothing to do\n\n");
+        // "Tidy" and "not tidy yet" are the same empty list and very
+        // different sentences. Saying the first when the second is true is how
+        // somebody concludes the thing does not work.
+        if plan.waiting() > 0 {
+            let _ = writeln!(
+                out,
+                "  nothing to do yet \u{2014} {} file(s) were written too recently to touch.",
+                plan.waiting(),
+            );
+            let _ = writeln!(
+                out,
+                "  the longest has {}s to wait; run this again after that.\n",
+                plan.longest_wait(),
+            );
+        } else {
+            out.push_str("  nothing to do\n\n");
+        }
     }
     for op in &plan.ops {
         out.push_str(&render_op(op));
