@@ -2,6 +2,39 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+export interface FolderView {
+  name: string;
+  root: string;
+  has_rules: boolean;
+  broken: string | null;
+}
+
+export interface LayoutView { name: string; summary: string; detail: string }
+
+export interface TreeEntry { path: string; is_dir: boolean; size: number; moves: boolean }
+
+export interface MoveView { from: string; to: string; why: string }
+
+export interface LeftAloneView { path: string; why: string }
+
+/** Everything the Folders tab needs to draw one folder. */
+export interface PreviewView {
+  folder: string;
+  before: TreeEntry[];
+  after: TreeEntry[];
+  moves: MoveView[];
+  left_alone: LeftAloneView[];
+  files: number;
+  of: number;
+  bytes: number;
+  large: boolean;
+  settles: boolean;
+  waiting: number;
+  longest_wait: number;
+  tidy: boolean;
+  undoable: number | null;
+}
+
 export interface Link {
   name: string;
   source: string;
@@ -230,6 +263,16 @@ export const api = {
   rememberPanes: (panes: { left: string | null; right: string | null }) =>
     invoke<void>("remember_panes", { panes }),
   startTransfer: (request: TransferRequest) => invoke<string>("start_transfer", { request }),
+  governed: () => invoke<FolderView[]>("governed"),
+  governFolder: (root: string) => invoke<void>("govern_folder", { root }),
+  forgetFolder: (root: string) => invoke<void>("forget_folder", { root }),
+  layouts: () => invoke<LayoutView[]>("layouts"),
+  giveRules: (root: string, layout: string) => invoke<void>("give_rules", { root, layout }),
+  rulesText: (root: string) => invoke<string>("rules_text", { root }),
+  folderPreview: (root: string) => invoke<PreviewView>("folder_preview", { root }),
+  tidyFolder: (root: string) => invoke<string>("tidy_folder", { root }),
+  putBack: (root: string, plan: number) => invoke<string>("put_back", { root, plan }),
+  pickFolder: () => invoke<string | null>("pick_folder"),
   links: () => invoke<Link[]>("list_links"),
   createLink: (form: NewLink) => invoke<void>("create_link", { form }),
   run: (name: string) => invoke<Accepted>("run_link", { name }),

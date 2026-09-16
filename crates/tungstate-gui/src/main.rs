@@ -36,6 +36,8 @@ use tungstate_transfer::{IdenticalAction, Stop, Summary, Transfer};
 use bridge::{Answer, ConflictChannel, EventProgress, Reply, WindowResolver};
 
 /// Shared state for the whole window.
+mod govern;
+
 struct App {
     journal: Journal,
     conflicts: ConflictChannel,
@@ -287,6 +289,146 @@ impl From<&Summary> for SummaryView {
                 .collect(),
         }
     }
+}
+
+// --- governed folders -----------------------------------------------------
+//
+// The window's half of the second half. The engine keeps its vocabulary; these
+// hand the screen plain words, because somebody opening this app has a messy
+// folder rather than a mental model of a reconciliation controller.
+
+#[tauri::command]
+fn governed(state: State<'_, App>) -> Result<Vec<govern::FolderView>, String> {
+    let folders = state.journal.folders().map_err(describe)?;
+    Ok(folders
+        .into_iter()
+        .map(|folder| {
+            let root = PathBuf::from(&folder.root);
+            let has_rules = govern::has_rules(&root);
+            govern::FolderView {
+                // Loaded here rather than when the folder is opened, so a
+                // broken policy is visible in the list rather than only after
+                // clicking into it.
+                broken: has_rules.then(|| govern::rules_at(&root).err()).flatten(),
+                name: folder.name,
+                root: folder.root,
+                has_rules,
+            }
+        })
+        .collect())
+}
+
+#[tauri::command]
+fn govern_folder(root: String, state: State<'_, App>) -> Result<(), String> {
+    let path = PathBuf::from(&root);
+    if !path.is_dir() {
+        return Err(format!("{root} is not a folder"));
+    }
+    state
+        .journal
+        .add_folder(&root, &govern::label_for(&path))
+        .map(|_| ())
+        .map_err(describe)
+}
+
+#[tauri::command]
+fn forget_folder(root: String, state: State<'_, App>) -> Result<(), String> {
+    state.journal.remove_folder(&root).map_err(describe)
+}
+
+#[tauri::command]
+fn layouts() -> Vec<govern::LayoutView> {
+    govern::layouts()
+}
+
+#[tauri::command]
+fn give_rules(root: String, layout: String) -> Result<(), String> {
+    govern::write_layout(&PathBuf::from(root), &layout).map(|_| ())
+}
+
+#[tauri::command]
+fn rules_text(root: String) -> Result<String, String> {
+    govern::rules_text(&PathBuf::from(root))
+}
+
+#[tauri::command]
+fn folder_preview(root: String, state: State<'_, App>) -> Result<govern::PreviewView, String> {
+    govern::preview(&PathBuf::from(root), &state.journal)
+}
+
+#[tauri::command]
+fn tidy_folder(root: String, state: State<'_, App>) -> Result<String, String> {
+    use std::fmt::Write as _;
+
+    let path = PathBuf::from(&root);
+    let backend = tungstate_backend::local::LocalBackend::new(path.clone());
+
+    // Close the books on anything a dead process left in flight, before
+    // planning against a journal that still describes a world that stopped
+    // being true.
+    tungstate_execute::resolve_interrupted(&backend, &state.journal, &root)
+        .map_err(|e| e.to_string())?;
+
+    let (_, snapshot, plan) = govern::plan_for(&path)?;
+    if plan.ops.is_empty() {
+        return Ok("there was nothing to do".to_string());
+    }
+    // The one refusal the window keeps, because it is a bug in the rules
+    // rather than a judgement about scale: the blast radius is shown in the
+    // preview the user just read, and a window that drew two trees has already
+    // had the conversation `--yes` exists to force.
+    if !plan.settles {
+        return Err(format!(
+            "these rules never settle: tidying would leave {} file(s) still wanting to move.              A rename that reads {{name}} and adds to it renders differently once the file is              renamed. Fix the rule first.",
+            plan.unsettled.len()
+        ));
+    }
+
+    let applied = tungstate_execute::apply(&plan, &snapshot, &backend, &state.journal, &root)
+        .map_err(|e| e.to_string())?;
+
+    let mut said = format!("moved {} file(s)", applied.done);
+    if !applied.skipped.is_empty() {
+        let _ = write!(
+            said,
+            "; left {} alone, changed while we looked",
+            applied.skipped.len()
+        );
+    }
+    if !applied.failed.is_empty() {
+        let _ = write!(said, "; {} could not be moved", applied.failed.len());
+    }
+    Ok(said)
+}
+
+#[tauri::command]
+fn put_back(root: String, plan: i64, state: State<'_, App>) -> Result<String, String> {
+    let path = PathBuf::from(&root);
+    let backend = tungstate_backend::local::LocalBackend::new(path.clone());
+    let policy = govern::rules_at(&path)?;
+    let fresh = tungstate_attrs::survey(&backend, &policy).map_err(|e| e.to_string())?;
+    let undone = tungstate_execute::undo(
+        tungstate_journal::plans::PlanId(plan),
+        &fresh,
+        &backend,
+        &state.journal,
+        &root,
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(format!("put {} file(s) back", undone.done))
+}
+
+#[tauri::command]
+async fn pick_folder(app: AppHandle) -> Result<Option<PathBuf>, String> {
+    use tauri_plugin_dialog::DialogExt as _;
+    let (tx, rx) = std::sync::mpsc::channel();
+    app.dialog().file().pick_folder(move |chosen| {
+        let _ = tx.send(chosen);
+    });
+    let chosen = rx
+        .recv()
+        .map_err(|_| "the folder chooser closed".to_string())?;
+    Ok(chosen.and_then(|p| p.into_path().ok()))
 }
 
 #[tauri::command]
@@ -1780,6 +1922,16 @@ fn main() {
             at_once_ceiling: AtomicUsize::new(0),
         })
         .invoke_handler(tauri::generate_handler![
+            governed,
+            govern_folder,
+            forget_folder,
+            layouts,
+            give_rules,
+            rules_text,
+            folder_preview,
+            tidy_folder,
+            put_back,
+            pick_folder,
             list_links,
             create_link,
             run_link,

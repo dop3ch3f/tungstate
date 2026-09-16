@@ -6,13 +6,22 @@ import TransfersView, { type Row } from "./components/TransfersView.vue";
 import LinksView from "./components/LinksView.vue";
 import FindView from "./components/FindView.vue";
 import StorageView from "./components/StorageView.vue";
+import FoldersView from "./components/FoldersView.vue";
 import ActivityView from "./components/ActivityView.vue";
 import ConnectionsView from "./components/ConnectionsView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
 import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk, type Connection, type Accepted, type Preview} from "./api";
 
-type Tab = "browse" | "transfers" | "links" | "connections" | "activity" | "find" | "storage";
+type Tab =
+  | "browse"
+  | "transfers"
+  | "folders"
+  | "links"
+  | "connections"
+  | "activity"
+  | "find"
+  | "storage";
 
 const tab = ref<Tab>("browse");
 const onboarding = ref(false);
@@ -337,6 +346,7 @@ function browseAt(location: string) {
         <button :aria-current="tab === 'transfers'" @click="tab = 'transfers'">
           Transfers<span v-if="running" class="badge">●</span>
         </button>
+        <button :aria-current="tab === 'folders'" @click="tab = 'folders'">Folders</button>
         <button :aria-current="tab === 'links'" @click="tab = 'links'">
           Links<span v-if="links.length" class="badge">{{ links.length }}</span>
         </button>
@@ -400,6 +410,8 @@ function browseAt(location: string) {
     <FindView v-else-if="tab === 'find'" :links="links" />
 
     <StorageView v-else-if="tab === 'storage'" @changed="reloadEverything" />
+
+    <FoldersView v-else-if="tab === 'folders'" />
 
     <LinksView v-else-if="tab === 'links'" :links="links" :busy="running"
                :places="places.map((p) => p.path)"

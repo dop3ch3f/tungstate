@@ -19,6 +19,9 @@ tungstate-backend-opendal = { path = "../tungstate-backend-opendal" }
 tungstate-secret = { path = "../tungstate-secret" }
 tungstate-journal = { path = "../tungstate-journal" }
 tungstate-transfer = { path = "../tungstate-transfer" }
+tungstate-execute = { path = "../tungstate-execute" }
+tungstate-attrs = { path = "../tungstate-attrs" }
+tungstate-core = { path = "../tungstate-core" }
 directories = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

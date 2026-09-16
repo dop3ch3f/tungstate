@@ -451,3 +451,60 @@ button, .chrome { user-select: none; }
 .modal .route + .route { margin-top: -6px; }
 
 .welcome .hero-mark { margin-bottom: 20px; }
+
+/* Folders ---------------------------------------------------------------- */
+
+/* The sentence that says what the button would do, before it is pressed. It
+   is the most important line on the screen, so it is not `.sub` grey. */
+.lede { color: var(--light); font-size: 13.5px; margin: 14px 0 0; }
+
+/* A folder's name in the table, which opens it. A button rather than a link
+   because it goes nowhere; styled back down to text so it does not read as a
+   third action in a row that already has one. */
+.asname {
+  background: none; border: 0; padding: 0; margin: 0;
+  font: inherit; color: var(--light); cursor: pointer; text-align: left;
+}
+.asname:hover b { color: var(--fluoresce); }
+
+/* The starting layouts, as cards rather than a dropdown: this is the first
+   real choice somebody makes, and a dropdown hides three of the four. */
+.layouts { display: grid; gap: 8px; margin: 12px 0 4px; }
+@media (min-width: 900px) { .layouts { grid-template-columns: 1fr 1fr; } }
+.layout {
+  display: grid; gap: 4px; text-align: left; cursor: pointer;
+  background: var(--ore-lift); border: 1px solid var(--seam);
+  border-radius: var(--r); padding: 11px 13px; font: inherit;
+}
+.layout:hover:not(:disabled) { border-color: var(--fluoresce); }
+.layout:disabled { opacity: 0.55; cursor: default; }
+.layout strong { color: var(--light); font-size: 13px; font-weight: 600; }
+.layout span { color: var(--dust); font-size: 12px; line-height: 1.45; }
+
+/* The two trees. A fixed height so the pair scroll independently and the
+   buttons above them never move off screen on a folder with 2,000 files. */
+.tree {
+  list-style: none; margin: 0; padding: 6px 0 0;
+  max-height: 46vh; overflow-y: auto;
+  font-family: var(--mono); font-size: 12px;
+}
+.tree li {
+  display: flex; gap: 10px; justify-content: space-between;
+  padding: 2px 6px; border-radius: 3px;
+}
+/* The one accent in the interface, spent on the files that would actually
+   change -- which is the only thing anyone is looking for here. */
+.tree li.moving { background: rgba(127, 212, 255, 0.10); color: var(--fluoresce); }
+.tree .size { color: var(--dust); flex: none; }
+.tree li.moving .size { color: inherit; opacity: 0.8; }
+
+/* The rules, shown and never edited. */
+.rules {
+  background: var(--ore-sink); border: 1px solid var(--seam); border-radius: var(--r);
+  padding: 12px 14px; font-size: 12px; line-height: 1.5;
+  max-height: 52vh; overflow: auto; white-space: pre; margin: 0;
+}
+
+.sheet h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; }
+/* Same red `.notice.bad` uses, so "needs attention" is one colour. */
+.ledger td .warn, .ledger td.warn { color: #e2705f; }
