@@ -3,6 +3,7 @@
 mod connection;
 mod explain;
 mod folder;
+mod plan;
 
 use std::path::{Path, PathBuf};
 
@@ -74,6 +75,20 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
+    /// Work out what would have to happen for a folder to match its policy.
+    ///
+    /// Changes nothing. Redirect `--json` to keep the plan.
+    Plan {
+        /// The folder, or anything inside it. Defaults to here.
+        target: Option<String>,
+        /// The policy to use, instead of the nearest `.tungstate/policy.toml`.
+        #[arg(long)]
+        policy: Option<PathBuf>,
+        /// Emit the plan as JSON.
+        #[arg(long)]
+        json: bool,
+    },
+
     /// Keep, clear and bring back what tungstate remembers.
     Storage {
         #[command(subcommand)]
@@ -265,6 +280,12 @@ fn main() -> std::process::ExitCode {
             return explain::explain(&target, policy.as_deref(), json);
         }
         Command::Storage { action } => return storage(action),
+        Command::Plan {
+            target,
+            policy,
+            json,
+        } => return plan::plan(target.as_deref(), policy.as_deref(), json),
+
         Command::Policy { action } => match action {
             PolicyAction::Validate { policy } => return explain::validate(policy.as_deref()),
         },
@@ -940,7 +961,7 @@ fn report_summary(summary: &tungstate_transfer::Summary, destination: &str) {
     }
 }
 
-fn human_bytes(bytes: u64) -> String {
+pub(crate) fn human_bytes(bytes: u64) -> String {
     const UNITS: [&str; 5] = ["B", "KiB", "MiB", "GiB", "TiB"];
     #[allow(clippy::cast_precision_loss)]
     let mut value = bytes as f64;

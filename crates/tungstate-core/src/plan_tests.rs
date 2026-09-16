@@ -423,6 +423,26 @@ fn nothing_is_ever_planned_inside_tungstates_own_directories() {
 // --- cooldown and blast radius -------------------------------------------
 
 #[test]
+fn an_ignored_file_is_not_told_to_wait_for_a_cooldown() {
+    // Cooldown is asked after the decision, not before it: a file nothing
+    // would move is not waiting for anything, and "another 29 seconds" is an
+    // answer to a question nobody asked.
+    let p = policy(
+        "[folder]\nname = \"f\"\nignore = [\".DS_Store\"]\n\
+         [defaults]\ncooldown = \"30s\"\n\n\
+         [[rule]]\nname = \"text\"\npath = \"Text\"\nmatch = { ext = \"txt\" }\n",
+    );
+    let now = Timestamp::UNIX_EPOCH + std::time::Duration::from_secs(600);
+    let mut junk = Attributes::new(".DS_Store", 10, now);
+    junk.mtime = Some(now - std::time::Duration::from_secs(1));
+    let snap = Snapshot::new(now, vec![junk], BTreeSet::new(), true);
+    assert!(matches!(
+        reason_for(&p.plan(&snap), ".DS_Store"),
+        Reason::Ignored { .. }
+    ));
+}
+
+#[test]
 fn a_file_written_too_recently_waits() {
     let p = policy(
         "[folder]\nname = \"f\"\n[defaults]\ncooldown = \"30s\"\n\n\

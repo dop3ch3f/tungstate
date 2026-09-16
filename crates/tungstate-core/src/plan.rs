@@ -344,18 +344,22 @@ impl Policy {
             // Directories are occupants, never movers. Moving an opaque unit
             // as a whole needs rules that match directories, which is a later
             // slice; `pre_rules` returns before any rule sees one.
+            //
+            // One that was deliberately not entered still gets a line, though,
+            // so "tungstate did not look in there" reads differently from
+            // "there is nothing in there".
             if entry.is_dir {
-                continue;
-            }
-
-            // Before anything else, and the same rule the drain applies, so
-            // both "what would happen" commands hold a file back for the same
-            // reason rather than for two that nearly agree.
-            if let Some(left) = cooling(entry, snap.taken, cooldown) {
-                untouched.push(Untouched {
-                    file,
-                    reason: Reason::Cooling { seconds_left: left },
-                });
+                match self.place(entry) {
+                    Outcome::Ignored { because } => untouched.push(Untouched {
+                        file,
+                        reason: Reason::Ignored { because },
+                    }),
+                    Outcome::Opaque { pattern } => untouched.push(Untouched {
+                        file,
+                        reason: Reason::Opaque { pattern },
+                    }),
+                    _ => {}
+                }
                 continue;
             }
 
@@ -419,6 +423,20 @@ impl Policy {
                     destination, rule, ..
                 } => (destination, Because::Rule { name: rule }),
             };
+
+            // Cooldown is asked *after* the decision, not before it. A file
+            // nothing would move anyway is not waiting for anything, and
+            // telling someone their `.DS_Store` needs another 29 seconds is
+            // an answer to a question they did not ask. Same rule as the
+            // drain's, so both "what would happen" commands hold a file back
+            // for one reason rather than two that nearly agree.
+            if let Some(left) = cooling(entry, snap.taken, cooldown) {
+                untouched.push(Untouched {
+                    file,
+                    reason: Reason::Cooling { seconds_left: left },
+                });
+                continue;
+            }
 
             // A policy may not route anything into tungstate's own keeping.
             // The classifier cannot know these names; this is the one place

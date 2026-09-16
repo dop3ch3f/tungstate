@@ -1078,3 +1078,165 @@ fn a_reset_keeps_the_history_of_a_run_that_finished() {
         "a reset must not touch files"
     );
 }
+
+// --- `tungstate plan` -----------------------------------------------------
+
+fn plan_in(home: &tempfile::TempDir) -> assert_cmd::Command {
+    let mut command = sandboxed(home);
+    command.arg("plan").arg(home.path().join("Downloads"));
+    command
+}
+
+/// `governed()` with the cooldown turned off.
+///
+/// Its 30-second cooldown is right for `explain`, which is about one file and
+/// wants the setting exercised; for `plan` it would mean every file in a
+/// freshly written fixture reads as "still settling" and no operation is ever
+/// visible. `a_file_written_too_recently_waits` covers the cooldown itself.
+fn planned() -> tempfile::TempDir {
+    let home = governed();
+    let policy = home.path().join("Downloads/.tungstate/policy.toml");
+    let text = std::fs::read_to_string(&policy).unwrap();
+    std::fs::write(
+        &policy,
+        text.replace("cooldown = \"30s\"", "cooldown = \"0s\""),
+    )
+    .unwrap();
+    home
+}
+
+/// Every file under a root, with its size and its modification time.
+///
+/// What `plan_changes_nothing` compares. Times as well as names, because a
+/// command that rewrote a file with identical content would still be a
+/// command that touched it.
+fn census(root: &std::path::Path) -> Vec<String> {
+    fn walk(dir: &std::path::Path, out: &mut Vec<String>) {
+        let mut entries: Vec<_> = std::fs::read_dir(dir)
+            .expect("the folder is readable")
+            .filter_map(Result::ok)
+            .collect();
+        entries.sort_by_key(std::fs::DirEntry::path);
+        for entry in entries {
+            let meta = entry.metadata().expect("metadata");
+            if meta.is_dir() {
+                out.push(format!("d {}", entry.path().display()));
+                walk(&entry.path(), out);
+            } else {
+                out.push(format!(
+                    "f {} {} {:?}",
+                    entry.path().display(),
+                    meta.len(),
+                    meta.modified().ok()
+                ));
+            }
+        }
+    }
+    let mut out = Vec::new();
+    walk(root, &mut out);
+    out
+}
+
+#[test]
+fn plan_changes_nothing() {
+    // The property the whole command rests on, and the reason it does not
+    // write the plan it prints: `tungstate plan` is safe to run on anything.
+    let home = governed();
+    let root = home.path().join("Downloads");
+    let before = census(&root);
+
+    let output = plan_in(&home).output().expect("plan runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    assert_eq!(before, census(&root), "`plan` touched the folder");
+}
+
+#[test]
+fn plan_walks_up_to_the_policy_and_says_what_would_happen() {
+    let home = planned();
+    let mut command = sandboxed(&home);
+    command.arg("plan").arg(home.path().join("Downloads"));
+    let output = command.output().expect("plan runs");
+    let text = String::from_utf8(output.stdout).expect("utf-8");
+
+    assert!(text.contains("folder \"downloads\""), "{text}");
+    assert!(text.contains("Archives/ZIP/papers.zip"), "{text}");
+    assert!(
+        text.contains("(archives)"),
+        "the deciding rule is named: {text}"
+    );
+    assert!(text.ends_with("Nothing has been changed.\n"), "{text}");
+}
+
+#[test]
+fn plan_names_the_ignored_file_and_says_it_is_ignored() {
+    // Not "written too recently", which is what it said before the cooldown
+    // check moved after the decision.
+    let home = planned();
+    let output = plan_in(&home).output().expect("plan runs");
+    let text = String::from_utf8(output.stdout).expect("utf-8");
+    assert!(text.contains(".DS_Store"), "{text}");
+    assert!(text.contains("ignore `.DS_Store`"), "{text}");
+}
+
+#[test]
+fn plan_as_json_is_valid_and_carries_the_same_decisions() {
+    let home = planned();
+    let mut command = plan_in(&home);
+    let output = command.arg("--json").output().expect("plan runs");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let document: serde_json::Value =
+        serde_json::from_slice(&output.stdout).expect("the plan is JSON");
+
+    assert_eq!(document["folder"], "downloads");
+    assert!(document["settles"].as_bool().expect("settles is a bool"));
+    let ops = document["ops"].as_array().expect("ops is an array");
+    assert!(
+        ops.iter().any(|op| op["to"] == "Archives/ZIP/papers.zip"),
+        "{ops:#?}"
+    );
+    assert!(document["snapshot"].as_str().is_some_and(|s| s.len() == 64));
+}
+
+#[test]
+fn plan_refuses_a_folder_with_no_policy_and_says_what_to_do() {
+    let home = sandbox();
+    let mut command = sandboxed(&home);
+    let output = command.arg("plan").arg(home.path()).output().expect("runs");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf-8");
+    assert!(stderr.contains(".tungstate/policy.toml"), "{stderr}");
+}
+
+#[test]
+fn plan_refuses_a_connection_rather_than_half_supporting_one() {
+    let home = sandbox();
+    let mut command = sandboxed(&home);
+    command
+        .arg("connection")
+        .arg("add")
+        .arg("nas")
+        .arg("--scheme")
+        .arg("fs")
+        .arg("--root")
+        .arg(home.path().to_str().expect("utf-8 path"));
+    command.assert().success();
+
+    let mut command = sandboxed(&home);
+    let output = command.arg("plan").arg("nas:inbox").output().expect("runs");
+    assert_eq!(
+        output.status.code(),
+        Some(2),
+        "not-built-yet is exit code 2"
+    );
+    let stderr = String::from_utf8(output.stderr).expect("utf-8");
+    assert!(stderr.contains("not built yet"), "{stderr}");
+}
