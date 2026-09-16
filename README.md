@@ -20,8 +20,10 @@ prerelease, rebuilt from the same pipeline every time the test suite passes on
 the branch. It moves without warning — use a numbered release for anything you
 want to stay put.
 
-Status: early construction. Files move safely, and the governance half
-can now say what it would do — it just cannot do it yet.
+Status: early construction, and both halves work. Files move safely between
+machines, and a governed folder can be reshaped and un-reshaped on command.
+What is missing is doing it *unprompted*: noticing duplicates, watching for
+changes, and running as a daemon.
 
 **The durable drain.** `tungstate link add <from> <to> --name x --move` then
 `tungstate link run x`, over a mounted volume or over FTP, resumable after a
@@ -37,7 +39,11 @@ that would have to happen for it to match its policy, in an order that can
 actually be carried out — including the temporary name two files need in
 order to trade places. It changes nothing, and it will tell you if your policy
 never settles. `tungstate plan --json` is the same answer for a script.
-Applying a plan is the next slice.
+
+**The executor.** `tungstate apply` carries a plan out, refusing anything past
+500 files or a fifth of the folder unless you say `--yes`. Every operation is
+recorded, so `tungstate undo` puts the folder back exactly as it was — and
+refuses rather than overwriting anything you have changed since.
 
 See `docs/DESIGN.md` for the full design and `docs/SYLLABUS.md` for the build
 order.
