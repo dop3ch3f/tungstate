@@ -1,5 +1,6 @@
 //! The `tungstate` command line interface.
 
+mod apply;
 mod connection;
 mod explain;
 mod folder;
@@ -87,6 +88,33 @@ enum Command {
         /// Emit the plan as JSON.
         #[arg(long)]
         json: bool,
+    },
+
+    /// Carry out a plan: make the folder match its policy.
+    ///
+    /// Refuses a large reorganisation without --yes. Everything it does can be
+    /// taken back with `tungstate undo`.
+    Apply {
+        /// The folder, or anything inside it. Defaults to here.
+        target: Option<String>,
+        /// Apply a plan saved earlier with `tungstate plan --json`.
+        #[arg(long = "plan", value_name = "FILE")]
+        saved: Option<PathBuf>,
+        /// Go ahead past the blast-radius and settling refusals.
+        #[arg(long)]
+        yes: bool,
+    },
+
+    /// Put back what `tungstate apply` did.
+    Undo {
+        /// The folder, or anything inside it. Defaults to here.
+        target: Option<String>,
+        /// Reverse the last N reorganisations of this folder. Defaults to 1.
+        #[arg(long, value_name = "N")]
+        last: Option<usize>,
+        /// Reverse one reorganisation by id, as `apply` reported it.
+        #[arg(long = "plan", value_name = "ID")]
+        plan: Option<i64>,
     },
 
     /// Keep, clear and bring back what tungstate remembers.
@@ -285,6 +313,13 @@ fn main() -> std::process::ExitCode {
             policy,
             json,
         } => return plan::plan(target.as_deref(), policy.as_deref(), json),
+
+        Command::Apply { target, saved, yes } => {
+            return apply::apply(target.as_deref(), saved.as_deref(), yes);
+        }
+        Command::Undo { target, last, plan } => {
+            return apply::undo(target.as_deref(), last, plan);
+        }
 
         Command::Policy { action } => match action {
             PolicyAction::Validate { policy } => return explain::validate(policy.as_deref()),

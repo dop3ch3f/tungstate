@@ -1171,7 +1171,7 @@ fn populated(path: &std::path::Path) -> Journal {
     // A reorganisation as well as a drain, so the fixture is a journal that
     // has done both of the things tungstate does.
     let plan = journal
-        .begin_plan("/Users/me/Downloads", "fingerprint")
+        .begin_plan("/Users/me/Downloads", "fingerprint", None)
         .expect("plan");
     let tidy = journal
         .begin(&NewOp {
@@ -1434,7 +1434,7 @@ use crate::plans::PlanId;
 /// A journal with one applied plan carrying two operations.
 fn with_plan(journal: &Journal) -> PlanId {
     let plan = journal
-        .begin_plan("/Users/me/Downloads", "abc123")
+        .begin_plan("/Users/me/Downloads", "abc123", None)
         .expect("plan");
     for (from, to) in [("a.txt", "Text/a.txt"), ("b.txt", "Text/b.txt")] {
         let op = journal
@@ -1487,7 +1487,7 @@ fn a_drains_operations_belong_to_no_plan() {
     journal
         .finish(op, &Outcome::Committed { hash: None })
         .expect("finish");
-    let plan = journal.begin_plan("/elsewhere", "zzz").expect("plan");
+    let plan = journal.begin_plan("/elsewhere", "zzz", None).expect("plan");
     assert!(journal.ops_for_plan(plan).expect("ops").is_empty());
 }
 
@@ -1496,8 +1496,8 @@ fn recent_plans_are_newest_first_and_include_undone_ones() {
     // "Undo the last three" has to be able to say *that one is already back*
     // rather than silently counting past it.
     let journal = Journal::open_in_memory().expect("journal");
-    let first = journal.begin_plan("/a", "1").expect("plan");
-    let second = journal.begin_plan("/b", "2").expect("plan");
+    let first = journal.begin_plan("/a", "1", None).expect("plan");
+    let second = journal.begin_plan("/b", "2", None).expect("plan");
     journal.mark_undone(first).expect("undo");
 
     let recent = journal.recent_plans(10).expect("recent");
@@ -1513,7 +1513,9 @@ fn recent_plans_are_newest_first_and_include_undone_ones() {
 fn recent_plans_honours_its_limit() {
     let journal = Journal::open_in_memory().expect("journal");
     for n in 0..5 {
-        journal.begin_plan(&format!("/{n}"), "x").expect("plan");
+        journal
+            .begin_plan(&format!("/{n}"), "x", None)
+            .expect("plan");
     }
     assert_eq!(journal.recent_plans(2).expect("recent").len(), 2);
 }
@@ -1544,7 +1546,7 @@ fn a_plan_remembers_the_folder_and_the_snapshot_it_was_built_from() {
     // saved plan.json applied later has to be refusable as stale.
     let journal = Journal::open_in_memory().expect("journal");
     let plan = journal
-        .begin_plan("/Users/me/Downloads", "abc123")
+        .begin_plan("/Users/me/Downloads", "abc123", None)
         .expect("plan");
     let stored = journal.plan_by_id(plan).expect("read back");
     assert_eq!(stored.folder, "/Users/me/Downloads");
@@ -1573,4 +1575,26 @@ fn rmdir_survives_a_round_trip_through_the_journal() {
         .expect("finish");
     let found = journal.recent(1).expect("recent");
     assert_eq!(found[0].kind, OpKind::RmDir);
+}
+
+#[test]
+fn an_undo_is_a_plan_but_never_one_that_undo_offers() {
+    // The bug this column exists for: an undo has to be a plan, or its
+    // operations never show up in `log`. Without a way to tell the two apart,
+    // "undo the last thing" picks up the undo and quietly redoes the work.
+    let journal = Journal::open_in_memory().expect("journal");
+    let original = journal.begin_plan("/root", "abc", None).expect("plan");
+    let reversal = journal
+        .begin_plan("/root", "undo of 1", Some(original))
+        .expect("undo plan");
+    journal.mark_undone(original).expect("mark");
+
+    let recent = journal.recent_plans(10).expect("recent");
+    assert_eq!(recent.len(), 2, "both are plans, and both are in the log");
+
+    let offered: Vec<_> = recent.iter().filter(|p| p.is_undoable()).collect();
+    assert!(offered.is_empty(), "{offered:?}");
+
+    assert!(journal.plan_by_id(reversal).unwrap().is_an_undo());
+    assert!(!journal.plan_by_id(original).unwrap().is_an_undo());
 }

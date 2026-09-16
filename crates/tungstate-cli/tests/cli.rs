@@ -1240,3 +1240,150 @@ fn plan_refuses_a_connection_rather_than_half_supporting_one() {
     let stderr = String::from_utf8(output.stderr).expect("utf-8");
     assert!(stderr.contains("not built yet"), "{stderr}");
 }
+
+// --- `tungstate apply` and `tungstate undo` -------------------------------
+
+fn tidy_folder() -> tempfile::TempDir {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(root.join("old/deeper")).unwrap();
+    std::fs::create_dir_all(root.join(".tungstate")).unwrap();
+    std::fs::write(
+        root.join(".tungstate/policy.toml"),
+        "[folder]\nname = \"downloads\"\n[defaults]\ncooldown = \"0s\"\n\n\
+         [[rule]]\nname = \"text\"\npath = \"Text\"\nmatch = { ext = \"txt\" }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("a.txt"), b"one").unwrap();
+    std::fs::write(root.join("old/b.txt"), b"two").unwrap();
+    std::fs::write(root.join("old/deeper/c.txt"), b"three").unwrap();
+    std::fs::write(root.join("keep.bin"), b"four").unwrap();
+    home
+}
+
+fn tungstate_in(home: &tempfile::TempDir, args: &[&str]) -> std::process::Output {
+    let mut command = sandboxed(home);
+    for arg in args {
+        command.arg(arg);
+    }
+    command.arg(home.path().join("Downloads"));
+    command.output().expect("the command runs")
+}
+
+#[test]
+fn apply_tidies_the_folder_and_undo_puts_it_back() {
+    let home = tidy_folder();
+    let root = home.path().join("Downloads");
+    let before = census(&root);
+
+    let applied = tungstate_in(&home, &["apply", "--yes"]);
+    assert!(
+        applied.status.success(),
+        "{}",
+        String::from_utf8_lossy(&applied.stderr)
+    );
+    assert!(root.join("Text/a.txt").exists());
+    assert!(!root.join("old").exists(), "the emptied directory is swept");
+
+    // And nothing left to do, on a real filesystem.
+    let planned = tungstate_in(&home, &["plan"]);
+    let text = String::from_utf8(planned.stdout).expect("utf-8");
+    assert!(text.contains("nothing to do"), "{text}");
+
+    let undone = tungstate_in(&home, &["undo"]);
+    assert!(
+        undone.status.success(),
+        "{}",
+        String::from_utf8_lossy(&undone.stderr)
+    );
+    assert_eq!(before, census(&root), "undo did not restore the folder");
+}
+
+#[test]
+fn apply_refuses_a_large_reorganisation_and_names_the_limit() {
+    let home = tidy_folder();
+    let output = tungstate_in(&home, &["apply"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf-8");
+    assert!(stderr.contains("500-file / 20% limit"), "{stderr}");
+    assert!(stderr.contains("--yes"), "{stderr}");
+    // Refused before anything moved.
+    assert!(home.path().join("Downloads/a.txt").exists());
+}
+
+#[test]
+fn apply_refuses_a_policy_that_never_settles() {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(root.join(".tungstate")).unwrap();
+    std::fs::write(
+        root.join(".tungstate/policy.toml"),
+        "[folder]\nname = \"churn\"\n[defaults]\ncooldown = \"0s\"\n\n\
+         [[rule]]\nname = \"prefix\"\npath = \"\"\nrename = \"copy-{name}\"\n\
+         match = { ext = \"txt\" }\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("a.txt"), b"x").unwrap();
+
+    let output = tungstate_in(&home, &["apply"]);
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf-8");
+    assert!(stderr.contains("does not settle"), "{stderr}");
+    assert!(root.join("a.txt").exists(), "nothing was moved");
+}
+
+#[test]
+fn a_saved_plan_is_refused_once_the_folder_has_moved_on() {
+    let home = tidy_folder();
+    let root = home.path().join("Downloads");
+
+    let mut command = sandboxed(&home);
+    let saved = command
+        .arg("plan")
+        .arg(&root)
+        .arg("--json")
+        .output()
+        .expect("plan runs");
+    let path = home.path().join("saved.json");
+    std::fs::write(&path, &saved.stdout).unwrap();
+
+    std::fs::write(root.join("surprise.txt"), b"new").unwrap();
+
+    let mut command = sandboxed(&home);
+    let output = command
+        .arg("apply")
+        .arg(&root)
+        .arg("--plan")
+        .arg(&path)
+        .arg("--yes")
+        .output()
+        .expect("apply runs");
+    assert!(!output.status.success());
+    let stderr = String::from_utf8(output.stderr).expect("utf-8");
+    assert!(
+        stderr.contains("changed since this plan was made"),
+        "{stderr}"
+    );
+    assert!(root.join("a.txt").exists(), "nothing was moved");
+}
+
+#[test]
+fn undo_is_refused_twice_for_the_same_reorganisation() {
+    let home = tidy_folder();
+    assert!(tungstate_in(&home, &["apply", "--yes"]).status.success());
+    assert!(tungstate_in(&home, &["undo"]).status.success());
+
+    let again = tungstate_in(&home, &["undo"]);
+    let text = String::from_utf8(again.stdout).expect("utf-8");
+    assert!(text.contains("nothing to undo"), "{text}");
+}
+
+#[test]
+fn applying_an_already_tidy_folder_says_so_rather_than_doing_nothing_quietly() {
+    let home = tidy_folder();
+    assert!(tungstate_in(&home, &["apply", "--yes"]).status.success());
+    let again = tungstate_in(&home, &["apply", "--yes"]);
+    assert!(again.status.success());
+    let text = String::from_utf8(again.stdout).expect("utf-8");
+    assert!(text.contains("already matches its policy"), "{text}");
+}

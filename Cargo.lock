@@ -5419,6 +5419,7 @@ dependencies = [
  "tungstate-backend",
  "tungstate-backend-opendal",
  "tungstate-core",
+ "tungstate-execute",
  "tungstate-journal",
  "tungstate-secret",
  "tungstate-transfer",

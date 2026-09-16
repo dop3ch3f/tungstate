@@ -14,6 +14,8 @@ Commands:
   whereis     Show where a file ended up
   explain     Show where a policy would put a file, and why
   plan        Work out what would have to happen for a folder to match its policy
+  apply       Carry out a plan: make the folder match its policy
+  undo        Put back what `tungstate apply` did
   storage     Keep, clear and bring back what tungstate remembers
   policy      Check and inspect policies
   help        Print this message or the help of the given subcommand(s)

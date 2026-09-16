@@ -303,7 +303,7 @@ fn inverting_reverses_the_order_as_well_as_the_operations() {
     // The part that is easy to get wrong: the last directory created has to be
     // the first one removed, or a parent is not empty when its turn comes.
     let journal = Journal::open_in_memory().expect("journal");
-    let plan = journal.begin_plan("/root", "x").expect("plan");
+    let plan = journal.begin_plan("/root", "x", None).expect("plan");
     for op in [
         (OpKind::MkDir, Some("deep"), None),
         (OpKind::MkDir, Some("deep/deeper"), None),
@@ -351,7 +351,7 @@ fn inverting_ignores_what_never_happened() {
     // A failed or skipped operation changed nothing, so undoing it would be
     // inventing work.
     let journal = Journal::open_in_memory().expect("journal");
-    let plan = journal.begin_plan("/root", "x").expect("plan");
+    let plan = journal.begin_plan("/root", "x", None).expect("plan");
     let failed = journal
         .begin(&NewOp {
             kind: OpKind::Rename,

@@ -33,12 +33,27 @@ pub use undo::{Undone, invert, undo};
 /// Anything that stops a plan being carried out.
 #[derive(Debug, thiserror::Error)]
 pub enum ExecuteError {
-    /// The folder is not as the plan believed, so the rest of it is guesswork.
+    /// The folder is not as the plan believed, found before anything was
+    /// attempted. Nothing has been changed.
     ///
     /// DESIGN §4: *stale plan → replan, not stale action.*
     #[error("the folder has changed since this plan was made: {what}")]
     Stale {
         /// What was different.
+        what: String,
+    },
+
+    /// The folder stopped being as the plan believed part-way through.
+    ///
+    /// Carries what was done, because the answer to "what now" depends on it:
+    /// those operations are journalled under `plan` and can be taken back.
+    #[error("stopped after {done} operation(s): {what}")]
+    StoppedPartWay {
+        /// The reorganisation, for `undo --plan`.
+        plan: PlanId,
+        /// How many operations had succeeded.
+        done: usize,
+        /// What stopped it.
         what: String,
     },
 
@@ -151,7 +166,7 @@ pub fn apply(
             source,
         })?;
 
-    let id = journal.begin_plan(root, &plan.snapshot)?;
+    let id = journal.begin_plan(root, &plan.snapshot, None)?;
     let mut applied = Applied {
         plan: id,
         done: 0,
@@ -163,8 +178,10 @@ pub fn apply(
     for (index, op) in plan.ops.iter().enumerate() {
         if !same_volume(backend, &token) {
             applied.remaining = plan.ops.len() - index;
-            return Err(ExecuteError::RootChanged {
-                root: root.to_string(),
+            return Err(ExecuteError::StoppedPartWay {
+                plan: id,
+                done: applied.done,
+                what: format!("`{root}` is not the volume this plan was made against"),
             });
         }
 
@@ -179,12 +196,28 @@ pub fn apply(
             Err(error) => {
                 applied.remaining = plan.ops.len() - index;
                 tracing::warn!(?error, done = applied.done, "stopping a plan part-way");
-                return Err(error);
+                return Err(ExecuteError::StoppedPartWay {
+                    plan: id,
+                    done: applied.done,
+                    what: describe_error(&error),
+                });
             }
         }
     }
 
     Ok(applied)
+}
+
+/// An error's whole chain, as one sentence.
+fn describe_error(error: &ExecuteError) -> String {
+    let mut text = error.to_string();
+    let mut source = std::error::Error::source(error);
+    while let Some(next) = source {
+        use std::fmt::Write as _;
+        let _ = write!(text, ": {next}");
+        source = next.source();
+    }
+    text
 }
 
 /// How one operation turned out.

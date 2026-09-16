@@ -97,7 +97,7 @@ pub fn undo(
         what: error.to_string(),
     })?;
 
-    let id = journal.begin_plan(root, &format!("undo of plan {}", plan.0))?;
+    let id = journal.begin_plan(root, &format!("undo of plan {}", plan.0), Some(plan))?;
     let mut done = 0;
     for op in &ops {
         let entry = journal.begin(&NewOp {

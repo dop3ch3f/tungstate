@@ -120,12 +120,18 @@ const MIGRATIONS: &[&str] = &[
     //
     // Additive: `plan_id IS NULL` on every existing row, which reads as "a
     // drain did this, not a reorganisation", and is exactly true.
+    //
+    // `undoes` is what stops "undo the last thing" from undoing the undo and
+    // quietly redoing the reorganisation. An undo is itself a plan -- it has
+    // to be, or its operations would not show up in `log` -- so without this
+    // column the two are indistinguishable from the outside.
     "CREATE TABLE plans (
          id         INTEGER PRIMARY KEY,
          folder     TEXT    NOT NULL,
          snapshot   TEXT    NOT NULL,
          applied_at INTEGER NOT NULL,
-         undone_at  INTEGER
+         undone_at  INTEGER,
+         undoes     INTEGER REFERENCES plans (id)
      );
 
      ALTER TABLE ops ADD COLUMN plan_id INTEGER REFERENCES plans (id);
