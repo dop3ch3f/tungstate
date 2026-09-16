@@ -116,15 +116,20 @@ pub struct Attributes {
     pub now: Timestamp,
 }
 
+/// Split a root-relative path into its directory and its name, both owned.
+fn split(relative_path: &str) -> (String, String) {
+    let trimmed = relative_path.trim_matches('/');
+    match trimmed.rsplit_once('/') {
+        Some((parent, name)) => (parent.to_string(), name.to_string()),
+        None => (String::new(), trimmed.to_string()),
+    }
+}
+
 impl Attributes {
     /// Stat-tier attributes for the file at `relative_path` (forward slashes).
     #[must_use]
     pub fn new(relative_path: &str, size: u64, now: Timestamp) -> Self {
-        let trimmed = relative_path.trim_matches('/');
-        let (parent, name) = match trimmed.rsplit_once('/') {
-            Some((parent, name)) => (parent.to_string(), name.to_string()),
-            None => (String::new(), trimmed.to_string()),
-        };
+        let (parent, name) = split(relative_path);
         Self {
             name,
             parent,
@@ -138,6 +143,18 @@ impl Attributes {
             source: None,
             now,
         }
+    }
+
+    /// Move these attributes to a new root-relative path.
+    ///
+    /// `name` and `parent` follow the move; everything read off the file —
+    /// size, mime, EXIF, hash — does not, because none of it changes when a
+    /// file is renamed. That is what lets a plan be applied to a snapshot on
+    /// paper and the result classified again, with no filesystem involved.
+    pub fn relocate(&mut self, relative_path: &str) {
+        let (parent, name) = split(relative_path);
+        self.parent = parent;
+        self.name = name;
     }
 
     /// The name without its last extension. `archive.tar.gz` gives

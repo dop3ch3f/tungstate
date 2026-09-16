@@ -187,6 +187,29 @@ impl Policy {
         }
     }
 
+    /// Where one file belongs, without the working shown.
+    ///
+    /// The same decision [`Policy::explain`] reaches, and a property test holds
+    /// the two to it. This one stops at the first rule that matches and builds
+    /// no trace, because `explain` deliberately evaluates every rule so it can
+    /// report what reordering would do — the right trade for one file, and
+    /// millions of discarded allocations for a folder of two hundred thousand.
+    #[must_use]
+    pub fn place(&self, attrs: &Attributes) -> Outcome {
+        let file = attrs.relative_path();
+        if let Some(early) = self.pre_rules(attrs, &file) {
+            return early;
+        }
+        for rule in &self.rules {
+            if let Verdict::Matched { captures } = rule.matcher.test(attrs) {
+                return route(rule, attrs, &captures, &file);
+            }
+        }
+        Outcome::Unmatched {
+            inbox: self.folder.inbox.clone(),
+        }
+    }
+
     /// The checks that come before any rule: ignore, symlinks, opaque.
     fn pre_rules(&self, attrs: &Attributes, file: &str) -> Option<Outcome> {
         if let Some(pattern) = self.folder.ignore.first_match_including_ancestors(file) {

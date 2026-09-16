@@ -305,3 +305,112 @@ fn paths_are_relative_with_forward_slashes() {
     let error = gather(&backend, Path::new("missing.txt"), Tier::Stat).unwrap_err();
     assert!(matches!(error, GatherError::Backend { .. }));
 }
+
+/// A folder with everything the survey has to treat differently.
+fn messy() -> tempfile::TempDir {
+    let d = dir();
+    let root = d.path();
+    std::fs::create_dir_all(root.join(".tungstate")).unwrap();
+    std::fs::create_dir_all(root.join("Photos.photoslibrary/inner")).unwrap();
+    std::fs::create_dir_all(root.join("node_modules/pkg")).unwrap();
+    std::fs::create_dir_all(root.join("nested/deep")).unwrap();
+    std::fs::write(root.join(".tungstate/policy.toml"), b"x").unwrap();
+    std::fs::write(root.join("top.txt"), b"top").unwrap();
+    std::fs::write(root.join("nested/deep/buried.txt"), b"buried").unwrap();
+    std::fs::write(root.join("Photos.photoslibrary/inner/p.jpg"), b"p").unwrap();
+    std::fs::write(root.join("node_modules/pkg/index.js"), b"j").unwrap();
+    std::fs::write(root.join(".DS_Store"), b"ds").unwrap();
+    d
+}
+
+fn surveying_policy() -> Policy {
+    Policy::parse(
+        "[folder]\nname = \"x\"\nignore = [\".DS_Store\", \"node_modules\"]\n\
+         opaque = [\"*.photoslibrary\"]\n\n\
+         [[rule]]\nname = \"text\"\npath = \"Text\"\nmatch = { ext = \"txt\" }\n",
+    )
+    .expect("the policy parses")
+    .policy
+}
+
+fn surveyed(d: &tempfile::TempDir) -> Snapshot {
+    let backend = LocalBackend::new(d.path().to_path_buf());
+    survey(&backend, &surveying_policy()).expect("the survey succeeds")
+}
+
+fn paths(snapshot: &Snapshot) -> Vec<String> {
+    snapshot
+        .entries
+        .iter()
+        .map(Attributes::relative_path)
+        .collect()
+}
+
+#[test]
+fn a_survey_never_looks_inside_tungstates_own_directory() {
+    // Not merely ignored by policy: reserved. Otherwise nothing stops a
+    // policy routing its own policy.toml into Documents/.
+    let d = messy();
+    let snapshot = surveyed(&d);
+    assert!(
+        !paths(&snapshot).iter().any(|p| p.starts_with(".tungstate")),
+        "{:?}",
+        paths(&snapshot)
+    );
+    assert!(!snapshot.directories.contains(".tungstate"));
+}
+
+#[test]
+fn an_ignored_directory_is_recorded_but_not_entered() {
+    // Recorded, because a directory that vanished from the snapshot would
+    // look empty to the planner, which would then offer to remove it.
+    let d = messy();
+    let snapshot = surveyed(&d);
+    let paths = paths(&snapshot);
+    assert!(paths.contains(&"node_modules".to_string()));
+    assert!(snapshot.directories.contains("node_modules"));
+    assert!(!paths.iter().any(|p| p.starts_with("node_modules/")));
+}
+
+#[test]
+fn an_opaque_unit_is_one_entry_with_nothing_inside_it() {
+    let d = messy();
+    let snapshot = surveyed(&d);
+    let paths = paths(&snapshot);
+    assert!(paths.contains(&"Photos.photoslibrary".to_string()));
+    assert!(!paths.iter().any(|p| p.starts_with("Photos.photoslibrary/")));
+}
+
+#[test]
+fn a_survey_reaches_every_depth_of_what_it_does_enter() {
+    let d = messy();
+    let paths = paths(&surveyed(&d));
+    assert!(paths.contains(&"nested/deep/buried.txt".to_string()));
+    assert!(paths.contains(&"top.txt".to_string()));
+    // Ignored by name, at any depth, so it is still listed as an entry.
+    assert!(paths.contains(&".DS_Store".to_string()));
+}
+
+#[test]
+fn entries_come_back_sorted_whatever_the_filesystem_said() {
+    let d = messy();
+    let paths = paths(&surveyed(&d));
+    let mut sorted = paths.clone();
+    sorted.sort();
+    assert_eq!(paths, sorted);
+}
+
+#[test]
+fn every_entry_is_stamped_with_one_moment() {
+    // So two files read a microsecond apart cannot answer `age` differently.
+    let d = messy();
+    let snapshot = surveyed(&d);
+    assert!(snapshot.entries.iter().all(|e| e.now == snapshot.taken));
+}
+
+#[test]
+fn a_survey_of_an_unreachable_folder_is_an_error_not_an_empty_folder() {
+    let d = dir();
+    let backend = LocalBackend::new(d.path().join("not-here"));
+    assert!(survey(&backend, &surveying_policy()).is_err());
+}

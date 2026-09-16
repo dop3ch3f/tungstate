@@ -1043,6 +1043,16 @@ proptest! {
     }
 
     #[test]
+    fn the_traceless_decision_is_the_same_decision(path in template(), rename in template(), attrs in attributes()) {
+        // `place` exists only to skip building a trace nobody reads when
+        // classifying a whole folder. The moment it answers differently from
+        // `explain`, what the command line showed you stops being what the
+        // plan does — so the two are held together here rather than by care.
+        let policy = generated_policy(&path, &rename);
+        prop_assert_eq!(policy.place(&attrs), policy.explain(&attrs).outcome);
+    }
+
+    #[test]
     fn a_destination_is_always_relative_and_never_escapes(path in template(), rename in template(), attrs in attributes()) {
         let policy = generated_policy(&path, &rename);
         let trace = policy.explain(&attrs);
@@ -1062,4 +1072,68 @@ proptest! {
             }
         }
     }
+}
+
+#[test]
+fn relocating_keeps_everything_that_was_read_off_the_file() {
+    // The property the paper-apply depends on: a file that moves is the same
+    // file, so its mime, its EXIF and its hash follow it unchanged and only
+    // its name and parent move.
+    let mut attrs = Attributes::new("old/place/clip.mp4", 42, jiff::Timestamp::UNIX_EPOCH);
+    attrs.mime = Some("video/mp4".to_string());
+    attrs.hash = Some("abc123".to_string());
+    let before = attrs.clone();
+
+    attrs.relocate("2026/06/clip.mp4");
+
+    assert_eq!(attrs.parent, "2026/06");
+    assert_eq!(attrs.name, "clip.mp4");
+    assert_eq!(attrs.relative_path(), "2026/06/clip.mp4");
+    assert_eq!(attrs.mime, before.mime);
+    assert_eq!(attrs.hash, before.hash);
+    assert_eq!(attrs.size, before.size);
+}
+
+#[test]
+fn relocating_to_the_root_leaves_no_parent() {
+    let mut attrs = Attributes::new("deep/down/a.txt", 1, jiff::Timestamp::UNIX_EPOCH);
+    attrs.relocate("a.txt");
+    assert_eq!(attrs.parent, "");
+    assert_eq!(attrs.relative_path(), "a.txt");
+}
+
+#[test]
+fn ancestors_are_every_directory_above_a_path_shallowest_first() {
+    use crate::snapshot::ancestors;
+    assert_eq!(ancestors("a/b/c.mp4"), ["a", "a/b"]);
+    assert_eq!(ancestors("c.mp4"), Vec::<String>::new());
+    assert_eq!(ancestors("a/b/c/d"), ["a", "a/b", "a/b/c"]);
+}
+
+#[test]
+fn the_reserved_directory_is_itself_and_everything_under_it() {
+    use crate::snapshot::is_reserved;
+    assert!(is_reserved(".tungstate"));
+    assert!(is_reserved(".tungstate/policy.toml"));
+    assert!(is_reserved(".tungstate/deep/down.toml"));
+    // Not a prefix match on the string: a sibling that merely starts the same
+    // way is an ordinary file.
+    assert!(!is_reserved(".tungstate-quarantine"));
+    assert!(!is_reserved(".tungstaterc"));
+}
+
+#[test]
+fn a_case_insensitive_snapshot_folds_names_together() {
+    use crate::snapshot::Snapshot;
+    use std::collections::BTreeSet;
+    let entries = vec![Attributes::new("A.JPG", 1, jiff::Timestamp::UNIX_EPOCH)];
+    let sensitive = Snapshot::new(
+        jiff::Timestamp::UNIX_EPOCH,
+        entries.clone(),
+        BTreeSet::new(),
+        true,
+    );
+    let folded = Snapshot::new(jiff::Timestamp::UNIX_EPOCH, entries, BTreeSet::new(), false);
+    assert_ne!(sensitive.key("A.JPG"), sensitive.key("a.jpg"));
+    assert_eq!(folded.key("A.JPG"), folded.key("a.jpg"));
 }

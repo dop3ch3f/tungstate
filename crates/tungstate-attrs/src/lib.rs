@@ -5,13 +5,15 @@
 //! never mentions `exif` or `hash` never opens the file at all, and over FTP
 //! a `head` read is one ranged request rather than the whole transfer.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::{Cursor, Read};
 use std::path::Path;
 
 use jiff::Timestamp;
+use tungstate_backend::walk::Walk;
 use tungstate_backend::{Backend, BackendError};
-pub use tungstate_core::{Attributes, Tier};
+pub use tungstate_core::{Attributes, Snapshot, Tier};
+use tungstate_core::{Policy, snapshot};
 
 /// Anything that can stop attributes being gathered.
 #[derive(Debug, thiserror::Error)]
@@ -95,6 +97,73 @@ pub fn gather(backend: &dyn Backend, path: &Path, tier: Tier) -> Result<Attribut
     }
 
     Ok(attrs)
+}
+
+/// Walk a whole folder and gather what `policy` needs about everything in it.
+///
+/// One pass and one `now`: every entry is stamped with the instant the walk
+/// began, so a plan built from this classifies every file as of one moment
+/// rather than as of whenever the walk happened to reach it. The tier is read
+/// from the policy once, so a policy that never mentions `hash` costs a
+/// directory listing and nothing else.
+///
+/// Directories matching `ignore` or `opaque`, and `.tungstate` itself, are
+/// recorded but never descended. Recorded rather than dropped, deliberately:
+/// a directory that vanished from the snapshot would look *empty* to the
+/// planner, which would then offer to remove it.
+///
+/// # Errors
+/// [`GatherError::Backend`] if the walk or any file cannot be read.
+pub fn survey(backend: &dyn Backend, policy: &Policy) -> Result<Snapshot> {
+    let taken = Timestamp::now();
+    let tier = policy.required_tier();
+    let failed = |path: &str| {
+        let path = path.to_string();
+        move |source: BackendError| GatherError::Backend { path, source }
+    };
+
+    let walk = Walk::new(backend, Path::new("")).prune(|entry| {
+        let path = entry.path.to_string_lossy().replace('\\', "/");
+        !snapshot::is_reserved(&path)
+            && policy
+                .folder
+                .ignore
+                .first_match_including_ancestors(&path)
+                .is_none()
+            && policy
+                .folder
+                .opaque
+                .first_match_including_ancestors(&path)
+                .is_none()
+    });
+
+    let mut entries = Vec::new();
+    let mut directories = BTreeSet::new();
+    for entry in walk {
+        let entry = entry.map_err(failed("the folder"))?;
+        let path = entry.path.to_string_lossy().replace('\\', "/");
+        if snapshot::is_reserved(&path) {
+            continue;
+        }
+        if entry.meta.is_dir {
+            directories.insert(path.clone());
+        }
+        // Directories go through `gather` too: it returns early for one at any
+        // tier, so this costs a `stat` and keeps one description of what an
+        // entry is.
+        let mut attrs = gather(backend, &entry.path, tier)?;
+        // `gather` stamps its own `now`, which would leave two files read a
+        // microsecond apart answering `age` differently for no reason.
+        attrs.now = taken;
+        entries.push(attrs);
+    }
+
+    Ok(Snapshot::new(
+        taken,
+        entries,
+        directories,
+        backend.capabilities().case_sensitive,
+    ))
 }
 
 /// The path with forward slashes, as the policy language spells paths.

@@ -16,6 +16,7 @@ pub mod error;
 pub mod grammar;
 pub mod matcher;
 pub mod policy;
+pub mod snapshot;
 pub mod template;
 pub mod vars;
 
@@ -23,6 +24,7 @@ pub use attrs::{Attributes, Tier, Value};
 pub use classify::{Explanation, Outcome, RuleResult, RuleTrace, VarTrace};
 pub use error::{PolicyError, Warning, line_of};
 pub use policy::{Loaded, Mode, Policy, Rule, Symlinks};
+pub use snapshot::Snapshot;
 
 #[cfg(test)]
 mod tests;
