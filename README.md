@@ -20,7 +20,8 @@ prerelease, rebuilt from the same pipeline every time the test suite passes on
 the branch. It moves without warning — use a numbered release for anything you
 want to stay put.
 
-Status: early construction, and two halves work.
+Status: early construction. Files move safely, and the governance half
+can now say what it would do — it just cannot do it yet.
 
 **The durable drain.** `tungstate link add <from> <to> --name x --move` then
 `tungstate link run x`, over a mounted volume or over FTP, resumable after a
@@ -29,8 +30,14 @@ crash and drivable from the desktop app.
 **The policy model.** Declare the shape a folder should have in
 `.tungstate/policy.toml`, then `tungstate explain <file>` says where that file
 belongs and why — every rule in order, every variable's provenance, and what
-reading it cost. Nothing is moved yet; the planner and the executor are the
-next two slices.
+reading it cost.
+
+**The planner.** `tungstate plan` reads a whole folder and prints everything
+that would have to happen for it to match its policy, in an order that can
+actually be carried out — including the temporary name two files need in
+order to trade places. It changes nothing, and it will tell you if your policy
+never settles. `tungstate plan --json` is the same answer for a script.
+Applying a plan is the next slice.
 
 See `docs/DESIGN.md` for the full design and `docs/SYLLABUS.md` for the build
 order.
