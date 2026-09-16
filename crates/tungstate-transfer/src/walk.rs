@@ -1,13 +1,16 @@
-//! Depth-first listing of a backend, and the orderings a link can ask for.
+//! What a drain needs on top of a walk: its own file record, the orderings a
+//! link can ask for, and the tidy-up after a move.
 //!
-//! Lives here rather than on `Backend` because ordering by size needs the whole
-//! list anyway. Bounded by file count, not by content, so a drain of very large
-//! files is cheap to plan. Slice 6 adds a streaming walk for million-file trees.
+//! The walk itself moved to `tungstate_backend::walk` in slice 6, so the
+//! planner could have it without reaching through the transfer engine for a
+//! directory listing. `sort` stayed because it needs `journal::Order`, which
+//! has no business in the backend crate, and `prune_empty` stayed because it
+//! *removes* directories — that is executor work, not walking.
 
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
-use tungstate_backend::Backend;
+use tungstate_backend::{Backend, walk as backend_walk};
 use tungstate_journal::Order;
 
 use crate::Result;
@@ -35,26 +38,20 @@ pub(crate) fn files(backend: &dyn Backend) -> Result<Vec<File>> {
 /// Every regular file beneath `root`, which is itself relative to the backend root.
 pub(crate) fn files_under(backend: &dyn Backend, root: &Path) -> Result<Vec<File>> {
     let mut found = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-
-    while let Some(directory) = pending.pop() {
-        for entry in backend.read_dir(&directory)? {
-            if entry.meta.is_symlink {
-                tracing::debug!(path = %entry.path.display(), "skipping symlink");
-                continue;
-            }
-            if entry.meta.is_dir {
-                pending.push(entry.path);
-            } else {
-                found.push(File {
-                    path: entry.path,
-                    size: entry.meta.len,
-                    modified: entry.meta.modified,
-                });
-            }
+    for entry in backend_walk::Walk::new(backend, root) {
+        let entry = entry?;
+        if entry.meta.is_symlink {
+            tracing::debug!(path = %entry.path.display(), "skipping symlink");
+            continue;
+        }
+        if !entry.meta.is_dir {
+            found.push(File {
+                path: entry.path,
+                size: entry.meta.len,
+                modified: entry.meta.modified,
+            });
         }
     }
-
     Ok(found)
 }
 
@@ -88,14 +85,10 @@ pub(crate) fn sort(files: &mut [File], order: Order) {
 pub(crate) fn prune_empty(backend: &dyn Backend, root: &Path) -> Result<u64> {
     let mut removed = 0;
     let mut directories = Vec::new();
-    let mut pending = vec![root.to_path_buf()];
-
-    while let Some(directory) = pending.pop() {
-        for entry in backend.read_dir(&directory)? {
-            if entry.meta.is_dir && !entry.meta.is_symlink {
-                pending.push(entry.path.clone());
-                directories.push(entry.path);
-            }
+    for entry in backend_walk::Walk::new(backend, root) {
+        let entry = entry?;
+        if entry.meta.is_dir && !entry.meta.is_symlink {
+            directories.push(entry.path);
         }
     }
 

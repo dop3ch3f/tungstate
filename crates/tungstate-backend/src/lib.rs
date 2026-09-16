@@ -10,6 +10,7 @@
 //! property of the code rather than a promise in a comment.
 
 pub mod local;
+pub mod walk;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
