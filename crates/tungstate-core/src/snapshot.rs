@@ -10,11 +10,24 @@ use jiff::Timestamp;
 
 use crate::attrs::Attributes;
 
-/// The directory tungstate keeps its own things in, which it never governs.
+/// Where a file the planner refuses to decide about is parked.
 ///
-/// Reserved independently of the policy's `ignore` list: without this, nothing
-/// stops a policy routing its own `policy.toml` into `Documents/`.
-pub const RESERVED: &str = ".tungstate";
+/// Spelled exactly as `tungstate-transfer` spells it, because a person looking
+/// for something set aside should find one directory whichever half of the
+/// product set it aside. The two definitions are separate only so that the
+/// transfer engine need not depend on the policy model for a string; slice 7
+/// unifies them when the executor forces the question.
+pub const QUARANTINE: &str = ".tungstate-quarantine";
+
+/// The directories tungstate keeps its own things in, which it never governs.
+///
+/// Reserved independently of the policy's `ignore` list, for two different
+/// reasons. Without `.tungstate`, nothing stops a policy routing its own
+/// `policy.toml` into `Documents/`. Without `.tungstate-quarantine`, a file
+/// parked there would be classified again on the next pass and routed straight
+/// back out — so planning would never converge, which is the one property the
+/// whole design rests on.
+pub const RESERVED: [&str; 2] = [".tungstate", QUARANTINE];
 
 /// A folder as one pass over it found it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -83,10 +96,15 @@ impl Snapshot {
     }
 }
 
-/// Whether `path` is `.tungstate` or anything inside it.
+/// Whether `path` is one of the [`RESERVED`] directories, or inside one.
+///
+/// A prefix test on the string alone would catch `.tungstaterc` as well, so
+/// the match is on whole path segments.
 #[must_use]
 pub fn is_reserved(path: &str) -> bool {
-    path == RESERVED || path.starts_with(&format!("{RESERVED}/"))
+    RESERVED
+        .iter()
+        .any(|reserved| path == *reserved || path.starts_with(&format!("{reserved}/")))
 }
 
 /// Every directory above `path`, shallowest first, excluding `path` itself.

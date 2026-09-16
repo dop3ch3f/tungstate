@@ -1116,10 +1116,15 @@ fn the_reserved_directory_is_itself_and_everything_under_it() {
     assert!(is_reserved(".tungstate"));
     assert!(is_reserved(".tungstate/policy.toml"));
     assert!(is_reserved(".tungstate/deep/down.toml"));
+    // Quarantine too, and for a different reason: a file parked there would
+    // otherwise be classified again next pass and routed straight back out,
+    // so planning would never settle.
+    assert!(is_reserved(".tungstate-quarantine"));
+    assert!(is_reserved(".tungstate-quarantine/clip.mp4"));
     // Not a prefix match on the string: a sibling that merely starts the same
     // way is an ordinary file.
-    assert!(!is_reserved(".tungstate-quarantine"));
     assert!(!is_reserved(".tungstaterc"));
+    assert!(!is_reserved(".tungstate-quarantined-notes.txt"));
 }
 
 #[test]

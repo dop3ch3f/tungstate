@@ -49,7 +49,7 @@ regex = "1"
 infer = "0.19"
 # Bundles a tzdb, so `tz = "Africa/Lagos"` means the same thing on every
 # platform rather than whatever the host happens to have installed.
-jiff = "0.2"
+jiff = { version = "0.2", features = ["serde"] }
 kamadak-exif = "0.6"
 
 [workspace.lints.rust]
