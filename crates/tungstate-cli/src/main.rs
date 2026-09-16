@@ -2,6 +2,7 @@
 
 mod connection;
 mod explain;
+mod folder;
 
 use std::path::{Path, PathBuf};
 
