@@ -215,7 +215,7 @@ observe  →  classify  →  diff (desired vs actual)  →  plan  →  execute  
 9. **Opaque bundles.** macOS `.app`, `.photoslibrary`, `.git`, `node_modules`, and anything user-listed are atomic. Reorganising the inside of a git repo is a bug, not a feature.
 
 ### Modes
-- `observe`: scan and report drift; never plan.
+- `observe`: scan and report drift; never **applies**. **Amended in slice 6** from *never plan*: reporting drift *is* planning, since the only way to know a file is misplaced is to compute where it belongs and compare. A mode is a statement about what tungstate may do to your files, and `tungstate plan` does nothing to your files — so honouring the old wording would have made the safest command in the product the most restricted one, and left everyone on the default mode unable to see their drift at all. `Plan` carries the mode so `apply` can refuse without re-reading the policy.
 - `suggest`: plan and surface it (CLI, notification); apply only on approval.
 - `enforce`: apply automatically, subject to the circuit breaker.
 Per-folder default with per-directory override, so a folder can enforce `Photos/` but only suggest for `Projects/`.
@@ -323,7 +323,7 @@ Ordered tie-break, configurable: already at canonical path > older `birthtime` >
 ### What to do with the others — **DECIDED: rich action set, `trash` default**
 - `skip`: leave it, just report.
 - `trash`: move the non-canonical copies to trash. **Default.**
-- `replace`: the *new* arrival wins; the existing canonical file goes to trash and the newcomer takes its place. Useful for "re-exported the video, overwrite the old one."
+- `replace`: the *new* arrival wins; the existing canonical file is **quarantined** and the newcomer takes its place. Useful for "re-exported the video, overwrite the old one." **Amended in slice 6** from *goes to trash*, to match what the drain already shipped and argued (`crates/tungstate-transfer/src/lib.rs:952`: *"Replace is the user's decision about which copy they want, not permission to destroy the other one"*). `--on-conflict replace` on a link and `on_conflict = "replace"` in a policy are the same word offered to the same person about the same situation, so one of the two readings had to go, and the shipped one is the safer. A consequence worth keeping: a slice-6 plan has no `Trash` and no `Delete` op at all, so **nothing it can express removes content**, and §1's *no content is ever lost* is trivially true for it rather than carefully true. `Trash` enters with `on_duplicate` in slice 8, where the default below still stands.
 - `newer-wins` / `larger-wins`: `replace` or `trash` chosen by comparing mtime or size.
 - `hardlink`: replace extras with hard links (same device only). Space reclaimed; editing one edits both. Power users.
 - `reflink`: copy-on-write clone (APFS `clonefile`, btrfs/XFS `FICLONE`, ReFS block clone). Independent files, shared blocks. Falls back to `trash` where unsupported.
