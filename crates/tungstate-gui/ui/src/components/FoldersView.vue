@@ -163,6 +163,16 @@ async function showRules() {
   }
 }
 
+/** A wait in words. Seconds are exact and unreadable past a minute, and this
+    sentence is read by somebody deciding whether to wait or walk away. */
+function waitInWords(secs: number): string {
+  if (secs < 60) return `${secs}s`;
+  const mins = Math.round(secs / 60);
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"}`;
+  const hours = Math.round(secs / 3600);
+  return `${hours} hour${hours === 1 ? "" : "s"}`;
+}
+
 /** One sentence saying what the button would do, before it is pressed. */
 const summary = computed(() => {
   const p = preview.value;
@@ -170,7 +180,9 @@ const summary = computed(() => {
   if (p.tidy && p.waiting > 0) {
     return `Nothing to do yet — ${p.waiting} file${p.waiting === 1 ? "" : "s"} ${
       p.waiting === 1 ? "was" : "were"
-    } written too recently to touch. The longest has ${p.longest_wait}s to wait.`;
+    } written too recently to touch. The longest has ${waitInWords(
+      p.longest_wait,
+    )} to wait.`;
   }
   if (p.tidy) return "This folder already matches its rules. Nothing to do.";
   return `${p.files} of ${p.of} file${p.of === 1 ? "" : "s"} would move (${bytes(p.bytes)}).`;
@@ -222,7 +234,7 @@ const policyPath = computed(() =>
           :aria-current="chosen?.root === folder.root"
         >
           <td><button class="asname" @click="open(folder)"><b>{{ folder.name }}</b></button></td>
-          <td class="addr root">{{ folder.root }}</td>
+          <td class="addr">{{ folder.root }}</td>
           <td>
             <span v-if="folder.broken" class="warn">rules will not load</span>
             <span v-else-if="folder.has_rules">set</span>

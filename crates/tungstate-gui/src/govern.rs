@@ -318,6 +318,21 @@ pub fn layouts() -> Vec<LayoutView> {
         .collect()
 }
 
+/// How many files a finished tidy actually moved.
+///
+/// Deliberately not `Applied::done`: that counts *operations*, and a plan's
+/// operations include the directories it creates and the ones its own moves
+/// empty. Reporting it as files told somebody who had just read "5 of 6 files
+/// would move" that 9 files had moved. `blast.files` is the number the preview
+/// showed, so it is the number the result has to agree with.
+#[must_use]
+pub fn files_moved(plan: &Plan, skipped: usize, failed: usize) -> usize {
+    plan.blast
+        .files
+        .saturating_sub(skipped)
+        .saturating_sub(failed)
+}
+
 /// A folder's name for the list: its own, or the directory's.
 #[must_use]
 pub fn label_for(root: &Path) -> String {
@@ -515,6 +530,39 @@ mod tests {
         let dir = tempfile::tempdir().expect("temp dir");
         assert!(!has_rules(dir.path()));
         assert!(rules_at(dir.path()).is_err());
+    }
+
+    #[test]
+    fn the_count_a_tidy_reports_is_files_and_not_operations() {
+        // The window promised "N of M files would move" and then reported the
+        // operation count, which also counts every directory the plan makes
+        // and every one its moves empty. The two numbers must not be swapped.
+        let dir = messy();
+        let (_, _, plan) = plan_for(dir.path()).expect("plan");
+
+        assert_eq!(plan.blast.files, 1, "only a.txt moves");
+        assert!(
+            plan.ops.len() > plan.blast.files,
+            "this plan also has to create Text/, which is what made the two \
+             numbers differ: {} ops vs {} files",
+            plan.ops.len(),
+            plan.blast.files
+        );
+        assert_eq!(files_moved(&plan, 0, 0), plan.blast.files);
+        assert_ne!(
+            files_moved(&plan, 0, 0),
+            plan.ops.len(),
+            "reporting operations as files is the bug"
+        );
+    }
+
+    #[test]
+    fn a_file_left_behind_is_not_counted_as_moved() {
+        let dir = messy();
+        let (_, _, plan) = plan_for(dir.path()).expect("plan");
+        assert_eq!(files_moved(&plan, 1, 0), 0, "the one mover was skipped");
+        assert_eq!(files_moved(&plan, 0, 1), 0, "or it failed");
+        assert_eq!(files_moved(&plan, 9, 9), 0, "and it never goes negative");
     }
 
     #[test]

@@ -44,6 +44,22 @@ body {
 button, .chrome { user-select: none; }
 :focus-visible { outline: 2px solid var(--fluoresce); outline-offset: 1px; }
 
+/* Type primitives -------------------------------------------------------- */
+
+/* Unscoped on purpose. Monospace used to be decided per table cell
+   (`.ledger .path`, `.conns .addr`, `.row .num` ...), so any new screen showing
+   a path outside a table silently lost it -- and `.mono` was used three times
+   and defined nowhere, surviving only where a `<pre>` made it look deliberate.
+   These two say what a thing *is*: a path, and literal text. Layout that is
+   genuinely about the container stays with the container. */
+.path { font-family: var(--mono); }
+.mono { font-family: var(--mono); }
+
+/* Push what follows to the far side. Was `.topbar .spacer` and
+   `.modal .feet .spacer` only, so the toolbar spacer on the Folders screen
+   matched nothing and its view toggles never moved right. */
+.spacer { margin-left: auto; }
+
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-thumb { background: var(--seam); border-radius: 5px; border: 3px solid transparent; background-clip: content-box; }
 ::-webkit-scrollbar-thumb:hover { background: var(--dust-dim); background-clip: content-box; }
@@ -76,8 +92,6 @@ button, .chrome { user-select: none; }
   margin-left: 6px; font-size: 11px; font-family: var(--mono);
   color: var(--fluoresce); font-variant-numeric: tabular-nums;
 }
-
-.topbar .spacer { margin-left: auto; }
 
 /* Buttons -------------------------------------------------------------- */
 
@@ -225,7 +239,7 @@ button, .chrome { user-select: none; }
   padding: 0 10px 6px 0; border-bottom: 1px solid var(--seam); position: sticky; top: 0; background: var(--ore);
 }
 .ledger td { padding: 5px 10px 5px 0; border-bottom: 1px solid var(--seam-soft); vertical-align: baseline; }
-.ledger .path { font-family: var(--mono); word-break: break-all; }
+.ledger .path { word-break: break-all; }
 .ledger .num { font-family: var(--mono); text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; color: var(--dust); }
 .ledger .detail { color: var(--dust-dim); font-size: 11.5px; }
 /* A path or an address, wherever a ledger shows one. `.conns` narrows this
@@ -326,7 +340,14 @@ button, .chrome { user-select: none; }
 
 /* Notices -------------------------------------------------------------- */
 
-.notice { border-radius: var(--r); padding: 9px 12px; margin: 12px 0; font-size: 12.5px; }
+/* A message the window is giving you, so it gets a container by default. The
+   base used to set only padding, and the three views that raise a bare `note`
+   (Folders, Links, Storage) rendered their confirmation as an indented
+   sentence floating in the page. The modifiers below only re-tint it. */
+.notice {
+  border-radius: var(--r); padding: 9px 12px; margin: 12px 0; font-size: 12.5px;
+  background: var(--ore-lift); border: 1px solid var(--seam);
+}
 .notice.bad { background: rgba(226, 112, 95, 0.09); border: 1px solid rgba(226, 112, 95, 0.35); }
 .notice.calm { background: var(--ore-lift); border: 1px solid var(--seam); color: var(--dust); }
 .notice.good { background: rgba(111, 207, 151, 0.08); border: 1px solid rgba(111, 207, 151, 0.3); }
@@ -359,7 +380,6 @@ button, .chrome { user-select: none; }
   padding: 14px 22px; border-top: 1px solid var(--seam);
   position: sticky; bottom: 0; background: var(--ore-lift);
 }
-.modal .feet .spacer { margin-left: auto; }
 
 /* The route line is the thing to read first in a sync dialog. */
 .route {
@@ -504,6 +524,15 @@ button, .chrome { user-select: none; }
   padding: 12px 14px; font-size: 12px; line-height: 1.5;
   max-height: 52vh; overflow: auto; white-space: pre; margin: 0;
 }
+
+/* The opened folder. Clicking a row opens it below, so the row you opened
+   must not look like the other rows. */
+.ledger tbody tr[aria-current="true"] { background: var(--ore-lift); }
+.ledger tbody tr[aria-current="true"] .asname b { color: var(--fluoresce); }
+
+/* Which of the three views you are reading. `.btn.small` sits outside `.tabs`,
+   so it got none of the tab rule that marks the current one. */
+.btn.small[aria-current="true"] { color: var(--light); background: var(--ore-lift); border-color: var(--dust-dim); }
 
 .sheet h3 { font-size: 13px; font-weight: 600; margin: 0 0 6px; }
 /* Same red `.notice.bad` uses, so "needs attention" is one colour. */

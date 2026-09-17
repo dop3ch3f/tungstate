@@ -159,6 +159,10 @@ that one is a bug in the rules rather than a judgement about scale.
 - **By hand, and this is the real bar:** a messy folder tidied from the window
   with no terminal open, then put back — and every screen looked at, because
   three of the last four screen bugs in this project shipped green.
+  **Met on macOS**: all twelve states seen, eleven defects found and fixed —
+  five of which no test would have caught, including the window reporting
+  "moved 9 file(s)" for five moved files. See §7 of the tour. Linux and Windows
+  are green in CI but have still not been looked at.
 
 ## Tests
 

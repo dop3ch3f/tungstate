@@ -363,7 +363,11 @@ function browseAt(location: string) {
       </select>
     </header>
 
-    <Welcome v-if="onboarding" @begin="onboarding = false" />
+    <!-- Welcome is the empty state of Browse, not of the whole window. Gating
+         the entire tab chain on it left every other tab dead on a fresh
+         install: the tab bar still moved its `aria-current`, so the window
+         said "you are on Folders" while showing onboarding. -->
+    <Welcome v-if="onboarding && tab === 'browse'" @begin="onboarding = false" />
 
     <template v-else-if="tab === 'browse'">
       <div class="browser">

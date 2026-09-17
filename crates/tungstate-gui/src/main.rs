@@ -387,7 +387,8 @@ fn tidy_folder(root: String, state: State<'_, App>) -> Result<String, String> {
     let applied = tungstate_execute::apply(&plan, &snapshot, &backend, &state.journal, &root)
         .map_err(|e| e.to_string())?;
 
-    let mut said = format!("moved {} file(s)", applied.done);
+    let moved = govern::files_moved(&plan, applied.skipped.len(), applied.failed.len());
+    let mut said = format!("moved {moved} file(s)");
     if !applied.skipped.is_empty() {
         let _ = write!(
             said,
@@ -415,7 +416,18 @@ fn put_back(root: String, plan: i64, state: State<'_, App>) -> Result<String, St
         &root,
     )
     .map_err(|e| e.to_string())?;
-    Ok(format!("put {} file(s) back", undone.done))
+    // Same trap as `tidy_folder`: `undone.done` counts operations, and undoing
+    // a plan also recreates the directories it emptied and removes the ones it
+    // made. Only the renames moved a file, so only they are worth counting.
+    let files = state
+        .journal
+        .ops_for_plan(tungstate_journal::plans::PlanId(plan))
+        .map_or(undone.done, |ops| {
+            ops.iter()
+                .filter(|o| o.kind == tungstate_journal::OpKind::Rename)
+                .count()
+        });
+    Ok(format!("put {files} file(s) back"))
 }
 
 #[tauri::command]
