@@ -47,6 +47,31 @@ pub const TEMPLATES: &[Template] = &[
         body: include_str!("../../../policies/documents.toml"),
     },
     Template {
+        name: "media",
+        summary: "Year, app, kind, extension, size",
+        detail: "Five levels, filed the way a camera roll should be: the year, \
+                 which app it came from, whether it is a photo or a video, its \
+                 extension, and how big it is. The app is read from the name \
+                 the app itself gave the file.",
+        body: include_str!("../../../policies/media.toml"),
+    },
+    Template {
+        name: "by-date",
+        summary: "Everything by year, then month",
+        detail: "The plainest shape there is. Uses the camera's own date where \
+                 a photo has one and the file's date where it does not, so a \
+                 photo keeps its real date even after being copied about.",
+        body: include_str!("../../../policies/by-date.toml"),
+    },
+    Template {
+        name: "by-source",
+        summary: "One directory per app it came from",
+        detail: "WhatsApp, Telegram, Screenshots and camera photos each get a \
+                 directory and nothing below it. For a downloads folder, where \
+                 which app put it there matters more than when.",
+        body: include_str!("../../../policies/by-source.toml"),
+    },
+    Template {
         name: "by-type",
         summary: "One directory per file extension",
         detail: "The simplest rule there is, and a good way to see what is \

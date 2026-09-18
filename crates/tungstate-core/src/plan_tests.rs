@@ -828,3 +828,165 @@ fn a_starter_layout_can_be_found_by_name_and_an_unknown_one_cannot() {
     assert!(crate::templates::template("nonsense").is_none());
     assert!(crate::templates::names().contains(&"photos"));
 }
+
+/// A file with the type and date the media layouts actually read.
+///
+/// The shared `folder` helper leaves `mime` and `mtime` unset, which is right
+/// for the layouts that route by extension and useless for the ones that route
+/// by what a file *is* -- against that snapshot they match nothing and settle
+/// vacuously. These layouts need a folder that looks like a real camera roll.
+fn media_folder() -> Snapshot {
+    let file = |path: &str, mime: &str, year: i32, size: u64| {
+        let mut a = at(path, size);
+        a.mime = Some(mime.to_string());
+        a.mtime = Some(
+            format!("{year}-06-01T12:00:00Z")
+                .parse::<Timestamp>()
+                .expect("a timestamp"),
+        );
+        a
+    };
+    let entries = vec![
+        file("IMG-20240312-WA0001.jpg", "image/jpeg", 2024, 40_000),
+        file("VID-20240722-WA0003.mp4", "video/mp4", 2024, 400_000),
+        file("photo_2025-01-04_18-22-11.jpg", "image/jpeg", 2025, 70_000),
+        file(
+            "Screenshot 2026-02-11 at 14.03.22.png",
+            "image/png",
+            2026,
+            900_000,
+        ),
+        file("DSC00042.jpg", "image/jpeg", 2023, 6_000_000),
+        file("notes.txt", "text/plain", 2024, 10),
+    ];
+    let mut directories = BTreeSet::new();
+    for entry in &entries {
+        for ancestor in crate::snapshot::ancestors(&entry.relative_path()) {
+            directories.insert(ancestor);
+        }
+    }
+    Snapshot::new(Timestamp::UNIX_EPOCH, entries, directories, true)
+}
+
+#[test]
+fn the_media_layout_files_five_levels_deep_and_knows_which_app_sent_it() {
+    let policy = policy(crate::templates::template("media").expect("media").body);
+    let plan = policy.plan(&media_folder());
+
+    let moves: Vec<(&str, &str)> = plan
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Move { from, to, .. } => Some((from.as_str(), to.as_str())),
+            _ => None,
+        })
+        .collect();
+
+    for (from, to) in [
+        (
+            "IMG-20240312-WA0001.jpg",
+            "2024/WhatsApp/Photo/jpg/under-100MB/IMG-20240312-WA0001.jpg",
+        ),
+        (
+            "VID-20240722-WA0003.mp4",
+            "2024/WhatsApp/Video/mp4/under-100MB/VID-20240722-WA0003.mp4",
+        ),
+        (
+            "photo_2025-01-04_18-22-11.jpg",
+            "2025/Telegram/Photo/jpg/under-100MB/photo_2025-01-04_18-22-11.jpg",
+        ),
+        (
+            "Screenshot 2026-02-11 at 14.03.22.png",
+            "2026/Screenshots/Photo/png/under-100MB/Screenshot 2026-02-11 at 14.03.22.png",
+        ),
+        // Not from any app this knows: a camera photo, and big enough to land
+        // in a different size band, which is the level that is easiest to get
+        // silently wrong.
+        (
+            "DSC00042.jpg",
+            "2023/Camera/Photo/jpg/under-100MB/DSC00042.jpg",
+        ),
+    ] {
+        assert!(
+            moves.contains(&(from, to)),
+            "expected {from} -> {to}, got {moves:#?}"
+        );
+    }
+
+    // A text file is not media and this layout does not claim it.
+    assert!(
+        !moves.iter().any(|(from, _)| *from == "notes.txt"),
+        "{moves:#?}"
+    );
+}
+
+#[test]
+fn the_media_layout_settles_on_a_folder_it_has_already_filed() {
+    // A five-level path is five chances to write a rule that reads back
+    // something it did not write. The name is the only level not recomputed
+    // from the file, which is exactly why the app is read from the name.
+    let snap = media_folder();
+    let policy = policy(crate::templates::template("media").expect("media").body);
+    let plan = policy.plan(&snap);
+    assert!(plan.settles, "{:?}", plan.unsettled);
+
+    let after = plan.apply_to(&snap).expect("executable");
+    assert!(
+        policy.plan(&after).ops.is_empty(),
+        "still work to do after filing: {:#?}",
+        policy.plan(&after).ops
+    );
+}
+
+#[test]
+fn by_source_puts_a_whatsapp_photo_under_whatsapp_and_not_under_camera() {
+    // `IMG-20240312-WA0001.jpg` matches the camera rule too. Rule order is the
+    // only thing that decides it, so it is asserted rather than assumed.
+    let policy = policy(
+        crate::templates::template("by-source")
+            .expect("by-source")
+            .body,
+    );
+    let plan = policy.plan(&media_folder());
+    let moved: Vec<(&str, &str)> = plan
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Move { from, to, .. } => Some((from.as_str(), to.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        moved.contains(&(
+            "IMG-20240312-WA0001.jpg",
+            "WhatsApp/IMG-20240312-WA0001.jpg"
+        )),
+        "{moved:#?}"
+    );
+    assert!(
+        moved.contains(&("DSC00042.jpg", "Camera/DSC00042.jpg")),
+        "{moved:#?}"
+    );
+}
+
+#[test]
+fn by_date_files_everything_it_can_date_and_leaves_the_rest() {
+    let policy = policy(crate::templates::template("by-date").expect("by-date").body);
+    let plan = policy.plan(&media_folder());
+    let moved: Vec<&str> = plan
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Move { to, .. } => Some(to.as_str()),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        moved.contains(&"2024/06/IMG-20240312-WA0001.jpg"),
+        "{moved:#?}"
+    );
+    assert!(moved.contains(&"2023/06/DSC00042.jpg"), "{moved:#?}");
+    // `glob = ["**"]` has to reach a file at the top of the folder, which is
+    // the one place a `**` pattern is easy to get wrong.
+    assert!(moved.contains(&"2024/06/notes.txt"), "{moved:#?}");
+}

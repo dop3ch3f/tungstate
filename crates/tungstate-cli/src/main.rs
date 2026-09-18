@@ -204,6 +204,13 @@ enum FolderAction {
         #[arg(long)]
         improved: bool,
     },
+    /// Show what every starting layout would do to a folder, side by side.
+    ///
+    /// Changes nothing.
+    Compare {
+        /// The folder to try them against.
+        path: String,
+    },
     /// Stop governing a folder. Its rules and its history are untouched.
     Remove {
         /// Path to the folder to forget.
@@ -320,6 +327,7 @@ fn main() -> std::process::ExitCode {
                 write,
                 improved,
             } => folders::learn(&path, write, improved),
+            FolderAction::Compare { path } => folders::compare(&path),
             FolderAction::Remove { path } => folders::remove(&path),
         },
         Command::Init { path, template } => folders::init(path.as_deref(), template.as_deref()),

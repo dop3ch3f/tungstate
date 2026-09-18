@@ -1,0 +1,71 @@
+# Media, filed the way a phone's camera roll should have been.
+#
+# Year, then which app it came from, then what it is, then its extension,
+# then how big it is. Five levels, and every one of them is answered by the
+# file itself: the app comes from the name the app gave it, which is the one
+# thing about a file that does not change when the file moves.
+
+[folder]
+name = "media"
+ignore = [".DS_Store", "Thumbs.db", "*.part", "*.crdownload", "*.download"]
+opaque = ["*.photoslibrary", "*.app"]
+
+[defaults]
+cooldown = "30s"
+on_conflict = "rename"
+
+# Specific senders first: a WhatsApp photo is also named like a camera photo,
+# and the first rule that matches wins.
+
+[[rule]]
+name = "whatsapp-photos"
+path = "{date:%Y}/WhatsApp/Photo/{ext}/{band}"
+match = { mime = "image/*", regex = "-WA[0-9]+\\." }
+vars.date = { from = ["exif.DateTimeOriginal", "mtime"] }
+vars.band = { from = "size", bucket = ["<100MB", "100MB-500MB", "500MB-1GB", ">1GB"] }
+
+[[rule]]
+name = "whatsapp-video"
+path = "{date:%Y}/WhatsApp/Video/{ext}/{band}"
+match = { mime = "video/*", regex = "-WA[0-9]+\\." }
+vars.date = { from = ["exif.DateTimeOriginal", "mtime"] }
+vars.band = { from = "size", bucket = ["<100MB", "100MB-500MB", "500MB-1GB", ">1GB"] }
+
+[[rule]]
+name = "telegram-photos"
+path = "{date:%Y}/Telegram/Photo/{ext}/{band}"
+match = { mime = "image/*", regex = "^photo_[0-9]{4}-[0-9]{2}-[0-9]{2}" }
+vars.date = { from = ["exif.DateTimeOriginal", "mtime"] }
+vars.band = { from = "size", bucket = ["<100MB", "100MB-500MB", "500MB-1GB", ">1GB"] }
+
+[[rule]]
+name = "telegram-video"
+path = "{date:%Y}/Telegram/Video/{ext}/{band}"
+match = { mime = "video/*", regex = "^video_[0-9]{4}-[0-9]{2}-[0-9]{2}" }
+vars.date = { from = ["exif.DateTimeOriginal", "mtime"] }
+vars.band = { from = "size", bucket = ["<100MB", "100MB-500MB", "500MB-1GB", ">1GB"] }
+
+[[rule]]
+name = "screenshots"
+path = "{date:%Y}/Screenshots/Photo/{ext}/{band}"
+match = { mime = "image/*", regex = "^(Screenshot|Screen Shot|Bildschirmfoto)[ _-]" }
+vars.date = { from = "mtime" }
+vars.band = { from = "size", bucket = ["<100MB", "100MB-500MB", "500MB-1GB", ">1GB"] }
+
+# Everything else that is a photo or a video. `Camera` rather than `Other`
+# because that is what it usually is, and a directory called Other is where
+# things go to be forgotten.
+
+[[rule]]
+name = "camera-photos"
+path = "{date:%Y}/Camera/Photo/{ext}/{band}"
+match = { mime = "image/*" }
+vars.date = { from = ["exif.DateTimeOriginal", "mtime"] }
+vars.band = { from = "size", bucket = ["<100MB", "100MB-500MB", "500MB-1GB", ">1GB"] }
+
+[[rule]]
+name = "camera-video"
+path = "{date:%Y}/Camera/Video/{ext}/{band}"
+match = { mime = "video/*" }
+vars.date = { from = ["exif.DateTimeOriginal", "mtime"] }
+vars.band = { from = "size", bucket = ["<100MB", "100MB-500MB", "500MB-1GB", ">1GB"] }

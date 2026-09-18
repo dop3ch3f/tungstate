@@ -1,0 +1,19 @@
+# Everything by when it was made: a year, then a month inside it.
+#
+# The plainest shape there is, and the one most people already have in their
+# heads. Uses the camera's own date where a photo has one, so a photo keeps
+# its real date even after being copied about.
+
+[folder]
+name = "by-date"
+ignore = [".DS_Store", "Thumbs.db", "*.part", "*.crdownload"]
+
+[defaults]
+cooldown = "30s"
+on_conflict = "rename"
+
+[[rule]]
+name = "everything"
+path = "{date:%Y}/{date:%m}"
+match = { glob = ["**"] }
+vars.date = { from = ["exif.DateTimeOriginal", "mtime"] }

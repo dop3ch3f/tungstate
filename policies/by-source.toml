@@ -1,0 +1,35 @@
+# One directory per place a file came from, and nothing below it.
+#
+# For a downloads folder, where what matters is which app put it there rather
+# than when. Read from the name each app gives its own files.
+
+[folder]
+name = "by-source"
+ignore = [".DS_Store", "Thumbs.db", "*.part", "*.crdownload"]
+
+[defaults]
+cooldown = "30s"
+on_conflict = "rename"
+
+# WhatsApp before Camera: a WhatsApp photo is named like a camera photo too,
+# and the first rule that matches is the one that takes it.
+
+[[rule]]
+name = "whatsapp"
+path = "WhatsApp"
+match = { regex = "-WA[0-9]+\\." }
+
+[[rule]]
+name = "telegram"
+path = "Telegram"
+match = { regex = "^(photo|video)_[0-9]{4}-[0-9]{2}-[0-9]{2}" }
+
+[[rule]]
+name = "screenshots"
+path = "Screenshots"
+match = { regex = "^(Screenshot|Screen Shot|Bildschirmfoto)[ _-]" }
+
+[[rule]]
+name = "camera"
+path = "Camera"
+match = { regex = "^(IMG|DSC|DSCN|DJI|GOPR|PXL)[-_]?[0-9]+" }

@@ -258,3 +258,86 @@ pub fn learn(path: &str, write: bool, improved: bool) -> ExitCode {
     println!("nothing has moved. `tungstate plan {path}` says what these rules would do.");
     ExitCode::SUCCESS
 }
+
+/// `tungstate folder compare <PATH>`.
+///
+/// What each starting layout would do to this folder, side by side, including
+/// the rules it already has. Changes nothing.
+///
+/// The folder is walked **once** and every layout planned against that one
+/// snapshot. That is safe because `classify` applies each policy's own
+/// `ignore` when it plans rather than only when it walks, so a shared walk
+/// does not let one layout's ignore list leak into another's answer.
+pub fn compare(path: &str) -> ExitCode {
+    let Ok(root) = Path::new(path).canonicalize() else {
+        eprintln!("error: cannot read `{path}`");
+        return ExitCode::FAILURE;
+    };
+
+    let probe = tungstate_core::policy::Policy::parse(tungstate_core::learn::PROBE)
+        .expect("the probe policy parses")
+        .policy;
+    let backend = tungstate_backend::local::LocalBackend::new(root.clone());
+    let snapshot = match tungstate_attrs::survey(&backend, &probe) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return crate::fail(&error),
+    };
+    let files = snapshot.entries.iter().filter(|e| !e.is_dir).count();
+
+    println!("folder at {}", root.display());
+    println!("  {files} file(s), walked once and shown against each layout\n");
+
+    // What they have now goes first, so every other line is read as a change
+    // from it rather than from nothing.
+    let mut rows: Vec<(String, Option<String>)> = Vec::new();
+    let existing = root.join(POLICY_RELATIVE);
+    if existing.is_file() {
+        match std::fs::read_to_string(&existing) {
+            Ok(text) => rows.push(("(the rules you have)".to_string(), Some(text))),
+            Err(error) => eprintln!("warning: cannot read {}: {error}", existing.display()),
+        }
+    }
+    for template in TEMPLATES {
+        rows.push((template.name.to_string(), Some(template.body.to_string())));
+    }
+
+    for (name, body) in rows {
+        let Some(body) = body else { continue };
+        let Ok(loaded) = tungstate_core::policy::Policy::parse(&body) else {
+            println!("  {name:<22} these rules will not load");
+            continue;
+        };
+        let plan = loaded.policy.plan(&snapshot);
+        let moves: Vec<(&str, &str)> = plan
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                tungstate_core::plan::Op::Move { from, to, .. } => {
+                    Some((from.as_str(), to.as_str()))
+                }
+                _ => None,
+            })
+            .collect();
+
+        if !plan.settles {
+            println!(
+                "  {name:<22} never settles — {} file(s) would move for ever",
+                plan.unsettled.len()
+            );
+            continue;
+        }
+        println!(
+            "  {name:<22} {} of {files} would move, {} dir(s) made, {} removed",
+            plan.blast.files, plan.blast.created, plan.blast.removed
+        );
+        // One real example, because a count does not tell you whether you would
+        // like the answer.
+        if let Some((from, to)) = moves.first() {
+            println!("  {:<22}   e.g. {from} → {to}", "");
+        } else {
+            println!("  {:<22}   nothing would change", "");
+        }
+    }
+    println!("\nnothing has moved. `tungstate init --template <NAME> {path}` picks one.");
+    ExitCode::SUCCESS
+}

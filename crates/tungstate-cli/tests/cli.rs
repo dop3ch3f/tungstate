@@ -1649,3 +1649,47 @@ fn learning_a_folder_writes_rules_that_leave_it_exactly_as_it_was() {
         .failure()
         .stderr(predicates::str::contains("already has rules"));
 }
+
+#[test]
+fn compare_shows_every_layout_against_one_folder_and_changes_nothing() {
+    let home = sandbox();
+    let root = home.path().join("media");
+    already_organised(&root);
+
+    sandboxed(&home)
+        .args(["folder", "compare"])
+        .arg(&root)
+        .assert()
+        .success()
+        // Every built-in layout gets a line, including the two that would
+        // undo the shape this folder is already in.
+        .stdout(predicates::str::contains("media"))
+        .stdout(predicates::str::contains("by-date"))
+        .stdout(predicates::str::contains("by-source"))
+        .stdout(predicates::str::contains("by-type"))
+        .stdout(predicates::str::contains("downloads"))
+        .stdout(predicates::str::contains("nothing has moved"));
+
+    // Nothing was written and nothing moved.
+    assert!(!root.join(".tungstate/policy.toml").exists());
+    assert!(
+        root.join("2024/WhatsApp/Photo/jpg/under-100MB/a.jpg")
+            .exists(),
+        "compare must not touch the folder"
+    );
+
+    // With rules in place, the rules you already have are the first row, so
+    // every other line reads as a change from them rather than from nothing.
+    sandboxed(&home)
+        .args(["folder", "learn", "--write"])
+        .arg(&root)
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["folder", "compare"])
+        .arg(&root)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("(the rules you have)"))
+        .stdout(predicates::str::contains("nothing would change"));
+}
