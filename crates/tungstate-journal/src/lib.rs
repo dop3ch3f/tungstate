@@ -724,7 +724,7 @@ pub(crate) fn path_str(path: &Path) -> String {
 /// does exist and put the rest of the path back on the end.
 #[must_use]
 pub fn resolve_for_lookup(path: &Path) -> PathBuf {
-    if let Ok(real) = path.canonicalize() {
+    if let Some(real) = canonical(path) {
         return real;
     }
     let mut tail: Vec<std::ffi::OsString> = Vec::new();
@@ -734,7 +734,7 @@ pub fn resolve_for_lookup(path: &Path) -> PathBuf {
             break;
         };
         tail.push(name);
-        if let Ok(real) = parent.canonicalize() {
+        if let Some(real) = canonical(&parent) {
             let mut out = real;
             for part in tail.iter().rev() {
                 out.push(part);
@@ -744,6 +744,33 @@ pub fn resolve_for_lookup(path: &Path) -> PathBuf {
         here = parent;
     }
     path.to_path_buf()
+}
+
+/// `canonicalize`, with Windows's verbatim prefix taken back off.
+fn canonical(path: &Path) -> Option<PathBuf> {
+    let real = path.canonicalize().ok()?;
+    let text = real.to_string_lossy();
+    match without_verbatim_prefix(&text) {
+        stripped if stripped.len() == text.len() => Some(real.clone()),
+        stripped => Some(PathBuf::from(stripped)),
+    }
+}
+
+/// Windows's `canonicalize` answers with a verbatim path — `\\?\C:\media` —
+/// and no journal row is ever spelled that way, so a resolved path carrying
+/// the prefix could never match one and the whole fallback would be dead
+/// weight on Windows.
+///
+/// A UNC verbatim path is left alone: `\\?\UNC\server\share` does not mean
+/// `UNC\server\share`, and stripping it would change which machine it names.
+///
+/// Free of `cfg!` so both answers are testable from either platform, as
+/// [`separators_as_slashes`] already is.
+fn without_verbatim_prefix(text: &str) -> &str {
+    match text.strip_prefix(r"\\?\") {
+        Some(rest) if !rest.starts_with(r"UNC\") => rest,
+        _ => text,
+    }
 }
 
 pub(crate) fn path_needle(path: &Path) -> String {

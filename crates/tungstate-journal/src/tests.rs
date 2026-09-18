@@ -1733,7 +1733,38 @@ fn a_lookup_path_is_resolved_even_when_the_file_is_gone() {
         "a path that no longer exists still resolves through its parents"
     );
 
-    // Nothing resolvable at all is returned unchanged rather than mangled.
+    // Nothing resolvable: whatever happens to the prefix, the path's own
+    // components survive. Asserted as a tail rather than as equality because
+    // on Windows a leading `/` names the current drive root, which *is*
+    // resolvable -- so the prefix legitimately differs there and only the
+    // tail is common to both platforms.
     let nowhere = std::path::Path::new("/no/such/root/at/all.txt");
-    assert_eq!(crate::resolve_for_lookup(nowhere), nowhere);
+    let resolved = crate::resolve_for_lookup(nowhere);
+    assert!(
+        resolved.ends_with("no/such/root/at/all.txt"),
+        "an unresolvable path came back mangled: {}",
+        resolved.display()
+    );
+}
+
+/// Windows's `canonicalize` answers with a verbatim path, and no journal row
+/// is ever spelled that way -- so without this the resolved form could never
+/// match a stored one and the fallback would be dead weight on Windows.
+#[test]
+fn a_verbatim_windows_prefix_is_taken_back_off_but_a_unc_one_is_not() {
+    assert_eq!(
+        crate::without_verbatim_prefix(r"\\?\C:\media\a.jpg"),
+        r"C:\media\a.jpg"
+    );
+    // `\\?\UNC\server\share` does not mean `UNC\server\share`; stripping it
+    // would change which machine the path names.
+    assert_eq!(
+        crate::without_verbatim_prefix(r"\\?\UNC\server\share\a.jpg"),
+        r"\\?\UNC\server\share\a.jpg"
+    );
+    // A path that never had one is untouched.
+    assert_eq!(
+        crate::without_verbatim_prefix("/media/a.jpg"),
+        "/media/a.jpg"
+    );
 }
