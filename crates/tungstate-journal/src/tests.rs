@@ -1703,3 +1703,37 @@ fn a_folder_can_be_found_by_its_root() {
         Err(JournalError::UnknownFolder(_))
     ));
 }
+
+/// A journal row stores the canonical root; somebody types the path they know.
+/// On macOS `/tmp` is a symlink to `/private/tmp`, so the two spellings are the
+/// same file and the lookup answered "no matching operations" for a file with a
+/// full history.
+#[test]
+fn a_lookup_path_is_resolved_even_when_the_file_is_gone() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let real = dir.path().canonicalize().expect("canonical temp dir");
+
+    // A file that exists resolves outright.
+    let here = dir.path().join("present.txt");
+    std::fs::write(&here, b"x").unwrap();
+    assert_eq!(
+        crate::resolve_for_lookup(&here),
+        real.join("present.txt"),
+        "an existing file resolves to its canonical path"
+    );
+
+    // The case that matters: `whereis` is most useful about a file that has
+    // already moved, so the old name no longer exists and cannot be
+    // canonicalised at all. The deepest ancestor that does exist is resolved
+    // and the rest put back on.
+    let gone = dir.path().join("subdir/deeper/moved-away.jpg");
+    assert_eq!(
+        crate::resolve_for_lookup(&gone),
+        real.join("subdir/deeper/moved-away.jpg"),
+        "a path that no longer exists still resolves through its parents"
+    );
+
+    // Nothing resolvable at all is returned unchanged rather than mangled.
+    let nowhere = std::path::Path::new("/no/such/root/at/all.txt");
+    assert_eq!(crate::resolve_for_lookup(nowhere), nowhere);
+}

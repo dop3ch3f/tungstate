@@ -576,12 +576,28 @@ impl Journal {
     /// # Errors
     /// [`JournalError::Query`] if the rows cannot be read.
     pub fn history(&self, path: &Path) -> Result<Vec<Op>> {
-        let needle = path_needle(path);
-        self.select(
-            &format!("SELECT * FROM ops WHERE {} ORDER BY id", matches_path()),
-            rusqlite::params![needle],
-            "reading the history of a path",
-        )
+        let sql = format!("SELECT * FROM ops WHERE {} ORDER BY id", matches_path());
+        let ask = |needle: String| {
+            self.select(
+                &sql,
+                rusqlite::params![needle],
+                "reading the history of a path",
+            )
+        };
+        // Both spellings, because rows are stored in whichever form the caller
+        // used when they were written -- `folder add` canonicalises its root
+        // and a link does not -- and on macOS `/tmp` and `/var` are symlinks,
+        // so one spelling silently matches nothing. Neither form can be
+        // preferred, so both are tried; see `resolve_for_lookup`.
+        let first = ask(path_needle(path))?;
+        if !first.is_empty() {
+            return Ok(first);
+        }
+        let resolved = resolve_for_lookup(path);
+        if resolved == path {
+            return Ok(first);
+        }
+        ask(path_needle(&resolved))
     }
 
     /// The most recent operations, newest first.
@@ -611,16 +627,24 @@ impl Journal {
                 "locating by hash",
             ),
             Locator::Path(path) => {
-                let needle = path_needle(path);
-                self.select(
-                    &format!(
-                        "SELECT * FROM ops WHERE status = 'committed' AND ({})
-                         ORDER BY id DESC",
-                        matches_path()
-                    ),
-                    rusqlite::params![needle],
-                    "locating by path",
-                )
+                let sql = format!(
+                    "SELECT * FROM ops WHERE status = 'committed' AND ({})
+                     ORDER BY id DESC",
+                    matches_path()
+                );
+                let ask = |needle: String| {
+                    self.select(&sql, rusqlite::params![needle], "locating by path")
+                };
+                // Both spellings, for the reason `history` gives.
+                let first = ask(path_needle(path))?;
+                if !first.is_empty() {
+                    return Ok(first);
+                }
+                let resolved = resolve_for_lookup(path);
+                if resolved == *path {
+                    return Ok(first);
+                }
+                ask(path_needle(&resolved))
             }
         }
     }
@@ -686,6 +710,42 @@ pub(crate) fn path_str(path: &Path) -> String {
 /// Not done on Unix, where a backslash is an ordinary character in a filename:
 /// normalising there would make `a\b.mp4` and `a/b.mp4` compare equal, which
 /// is two different files answering to one name.
+/// The path to look a file up by.
+///
+/// A journal row stores the root as it was canonicalised when the folder was
+/// governed — `/private/tmp/media` — and somebody asking about it types
+/// `/tmp/media`, because on macOS `/tmp` is a symlink. The two are plainly the
+/// same file and the lookup missed, silently, answering "no matching
+/// operations" for a file with a full history.
+///
+/// `canonicalize` on its own will not do: the most useful question `whereis`
+/// answers is about a file that has *moved*, whose old path no longer exists
+/// and cannot be canonicalised at all. So resolve the deepest ancestor that
+/// does exist and put the rest of the path back on the end.
+#[must_use]
+pub fn resolve_for_lookup(path: &Path) -> PathBuf {
+    if let Ok(real) = path.canonicalize() {
+        return real;
+    }
+    let mut tail: Vec<std::ffi::OsString> = Vec::new();
+    let mut here = path.to_path_buf();
+    while let Some(parent) = here.parent().map(Path::to_path_buf) {
+        let Some(name) = here.file_name().map(std::ffi::OsStr::to_os_string) else {
+            break;
+        };
+        tail.push(name);
+        if let Ok(real) = parent.canonicalize() {
+            let mut out = real;
+            for part in tail.iter().rev() {
+                out.push(part);
+            }
+            return out;
+        }
+        here = parent;
+    }
+    path.to_path_buf()
+}
+
 pub(crate) fn path_needle(path: &Path) -> String {
     separators_as_slashes(&path.to_string_lossy(), cfg!(windows))
 }

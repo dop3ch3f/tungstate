@@ -1402,7 +1402,9 @@ fn names_summary(request: &TransferRequest) -> String {
 fn history(path: String, state: State<'_, App>) -> Result<Vec<OpView>, String> {
     state
         .journal
-        .history(std::path::Path::new(&path))
+        .history(&tungstate_journal::resolve_for_lookup(
+            std::path::Path::new(&path),
+        ))
         .map(|ops| {
             ops.iter()
                 .map(|op| OpView::of(op, &state.journal))
