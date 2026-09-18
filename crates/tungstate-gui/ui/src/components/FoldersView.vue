@@ -1,6 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
-import { api, bytes, type FolderView, type LayoutView, type PreviewView } from "../api";
+import {
+  api,
+  bytes,
+  type FolderView,
+  type LayoutView,
+  type PreviewView,
+  type TidyDone,
+} from "../api";
 
 /// Plain words on screen, precise ones underneath: a policy is "rules", a plan
 /// is a "preview", applying is "tidying up". The glossary is in the tour.
@@ -69,6 +76,24 @@ async function open(folder: FolderView) {
   await look();
 }
 
+/** `1 file` / `3 files`, so no sentence here says "file(s)". */
+function files(n: number): string {
+  return `${n} file${n === 1 ? "" : "s"}`;
+}
+
+/** What a finished tidy says, worded here rather than handed over as prose.
+    The window receives counts, so it can put the number where it likes and
+    still be rewritten without touching Rust. */
+function saidOfTidy(done: TidyDone): string {
+  if (done.already_tidy) return "There was nothing to do.";
+  const parts = [`Moved ${files(done.moved)}.`];
+  if (done.skipped > 0) {
+    parts.push(`Left ${files(done.skipped)} alone — they changed while we looked.`);
+  }
+  if (done.failed > 0) parts.push(`${files(done.failed)} could not be moved.`);
+  return parts.join(" ");
+}
+
 /** Work out what the rules would do. Changes nothing. */
 async function look() {
   if (!chosen.value) return;
@@ -111,7 +136,7 @@ async function tidy() {
   error.value = "";
   note.value = "";
   try {
-    note.value = await api.tidyFolder(chosen.value.root);
+    note.value = saidOfTidy(await api.tidyFolder(chosen.value.root));
     await look();
   } catch (e) {
     error.value = String(e);
@@ -126,7 +151,8 @@ async function putBack() {
   error.value = "";
   note.value = "";
   try {
-    note.value = await api.putBack(chosen.value.root, preview.value.undoable);
+    const done = await api.putBack(chosen.value.root, preview.value.undoable);
+    note.value = `Put ${files(done.files)} back where they were.`;
     await look();
   } catch (e) {
     error.value = String(e);

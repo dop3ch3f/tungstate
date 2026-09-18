@@ -255,6 +255,46 @@ export interface Accepted {
   waiting: number;
 }
 
+
+/** What a tidy did. Numbers, so the window words the result itself. */
+export type TidyDone = {
+  moved: number;
+  skipped: number;
+  failed: number;
+  /** Nothing to do, which is not the same as having moved none. */
+  already_tidy: boolean;
+};
+
+export type PutBackDone = { files: number };
+
+/** A folder's own shape, read back out of it. */
+export type Learned = {
+  /** One word per level, outermost first. */
+  levels: string[];
+  explains: number;
+  of: number;
+  loose: number;
+  as_is: string;
+  improved: string | null;
+  suggestions: { headline: string; why: string }[];
+};
+
+/** What one layout would do to this folder. */
+export type Outcome = {
+  name: string;
+  summary: string;
+  loads: boolean;
+  settles: boolean;
+  files: number;
+  of: number;
+  bytes: number;
+  created: number;
+  /** Directories it would remove: the number that says a layout is replacing
+      a shape rather than adding one. */
+  removed: number;
+  example: { from: string; to: string } | null;
+};
+
 export const api = {
   previewTransfer: (request: TransferRequest) => invoke<Preview>("preview_transfer", { request }),
   browse: (path: string) => invoke<Listing>("browse", { path }),
@@ -270,8 +310,10 @@ export const api = {
   giveRules: (root: string, layout: string) => invoke<void>("give_rules", { root, layout }),
   rulesText: (root: string) => invoke<string>("rules_text", { root }),
   folderPreview: (root: string) => invoke<PreviewView>("folder_preview", { root }),
-  tidyFolder: (root: string) => invoke<string>("tidy_folder", { root }),
-  putBack: (root: string, plan: number) => invoke<string>("put_back", { root, plan }),
+  tidyFolder: (root: string) => invoke<TidyDone>("tidy_folder", { root }),
+  putBack: (root: string, plan: number) => invoke<PutBackDone>("put_back", { root, plan }),
+  learnFolder: (root: string) => invoke<Learned>("learn_folder", { root }),
+  compareFolder: (root: string) => invoke<Outcome[]>("compare_folder", { root }),
   pickFolder: () => invoke<string | null>("pick_folder"),
   links: () => invoke<Link[]>("list_links"),
   createLink: (form: NewLink) => invoke<void>("create_link", { form }),

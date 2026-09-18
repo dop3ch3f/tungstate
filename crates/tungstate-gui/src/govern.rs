@@ -318,6 +318,121 @@ pub fn layouts() -> Vec<LayoutView> {
         .collect()
 }
 
+/// What a tidy did, as numbers the window words for itself.
+///
+/// Numbers rather than a sentence on purpose. The window used to receive
+/// `"moved 5 file(s)"` and could only print it — no way to show the 5 large,
+/// or to put an undo beside it, or to say it differently, without changing
+/// Rust. A screen that cannot restyle its own results is a screen that cannot
+/// be redesigned.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct TidyDone {
+    /// Files that moved.
+    pub moved: usize,
+    /// Files left where they were because they changed while we looked.
+    pub skipped: usize,
+    /// Files that could not be moved.
+    pub failed: usize,
+    /// True when there was nothing to do, which is not the same as moving none.
+    pub already_tidy: bool,
+}
+
+/// What putting a folder back did.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct PutBackDone {
+    /// Files returned to where they were.
+    pub files: usize,
+}
+
+/// A folder's shape as the window shows it.
+#[derive(Debug, Clone, Serialize)]
+pub struct LearnedView {
+    /// One word per level, outermost first: year, name, kind, extension, size.
+    pub levels: Vec<String>,
+    /// Files the shape accounts for.
+    pub explains: usize,
+    /// Files looked at.
+    pub of: usize,
+    /// Files sitting loose at the top.
+    pub loose: usize,
+    /// Rules that keep the shape it already has.
+    pub as_is: String,
+    /// The same rules with every suggestion applied, when there are any.
+    pub improved: Option<String>,
+    /// What would be better, and by how much.
+    pub suggestions: Vec<SuggestionView>,
+}
+
+/// One suggestion, and the counts that justify it.
+#[derive(Debug, Clone, Serialize)]
+pub struct SuggestionView {
+    /// What to do, in plain words.
+    pub headline: String,
+    /// The counts behind it. Never an opinion on its own.
+    pub why: String,
+}
+
+impl LearnedView {
+    fn of(learned: &tungstate_core::learn::Learned) -> Self {
+        Self {
+            levels: learned
+                .levels
+                .iter()
+                .map(|l| l.word().to_string())
+                .collect(),
+            explains: learned.explains,
+            of: learned.of,
+            loose: learned.loose,
+            as_is: learned.as_is.clone(),
+            improved: learned.improved.clone(),
+            suggestions: learned
+                .suggestions
+                .iter()
+                .map(|s| SuggestionView {
+                    headline: s.headline.clone(),
+                    why: s.why.clone(),
+                })
+                .collect(),
+        }
+    }
+}
+
+/// Read the shape a folder already has.
+///
+/// # Errors
+/// A sentence, if the folder cannot be walked.
+pub fn learn(root: &Path) -> Result<LearnedView, String> {
+    let snapshot = probe_survey(root)?;
+    let name = label_for(root);
+    Ok(LearnedView::of(&tungstate_core::learn::learn(
+        &snapshot, &name,
+    )))
+}
+
+/// What every starting layout would do to this folder.
+///
+/// # Errors
+/// A sentence, if the folder cannot be walked.
+pub fn compare(root: &Path) -> Result<Vec<tungstate_core::compare::Outcome>, String> {
+    let snapshot = probe_survey(root)?;
+    // The folder's own rules first, so every other row reads as a change from
+    // where it actually is rather than from nothing.
+    let mut also = Vec::new();
+    if let Ok(text) = std::fs::read_to_string(root.join(POLICY_RELATIVE)) {
+        also.push(("(the rules you have)".to_string(), text));
+    }
+    Ok(tungstate_core::compare::against(&snapshot, &also))
+}
+
+/// Walk a folder that may have no rules of its own yet.
+fn probe_survey(root: &Path) -> Result<Snapshot, String> {
+    let probe = tungstate_core::policy::Policy::parse(tungstate_core::learn::PROBE)
+        .expect("the probe policy parses")
+        .policy;
+    let backend = LocalBackend::new(root.to_path_buf());
+    tungstate_attrs::survey(&backend, &probe).map_err(|e| e.to_string())
+}
+
 /// How many files a finished tidy actually moved.
 ///
 /// Deliberately not `Applied::done`: that counts *operations*, and a plan's
@@ -563,6 +678,66 @@ mod tests {
         assert_eq!(files_moved(&plan, 1, 0), 0, "the one mover was skipped");
         assert_eq!(files_moved(&plan, 0, 1), 0, "or it failed");
         assert_eq!(files_moved(&plan, 9, 9), 0, "and it never goes negative");
+    }
+
+    /// The window has to be able to ask both of these, or a redesign needs
+    /// Rust work halfway through. Split out from the `#[tauri::command]`
+    /// wrappers for exactly the reason the rest of this file is: a command
+    /// needs an `AppHandle` and cannot be called from a test.
+    #[test]
+    fn the_window_can_read_a_folders_shape_without_it_having_rules_yet() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("a.txt"), b"one").unwrap();
+        std::fs::create_dir_all(dir.path().join("Work/Clients/Acme")).unwrap();
+        std::fs::write(dir.path().join("Work/Clients/Acme/b.txt"), b"two").unwrap();
+
+        // No `.tungstate/policy.toml` anywhere: learning happens before there
+        // are rules, which is the whole chicken-and-egg `PROBE` exists for.
+        let view = learn(dir.path()).expect("a folder with no rules can still be read");
+        assert_eq!(view.of, 2);
+        assert_eq!(view.loose, 1, "a.txt sits at the top");
+        assert!(!view.as_is.is_empty(), "rules come back as text to show");
+    }
+
+    #[test]
+    fn the_window_can_ask_what_every_layout_would_do() {
+        let dir = messy();
+        let outcomes = compare(dir.path()).expect("a folder can be compared");
+
+        // The folder's own rules first, then every built-in layout.
+        assert_eq!(outcomes[0].name, "(the rules you have)");
+        assert_eq!(outcomes.len(), 1 + tungstate_core::templates::names().len());
+        assert!(outcomes.iter().all(|o| o.loads));
+        // Counts, not sentences: the window decides how to say it.
+        assert!(outcomes.iter().any(|o| o.files > 0));
+    }
+
+    /// The result of a tidy arrives as numbers. A window that receives
+    /// `"moved 5 file(s)"` can only print it -- it cannot show the 5 large,
+    /// put an undo beside it, or word it differently, without changing Rust.
+    #[test]
+    fn a_tidys_result_is_counted_rather_than_worded() {
+        let done = TidyDone {
+            moved: 5,
+            skipped: 1,
+            failed: 0,
+            already_tidy: false,
+        };
+        let json = serde_json::to_value(done).expect("serialises for the window");
+        assert_eq!(json["moved"], 5);
+        assert_eq!(json["skipped"], 1);
+        assert_eq!(json["already_tidy"], false);
+        // Nothing to do is its own answer, not "moved 0".
+        let nothing = TidyDone {
+            moved: 0,
+            skipped: 0,
+            failed: 0,
+            already_tidy: true,
+        };
+        assert_eq!(
+            serde_json::to_value(nothing).expect("serialises")["already_tidy"],
+            true
+        );
     }
 
     #[test]

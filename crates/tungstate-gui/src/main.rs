@@ -346,6 +346,18 @@ fn give_rules(root: String, layout: String) -> Result<(), String> {
     govern::write_layout(&PathBuf::from(root), &layout).map(|_| ())
 }
 
+/// Read the shape a folder already has, without changing anything.
+#[tauri::command]
+fn learn_folder(root: String) -> Result<govern::LearnedView, String> {
+    govern::learn(Path::new(&root))
+}
+
+/// What every starting layout would do to this folder, side by side.
+#[tauri::command]
+fn compare_folder(root: String) -> Result<Vec<tungstate_core::compare::Outcome>, String> {
+    govern::compare(Path::new(&root))
+}
+
 #[tauri::command]
 fn rules_text(root: String) -> Result<String, String> {
     govern::rules_text(&PathBuf::from(root))
@@ -357,9 +369,7 @@ fn folder_preview(root: String, state: State<'_, App>) -> Result<govern::Preview
 }
 
 #[tauri::command]
-fn tidy_folder(root: String, state: State<'_, App>) -> Result<String, String> {
-    use std::fmt::Write as _;
-
+fn tidy_folder(root: String, state: State<'_, App>) -> Result<govern::TidyDone, String> {
     let path = PathBuf::from(&root);
     let backend = tungstate_backend::local::LocalBackend::new(path.clone());
 
@@ -371,7 +381,12 @@ fn tidy_folder(root: String, state: State<'_, App>) -> Result<String, String> {
 
     let (_, snapshot, plan) = govern::plan_for(&path)?;
     if plan.ops.is_empty() {
-        return Ok("there was nothing to do".to_string());
+        return Ok(govern::TidyDone {
+            moved: 0,
+            skipped: 0,
+            failed: 0,
+            already_tidy: true,
+        });
     }
     // The one refusal the window keeps, because it is a bug in the rules
     // rather than a judgement about scale: the blast radius is shown in the
@@ -387,23 +402,16 @@ fn tidy_folder(root: String, state: State<'_, App>) -> Result<String, String> {
     let applied = tungstate_execute::apply(&plan, &snapshot, &backend, &state.journal, &root)
         .map_err(|e| e.to_string())?;
 
-    let moved = govern::files_moved(&plan, applied.skipped.len(), applied.failed.len());
-    let mut said = format!("moved {moved} file(s)");
-    if !applied.skipped.is_empty() {
-        let _ = write!(
-            said,
-            "; left {} alone, changed while we looked",
-            applied.skipped.len()
-        );
-    }
-    if !applied.failed.is_empty() {
-        let _ = write!(said, "; {} could not be moved", applied.failed.len());
-    }
-    Ok(said)
+    Ok(govern::TidyDone {
+        moved: govern::files_moved(&plan, applied.skipped.len(), applied.failed.len()),
+        skipped: applied.skipped.len(),
+        failed: applied.failed.len(),
+        already_tidy: false,
+    })
 }
 
 #[tauri::command]
-fn put_back(root: String, plan: i64, state: State<'_, App>) -> Result<String, String> {
+fn put_back(root: String, plan: i64, state: State<'_, App>) -> Result<govern::PutBackDone, String> {
     let path = PathBuf::from(&root);
     let backend = tungstate_backend::local::LocalBackend::new(path.clone());
     let policy = govern::rules_at(&path)?;
@@ -427,7 +435,7 @@ fn put_back(root: String, plan: i64, state: State<'_, App>) -> Result<String, St
                 .filter(|o| o.kind == tungstate_journal::OpKind::Rename)
                 .count()
         });
-    Ok(format!("put {files} file(s) back"))
+    Ok(govern::PutBackDone { files })
 }
 
 #[tauri::command]
@@ -1941,6 +1949,8 @@ fn main() {
             forget_folder,
             layouts,
             give_rules,
+            learn_folder,
+            compare_folder,
             rules_text,
             folder_preview,
             tidy_folder,
