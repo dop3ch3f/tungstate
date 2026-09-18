@@ -725,39 +725,57 @@ fn class_for(word: &str) -> Option<&'static str> {
         .map(|(_, class)| *class)
 }
 
-/// The globs that pin a branch to its names.
+/// The globs that pin a branch to its names, at the depth the shape describes.
 ///
 /// A name — an app, a client — cannot be recovered from a file's own
-/// attributes, so it has to be matched on where the file *is*. Two arms,
-/// because the rule has to match the file both where it sits now and where the
-/// rule will put it; without the second the rule chases itself one directory
-/// deeper every run and never settles.
+/// attributes, so it has to be matched on where the file *is*.
 ///
-/// Only the names go in the glob. What a file *is* is matched by `mime`
-/// instead, which is what lets a file arriving loose in `WhatsApp/` be filed
-/// as a photo without already sitting in a `Photo` directory.
-fn globs_for(named: &[(usize, String)]) -> Option<Vec<String>> {
-    let (first, rest) = named.split_first()?;
-    let contiguous = rest
+/// **`*` and not `**`.** `**` crosses directories, and a rule whose path is
+/// `Work/Clients/Acme` matching `Work/Clients/Acme/**` claims
+/// `Work/Clients/Acme/2023/invoice.pdf` and files it one level up — flattening
+/// the `2023` directory, out of the policy whose whole promise is keeping the
+/// shape you already have. A file deeper than the shape is outside the shape,
+/// and outside the shape means left alone.
+///
+/// Two arms, because the rule has to match the file both where it sits now and
+/// where the rule will put it; without the second it stops matching its own
+/// output. They collapse to one when the names *are* the whole path.
+fn globs_for(levels: &[Level], combo: &Combo) -> Option<Vec<String>> {
+    let named: Vec<String> = levels
         .iter()
-        .scan(first.0, |prev, (i, _)| {
-            let ok = *i == *prev + 1;
-            *prev = *i;
-            Some(ok)
+        .zip(combo)
+        .filter_map(|(level, value)| match (level, value) {
+            (Level::Named(_), Some(v)) => Some(v.clone()),
+            _ => None,
         })
-        .all(|ok| ok);
-    let joined = if contiguous {
-        named
-            .iter()
-            .map(|(_, v)| v.as_str())
-            .collect::<Vec<_>>()
-            .join("/")
-    } else {
-        // Not adjacent in the path, so there is no one prefix to match. The
-        // deepest name is the most specific thing that is still true.
-        named.last().map(|(_, v)| v.clone())?
-    };
-    Some(vec![format!("{joined}/**"), format!("**/{joined}/**")])
+        .collect();
+    if named.is_empty() {
+        return None;
+    }
+
+    // Where this rule will put it: one segment per level — the literal where
+    // the level is a name, `*` where it is read off the file — and one more
+    // for the filename. Exactly as deep as the shape, so a stray directory
+    // below it does not match.
+    let mut after: Vec<String> = levels
+        .iter()
+        .zip(combo)
+        .map(|(level, value)| match (level, value) {
+            (Level::Named(_) | Level::Kind(_), Some(v)) => v.clone(),
+            _ => "*".to_string(),
+        })
+        .collect();
+    after.push("*".to_string());
+
+    // Where a file may be arriving: loose inside the named directories.
+    let before = format!("{}/*", named.join("/"));
+    let after = after.join("/");
+
+    let mut globs = vec![before];
+    if !globs.contains(&after) {
+        globs.push(after);
+    }
+    Some(globs)
 }
 
 /// Write the rules for a shape, as a policy somebody can read and edit.
@@ -826,15 +844,6 @@ fn write_policy(
             .collect();
 
         // The names pin the branch; the kind is matched on the file's type.
-        let named: Vec<(usize, String)> = levels
-            .iter()
-            .zip(combo)
-            .enumerate()
-            .filter_map(|(i, (level, value))| match (level, value) {
-                (Level::Named(_), Some(v)) => Some((i, v.clone())),
-                _ => None,
-            })
-            .collect();
         let kind = levels
             .iter()
             .zip(combo)
@@ -847,7 +856,7 @@ fn write_policy(
         if let Some(class) = kind.as_deref().and_then(class_for) {
             clauses.push(format!("mime = \"{class}/*\""));
         }
-        if let Some(globs) = globs_for(&named) {
+        if let Some(globs) = globs_for(levels, combo) {
             clauses.push(format!(
                 "glob = [{}]",
                 globs
@@ -1076,6 +1085,44 @@ mod tests {
             !learned.as_is.contains("Personal/Personal"),
             "the cross-product bug is back:\n{}",
             learned.as_is
+        );
+    }
+
+    /// A file deeper than the learned shape is outside the shape, and outside
+    /// the shape means left alone. The first version globbed `Acme/**`, which
+    /// claimed `Acme/2023/invoice.pdf` and filed it one level up -- flattening
+    /// the `2023` directory, out of the policy whose whole promise is keeping
+    /// what you already have.
+    #[test]
+    fn a_file_deeper_than_the_shape_is_left_alone_and_not_flattened_into_it() {
+        let snap = folder(vec![
+            file("Work/Clients/Acme/notes.pdf", "application/pdf", 2024, 10),
+            file("Work/Clients/Globex/deal.pdf", "application/pdf", 2024, 10),
+            file("Personal/Photos/Wedding/a.jpg", "image/jpeg", 2024, 10),
+            // One level deeper than the shape the other three describe.
+            file(
+                "Work/Clients/Acme/2023/invoice.pdf",
+                "application/pdf",
+                2023,
+                10,
+            ),
+        ]);
+        let learned = learn(&snap, "f");
+        let policy = Policy::parse(&learned.as_is).expect("parses").policy;
+        let plan = policy.plan(&snap);
+
+        assert!(plan.settles);
+        let moves: Vec<String> = plan
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                crate::plan::Op::Move { from, .. } => Some(from.clone()),
+                _ => None,
+            })
+            .collect();
+        assert!(
+            moves.is_empty(),
+            "a learned policy flattened a directory it was supposed to keep: {moves:#?}"
         );
     }
 

@@ -12,6 +12,7 @@
 
 pub mod attrs;
 pub mod classify;
+pub mod compare;
 pub mod error;
 pub mod grammar;
 pub mod graph;

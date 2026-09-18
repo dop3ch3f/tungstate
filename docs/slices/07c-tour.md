@@ -51,7 +51,7 @@ path, which is exactly the handle needed — with one wrinkle:
 [[rule]]
 name = "whatsapp-photo"
 path  = "{date:%Y}/WhatsApp/Photo/{ext}/{band}"
-match = { mime = "image/*", glob = ["WhatsApp/**", "**/WhatsApp/**"] }
+match = { mime = "image/*", glob = ["WhatsApp/*", "*/WhatsApp/Photo/*/*/*"] }
 ```
 
 Two arms, and the second is load-bearing. The first catches the file where it
@@ -59,6 +59,17 @@ is *now*, loose in `WhatsApp/`. The second catches it where this rule will
 *put* it, at `2024/WhatsApp/...`. Without the second arm the rule stops
 matching its own output, the file looks unmatched on the next run, and the
 policy is unstable in the other direction.
+
+**`*` and not `**`, which took a second pass to get right.** Both arms were
+first written with `**`, and `**` crosses directories: a rule whose path is
+`Work/Clients/Acme` matching `Work/Clients/Acme/**` also claims
+`Work/Clients/Acme/2023/invoice.pdf` and files it one level up — *flattening
+the `2023` directory*, out of the policy whose whole promise is keeping the
+shape you already have. The second arm is now the shape itself, one segment per
+level with `*` wherever the level is read off the file, so it matches at
+exactly the depth the shape describes and a stray directory below it does not.
+A file deeper than the shape is outside the shape, and outside the shape means
+left alone. §3 has the rest of that story.
 
 Note what is **not** in the glob: the type. `Photo` is a literal in the path but
 `mime = "image/*"` in the match, which is what lets a file arriving loose in
@@ -114,7 +125,7 @@ the first line.
 
 ---
 
-## 3. Two bugs that only running it could find
+## 3. Three bugs that only running it could find
 
 ### The cross product that invented directories
 
@@ -135,6 +146,22 @@ the regression test is named for the string it used to emit.
 This is worth dwelling on because the unit tests at the time were green. They
 were green on the *yardstick* shape, which has exactly one name level, and one
 is the width at which a product and a tree are the same thing.
+
+### The `**` that flattened a directory it promised to keep
+
+Found by reading real output rather than by a test: `folder compare` reported
+that a folder's *own learned rules* would move two of its files. They would
+have flattened `Work/Clients/Acme/2023/` into `Work/Clients/Acme/`.
+
+The check that should have caught it had passed, and the way it passed is the
+lesson. The folder was copied with `cp -R`, which does not preserve
+modification times, so every file was seconds old and inside the 30-second
+cooldown — and a plan reports those as **left alone**. "Left alone because
+correct" and "left alone because too recent" print identically. Re-run against
+a folder backdated well past the cooldown, the two files moved.
+
+The unit test missed it for a duller reason: every file in its fixture sat at
+the shape's own depth, and the bug only bites a file *deeper* than the shape.
 
 ### The inbox that would have swept two thirds of the folder
 

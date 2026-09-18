@@ -264,10 +264,9 @@ pub fn learn(path: &str, write: bool, improved: bool) -> ExitCode {
 /// What each starting layout would do to this folder, side by side, including
 /// the rules it already has. Changes nothing.
 ///
-/// The folder is walked **once** and every layout planned against that one
-/// snapshot. That is safe because `classify` applies each policy's own
-/// `ignore` when it plans rather than only when it walks, so a shared walk
-/// does not let one layout's ignore list leak into another's answer.
+/// The comparing itself lives in `tungstate_core::compare` so the window asks
+/// the same question and gets the same answer, rather than each surface
+/// computing its own and drifting.
 pub fn compare(path: &str) -> ExitCode {
     let Ok(root) = Path::new(path).canonicalize() else {
         eprintln!("error: cannot read `{path}`");
@@ -282,60 +281,40 @@ pub fn compare(path: &str) -> ExitCode {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::fail(&error),
     };
-    let files = snapshot.entries.iter().filter(|e| !e.is_dir).count();
 
-    println!("folder at {}", root.display());
-    println!("  {files} file(s), walked once and shown against each layout\n");
-
-    // What they have now goes first, so every other line is read as a change
-    // from it rather than from nothing.
-    let mut rows: Vec<(String, Option<String>)> = Vec::new();
+    // The folder's own rules first, so every other row reads as a change from
+    // where it actually is rather than from nothing.
+    let mut also = Vec::new();
     let existing = root.join(POLICY_RELATIVE);
     if existing.is_file() {
         match std::fs::read_to_string(&existing) {
-            Ok(text) => rows.push(("(the rules you have)".to_string(), Some(text))),
+            Ok(text) => also.push(("(the rules you have)".to_string(), text)),
             Err(error) => eprintln!("warning: cannot read {}: {error}", existing.display()),
         }
     }
-    for template in TEMPLATES {
-        rows.push((template.name.to_string(), Some(template.body.to_string())));
-    }
 
-    for (name, body) in rows {
-        let Some(body) = body else { continue };
-        let Ok(loaded) = tungstate_core::policy::Policy::parse(&body) else {
+    let outcomes = tungstate_core::compare::against(&snapshot, &also);
+    let files = outcomes.first().map_or(0, |o| o.of);
+    println!("folder at {}", root.display());
+    println!("  {files} file(s), walked once and shown against each layout\n");
+
+    for outcome in &outcomes {
+        let name = &outcome.name;
+        if !outcome.loads {
             println!("  {name:<22} these rules will not load");
             continue;
-        };
-        let plan = loaded.policy.plan(&snapshot);
-        let moves: Vec<(&str, &str)> = plan
-            .ops
-            .iter()
-            .filter_map(|op| match op {
-                tungstate_core::plan::Op::Move { from, to, .. } => {
-                    Some((from.as_str(), to.as_str()))
-                }
-                _ => None,
-            })
-            .collect();
-
-        if !plan.settles {
-            println!(
-                "  {name:<22} never settles — {} file(s) would move for ever",
-                plan.unsettled.len()
-            );
+        }
+        if !outcome.settles {
+            println!("  {name:<22} never settles — it would keep moving the same files");
             continue;
         }
         println!(
             "  {name:<22} {} of {files} would move, {} dir(s) made, {} removed",
-            plan.blast.files, plan.blast.created, plan.blast.removed
+            outcome.files, outcome.created, outcome.removed
         );
-        // One real example, because a count does not tell you whether you would
-        // like the answer.
-        if let Some((from, to)) = moves.first() {
-            println!("  {:<22}   e.g. {from} → {to}", "");
-        } else {
-            println!("  {:<22}   nothing would change", "");
+        match &outcome.example {
+            Some(m) => println!("  {:<22}   e.g. {} → {}", "", m.from, m.to),
+            None => println!("  {:<22}   nothing would change", ""),
         }
     }
     println!("\nnothing has moved. `tungstate init --template <NAME> {path}` picks one.");
