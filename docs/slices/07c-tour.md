@@ -6,14 +6,33 @@ only turned up by running it.
 
 ---
 
-## 1. The dimension a file cannot tell you
+## 1. Where the app name can be read from
 
 The yardstick shape is `YEAR / APP / TYPE / EXTENSION / SIZE-GROUP`. Four of
 those five are properties of the file: `{date:%Y}` from its date, `{ext}` from
 its name, a `bucket` on `size`, and the type from `mime`.
 
-**App is not.** Nothing inside `IMG-20240312-WA0001.jpg` says WhatsApp. It is
-knowable only from where the file sits.
+**App is the awkward one** — and the first draft of this tour got it wrong. It
+claimed *"nothing inside `IMG-20240312-WA0001.jpg` says WhatsApp"*, which is
+false: `-WA0001` is WhatsApp's own naming convention, and the name is a property
+of the file. Corrected, with what is actually available:
+
+- **The filename.** `match.regex` runs over the name and its named captures
+  become path variables, so `regex = "-WA[0-9]+\\."` identifies a WhatsApp file
+  wherever it sits. This is the *strongest* handle, because a name does not
+  change when the file moves — so a rule keyed on it settles trivially, and it
+  works on a file loose at the root with no directory to read.
+- **EXIF.** `read_exif` keeps every primary-IFD field, so `exif.Software`,
+  `exif.Make` and `exif.Model` are all usable as `from` sources. A camera says
+  what it is; some apps do too.
+- **What tungstate cannot see:** extended attributes. macOS records the
+  downloading app in `com.apple.quarantine` and the origin URL in
+  `kMDItemWhereFroms`, which would be the most reliable signal of all, and
+  `Attributes` has no field for either. That is a real gap, not a decision.
+
+What *is* true, and is what the rest of this section is about: when the app is
+known only from **the directory the file is in**, it cannot be carried by any
+attribute of the file.
 
 The obvious answer is the `parent` attribute, which is the file's immediate
 directory. It does not work, and the way it fails is the interesting part. A
@@ -189,19 +208,51 @@ test is the real point — it is what stops a later edit quietly turning every
   *keep the shape it already has* — and show both rule sets in the preview.
   That is 7d. The command line goes first because it is the reference surface,
   as it did for 5/5b and 7/7b.
-- **It reads directories, not filenames.** `photo_2025-01-04.jpg` plainly
-  carries a date, and `learn` ignores it and uses the file's timestamp. Reading
-  dates out of names is a guess with a long tail of wrong answers, and the
-  `regex` match key already exists for anyone who wants to write that rule
-  themselves.
+- **It does not read dates out of filenames.** `photo_2025-01-04.jpg` plainly
+  carries one, and `learn` uses the file's timestamp instead. That guess has a
+  long tail of wrong answers, and `match.regex` with named captures is there for
+  anyone who wants to write the rule themselves. Note this caution is narrower
+  than the one first written here: a *distinctive app marker* is not a guess,
+  and §6b is what came of saying so.
 - **One shape per folder.** A folder organised two different ways in two
   branches gets the dominant one, and the `N of M` line is how you find out.
 - **Suggestions are not applied to a written policy unless asked.** `--write`
   saves what you read; `--improved --write` saves the other one.
 
+## 6b. What the filenames turned out to be worth
+
+The first version of this slice read directories and nothing else, on the
+reasoning corrected at the top of §1. Filenames are in fact the *better* handle,
+and `learn` now uses them:
+
+- A name does not change when a file moves, so a rule keyed on one **settles
+  trivially** — no second glob arm, no chasing itself deeper.
+- It needs no directory, so it works on a file lying loose at the top of the
+  folder. That is the case the directory-only version could say nothing at all
+  about: a folder of downloads came back "no shape found".
+
+`CONVENTIONS` is a deliberately short table of markers that mean one thing —
+WhatsApp's `-WA0001`, Telegram's `photo_`/`video_` stamps, `Screenshot `. Each
+recognised file contributes a rule that files it **into the shape that was
+learned**, so on a folder already organised year/app/kind/ext the new rules
+adopt those same five levels; on a folder with no shape at all they supply
+`{date:%Y}/<App>/<Kind>/{ext}`.
+
+Two restraints matter more than the table:
+
+- **Only unhomed files are considered.** A file already sitting in the shape is
+  filed, and re-filing it by its name would be the tool second-guessing the
+  person who put it there. There is a test named for exactly that.
+- **Convention rules go in the `improved` policy only, never `as_is`.** Moving
+  files that are merely lying about untidily is a *change*, and this command's
+  contract is that `as_is` keeps what you have.
+
+On six loose downloads: five filed, `holiday-snap.jpg` left alone because no
+convention claims it, and the re-plan moves nothing.
+
 ## 7. Verified
 
-450 tests, fmt and clippy clean. Twelve of those are new in `learn`, and the
+452 tests, fmt and clippy clean. Fourteen of those are new in `learn`, and the
 three that carry the weight are:
 
 - `a_learned_policy_leaves_the_folder_it_was_learned_from_alone` — reads the
@@ -210,6 +261,11 @@ three that carry the weight are:
   that merely does nothing would pass the one above.
 - `files_the_shape_does_not_explain_are_left_where_they_are` — the inbox bug,
   pinned.
+- `loose_files_are_recognised_by_the_names_their_apps_gave_them` — five loose
+  downloads filed by name into `2024/WhatsApp/Photo/jpg/…`, asserting the plan
+  settles.
+- `a_file_already_in_the_shape_is_not_refiled_by_its_name` — the restraint that
+  keeps the previous one from being a licence to rearrange.
 
 Plus one end-to-end CLI test against a real directory, which learns, writes,
 re-plans to `0 file(s) would move`, and checks the second `--write` is refused

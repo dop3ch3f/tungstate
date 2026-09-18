@@ -159,6 +159,40 @@ enum Guess {
     Named(String),
 }
 
+/// A filename convention that names the app that wrote the file.
+///
+/// The name is the one handle on a file that does **not** change when the file
+/// moves, so a rule keyed on it settles trivially and — unlike a directory —
+/// works on a file sitting loose at the top of the folder.
+///
+/// Deliberately a short table of distinctive markers. `-WA0001` is the
+/// convention `WhatsApp` uses and means nothing else; that is a different kind of claim
+/// from reading a *date* out of a filename, which has a long tail of wrong
+/// answers and is not done here.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Convention {
+    /// What to call the directory.
+    pub app: &'static str,
+    /// Matched against the file's name.
+    pub pattern: &'static str,
+}
+
+/// The conventions this recognises.
+pub const CONVENTIONS: &[Convention] = &[
+    Convention {
+        app: "WhatsApp",
+        pattern: r"-WA[0-9]+\.",
+    },
+    Convention {
+        app: "Telegram",
+        pattern: r"^(photo|video)_[0-9]{4}-[0-9]{2}-[0-9]{2}",
+    },
+    Convention {
+        app: "Screenshots",
+        pattern: r"^(Screenshot|Screen Shot|Bildschirmfoto)[ _-]",
+    },
+];
+
 /// The kind words this recognises, and the media type each implies.
 const KINDS: &[(&str, &str)] = &[
     ("photo", "image"),
@@ -248,6 +282,27 @@ fn guess(segment: &str, position: usize, previous: Option<&Guess>, file: &Attrib
     Guess::Named(segment.to_string())
 }
 
+/// Which conventions the files nobody has filed match, and how many each.
+///
+/// Only the unhomed ones: a file already sitting in the shape is filed, and
+/// re-filing it by its name would be this tool second-guessing the person.
+fn conventions_among(files: &[&Attributes]) -> Vec<(Convention, usize, bool, bool)> {
+    let mut out = Vec::new();
+    for convention in CONVENTIONS {
+        let Ok(re) = regex::Regex::new(convention.pattern) else {
+            continue;
+        };
+        let hits: Vec<&&Attributes> = files.iter().filter(|f| re.is_match(&f.name)).collect();
+        if hits.is_empty() {
+            continue;
+        }
+        let images = hits.iter().any(|f| class_of(f) == Some("image"));
+        let videos = hits.iter().any(|f| class_of(f) == Some("video"));
+        out.push((*convention, hits.len(), images, videos));
+    }
+    out
+}
+
 /// Every file the shape should be read from: real files, below the root.
 fn files(snapshot: &Snapshot) -> impl Iterator<Item = &Attributes> {
     snapshot
@@ -275,7 +330,7 @@ pub fn learn(snapshot: &Snapshot, folder_name: &str) -> Learned {
             .push(file);
     }
     let Some((&depth, deepest)) = by_depth.iter().max_by_key(|(_, v)| v.len()) else {
-        return nothing_found(folder_name, of, loose);
+        return nothing_found(folder_name, &all, of, loose);
     };
 
     // One column per level, holding what each file thought that segment meant.
@@ -294,10 +349,22 @@ pub fn learn(snapshot: &Snapshot, folder_name: &str) -> Learned {
     let explains = deepest.len();
     let combos = combinations(&levels, deepest);
 
-    let suggestions = advise(&levels, deepest, loose, of);
-    let as_is = write_policy(folder_name, &levels, &combos);
-    let improved = improve(&levels, &combos, &suggestions)
-        .map(|(levels, combos)| write_policy(folder_name, &levels, &combos));
+    // Files the shape does not account for: loose at the top, or at some other
+    // depth. These are the ones a filename convention can still find a home for.
+    let homed: BTreeSet<String> = deepest.iter().map(|f| f.relative_path()).collect();
+    let unhomed: Vec<&Attributes> = all
+        .iter()
+        .copied()
+        .filter(|f| !homed.contains(&f.relative_path()))
+        .collect();
+    let found = conventions_among(&unhomed);
+
+    let suggestions = advise(&levels, deepest, loose, of, &found);
+    let as_is = write_policy(folder_name, &levels, &combos, &[]);
+    let improved = improve(&levels, &combos, &suggestions).map_or_else(
+        || (!found.is_empty()).then(|| write_policy(folder_name, &levels, &combos, &found)),
+        |(levels, combos)| Some(write_policy(folder_name, &levels, &combos, &found)),
+    );
 
     Learned {
         levels,
@@ -360,18 +427,34 @@ fn distinct(values: impl Iterator<Item = String>) -> Vec<String> {
     values.collect::<BTreeSet<_>>().into_iter().collect()
 }
 
-fn nothing_found(folder_name: &str, of: usize, loose: usize) -> Learned {
+/// A folder with no directories at all.
+///
+/// Still not a dead end: the filenames may say where their files belong even
+/// when nothing else does, which is exactly the folder-of-downloads case.
+fn nothing_found(folder_name: &str, all: &[&Attributes], of: usize, loose: usize) -> Learned {
+    let found = conventions_among(all);
+    let mut suggestions = vec![Suggestion {
+        headline: "There is no shape here yet to keep.".to_string(),
+        why: format!("All {of} file(s) sit at the top of the folder, in no directory."),
+    }];
+    for (convention, count, _, _) in &found {
+        suggestions.push(Suggestion {
+            headline: format!("File the {} files by their names.", convention.app),
+            why: format!(
+                "{count} unfiled file(s) are named the way {} names them (`{}`), which says \
+                 where they belong without any directory to read.",
+                convention.app, convention.pattern
+            ),
+        });
+    }
     Learned {
         levels: Vec::new(),
         explains: 0,
         of,
         loose,
-        as_is: write_policy(folder_name, &[], &[]),
-        improved: None,
-        suggestions: vec![Suggestion {
-            headline: "There is no shape here yet to keep.".to_string(),
-            why: format!("All {of} file(s) sit at the top of the folder, in no directory."),
-        }],
+        as_is: write_policy(folder_name, &[], &[], &[]),
+        improved: (!found.is_empty()).then(|| write_policy(folder_name, &[], &[], &found)),
+        suggestions,
     }
 }
 
@@ -385,7 +468,13 @@ fn leaf_sizes(files: &[&Attributes]) -> Vec<usize> {
 }
 
 /// What would make this shape easier to live in, and by how much.
-fn advise(levels: &[Level], files: &[&Attributes], loose: usize, of: usize) -> Vec<Suggestion> {
+fn advise(
+    levels: &[Level],
+    files: &[&Attributes],
+    loose: usize,
+    of: usize,
+    found: &[(Convention, usize, bool, bool)],
+) -> Vec<Suggestion> {
     let mut out = Vec::new();
     let leaves = leaf_sizes(files);
     let biggest = leaves.iter().copied().max().unwrap_or(0);
@@ -474,6 +563,18 @@ fn advise(levels: &[Level], files: &[&Attributes], loose: usize, of: usize) -> V
             headline: "Give the loose files a home.".to_string(),
             why: format!(
                 "{loose} of {of} file(s) sit at the top of the folder, outside the shape."
+            ),
+        });
+    }
+    // What the filenames themselves say. This is the only advice here that can
+    // home a file with no directory to read.
+    for (convention, count, _, _) in found {
+        out.push(Suggestion {
+            headline: format!("File the {} files by their names.", convention.app),
+            why: format!(
+                "{count} unfiled file(s) are named the way {} names them (`{}`), which says \
+                 where they belong without any directory to read.",
+                convention.app, convention.pattern
             ),
         });
     }
@@ -662,7 +763,12 @@ fn globs_for(named: &[(usize, String)]) -> Option<Vec<String>> {
 /// Write the rules for a shape, as a policy somebody can read and edit.
 ///
 /// One rule per branch that actually exists, per kind.
-fn write_policy(folder_name: &str, levels: &[Level], combos: &[Combo]) -> String {
+fn write_policy(
+    folder_name: &str,
+    levels: &[Level],
+    combos: &[Combo],
+    conventions: &[(Convention, usize, bool, bool)],
+) -> String {
     use std::fmt::Write as _;
 
     let mut out = String::new();
@@ -682,7 +788,7 @@ fn write_policy(folder_name: &str, levels: &[Level], combos: &[Combo]) -> String
     out.push_str("cooldown = \"30s\"\n");
     out.push_str("on_conflict = \"rename\"\n");
 
-    if levels.is_empty() {
+    if levels.is_empty() && conventions.is_empty() {
         out.push_str(
             "\n# No shape was found to keep: every file sits at the top of the\n\
              # folder. Add a rule below, or start from one of the layouts in\n\
@@ -690,6 +796,21 @@ fn write_policy(folder_name: &str, levels: &[Level], combos: &[Combo]) -> String
         );
         return out;
     }
+
+    // With nothing to keep but names that say where files belong, the names
+    // supply the shape. Year and kind are still read off the file itself.
+    let borrowed;
+    let levels = if levels.is_empty() {
+        borrowed = vec![
+            Level::Year,
+            Level::Named(Vec::new()),
+            Level::Kind(Vec::new()),
+            Level::Ext,
+        ];
+        &borrowed[..]
+    } else {
+        levels
+    };
 
     let wants_date = levels
         .iter()
@@ -775,6 +896,7 @@ fn write_policy(folder_name: &str, levels: &[Level], combos: &[Combo]) -> String
             let _ = writeln!(out, "vars.band = {{ from = \"size\", bucket = [{bands}] }}");
         }
     }
+    write_conventions(&mut out, levels, conventions, &mut used);
     out
 }
 
@@ -1033,6 +1155,89 @@ mod tests {
         );
     }
 
+    /// The name is the one handle that does not change when the file moves,
+    /// and it works on a file with no directory to read at all.
+    #[test]
+    fn loose_files_are_recognised_by_the_names_their_apps_gave_them() {
+        let snap = folder(vec![
+            file("IMG-20240312-WA0001.jpg", "image/jpeg", 2024, 10),
+            file("IMG-20240513-WA0002.jpg", "image/jpeg", 2024, 10),
+            file("VID-20240722-WA0003.mp4", "video/mp4", 2024, 10),
+            file("photo_2025-01-04_18-22-11.jpg", "image/jpeg", 2025, 10),
+        ]);
+        let learned = learn(&snap, "downloads");
+
+        assert!(
+            learned.suggestions.iter().any(|s| {
+                s.headline == "File the WhatsApp files by their names."
+                    && s.why.contains("3 unfiled")
+            }),
+            "{:?}",
+            learned.suggestions
+        );
+
+        // `as_is` keeps what is there, which is nothing -- the offer is in the
+        // improved rules, where somebody has to read it first.
+        assert!(!learned.as_is.contains("WhatsApp"), "{}", learned.as_is);
+
+        let improved = learned
+            .improved
+            .expect("names alone are a shape worth offering");
+        let policy = Policy::parse(&improved).expect("parses").policy;
+        let plan = policy.plan(&snap);
+        assert!(plan.settles, "a rule keyed on a name must settle");
+
+        let moved: BTreeSet<String> = plan
+            .ops
+            .iter()
+            .filter_map(|op| match op {
+                crate::plan::Op::Move { to, .. } => Some(to.clone()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            moved,
+            [
+                "2024/WhatsApp/Photo/jpg/IMG-20240312-WA0001.jpg",
+                "2024/WhatsApp/Photo/jpg/IMG-20240513-WA0002.jpg",
+                "2024/WhatsApp/Video/mp4/VID-20240722-WA0003.mp4",
+                "2025/Telegram/Photo/jpg/photo_2025-01-04_18-22-11.jpg",
+            ]
+            .into_iter()
+            .map(String::from)
+            .collect::<BTreeSet<_>>()
+        );
+    }
+
+    /// A file already sitting in the shape is filed. Re-filing it by its name
+    /// would be the tool second-guessing the person who put it there.
+    #[test]
+    fn a_file_already_in_the_shape_is_not_refiled_by_its_name() {
+        let snap = folder(vec![
+            file(
+                "2024/WhatsApp/Photo/jpg/IMG-20240312-WA0001.jpg",
+                "image/jpeg",
+                2024,
+                10,
+            ),
+            file(
+                "2024/WhatsApp/Photo/jpg/IMG-20240513-WA0002.jpg",
+                "image/jpeg",
+                2024,
+                10,
+            ),
+        ]);
+        let learned = learn(&snap, "media");
+        assert!(
+            !learned
+                .suggestions
+                .iter()
+                .any(|s| s.headline.starts_with("File the WhatsApp")),
+            "{:?}",
+            learned.suggestions
+        );
+    }
+
     #[test]
     fn a_folder_with_no_shape_says_so_instead_of_inventing_one() {
         let snap = folder(vec![
@@ -1104,5 +1309,83 @@ mod keeping_tests {
             !learned.as_is.contains("inbox"),
             "a learned policy must not sweep what it did not explain"
         );
+    }
+}
+
+/// Rules that file by filename convention, into the shape that was learned.
+///
+/// These go in the *improved* policy only. `as_is` keeps what is there; moving
+/// files that are merely lying about untidily is a change, and a change is
+/// something to be offered rather than assumed.
+fn write_conventions(
+    out: &mut String,
+    levels: &[Level],
+    conventions: &[(Convention, usize, bool, bool)],
+    used: &mut BTreeSet<String>,
+) {
+    use std::fmt::Write as _;
+
+    let wants_date = levels
+        .iter()
+        .any(|l| matches!(l, Level::Year | Level::Month));
+    let wants_band = levels.contains(&Level::Size);
+
+    for (convention, _, images, videos) in conventions {
+        // One rule per kind the convention actually produced, so a `Photo`
+        // directory is never created for an app that only sent videos.
+        let kinds: Vec<Option<&str>> = match (*images, *videos) {
+            (true, true) => vec![Some("Photo"), Some("Video")],
+            (true, false) => vec![Some("Photo")],
+            (false, true) => vec![Some("Video")],
+            (false, false) => vec![None],
+        };
+        for kind in kinds {
+            let path: Vec<String> = levels
+                .iter()
+                .map(|level| match level {
+                    Level::Named(_) => convention.app.to_string(),
+                    Level::Kind(_) => kind.unwrap_or("Other").to_string(),
+                    other => other.template(None),
+                })
+                .collect();
+
+            let mut clauses = vec![format!("regex = {:?}", convention.pattern)];
+            match kind {
+                Some("Photo") => clauses.push("mime = \"image/*\"".to_string()),
+                Some("Video") => clauses.push("mime = \"video/*\"".to_string()),
+                _ => {}
+            }
+
+            let stem = slug(&format!(
+                "{}-{}",
+                convention.app,
+                kind.unwrap_or("all").to_ascii_lowercase()
+            ));
+            let mut rule = stem.clone();
+            let mut n = 2;
+            while !used.insert(rule.clone()) {
+                rule = format!("{stem}-{n}");
+                n += 1;
+            }
+
+            let _ = writeln!(out, "\n[[rule]]");
+            let _ = writeln!(out, "name = {rule:?}");
+            let _ = writeln!(out, "path = {:?}", path.join("/"));
+            let _ = writeln!(out, "match = {{ {} }}", clauses.join(", "));
+            if wants_date {
+                let _ = writeln!(
+                    out,
+                    "vars.date = {{ from = [\"exif.DateTimeOriginal\", \"mtime\"] }}"
+                );
+            }
+            if wants_band {
+                let bands = BANDS
+                    .iter()
+                    .map(|b| format!("{b:?}"))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                let _ = writeln!(out, "vars.band = {{ from = \"size\", bucket = [{bands}] }}");
+            }
+        }
     }
 }
