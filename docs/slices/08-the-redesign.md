@@ -48,12 +48,20 @@ so it can be handed to a fresh session whole.
 > ### Where things are
 >
 > The window is about 3,700 lines of Vue 3, TypeScript and CSS in
-> `crates/tungstate-gui/ui/`. That is what you are replacing. Underneath it sit
-> about 21,500 lines of Rust across six crates with 467 tests, and you will not
-> need to touch any of it: every capability is already a command and every
-> result already crosses as data. If you do find yourself wanting an engine
-> change, that is a hole in the seam. Write it into `docs/SEAM.md` and commit it
-> on its own rather than folding it into the redesign.
+> `crates/tungstate-gui/ui/`. That is what you are replacing, and it is the
+> only thing you are changing.
+>
+> **Do not touch `crates/`.** Not a command, not a return type, not a comment.
+> The engine underneath is about 21,500 lines of Rust across six crates with
+> 467 tests, and it was deliberately finished and locked before this slice
+> started so that the redesign would never need it. Every capability is already
+> a command and every result already crosses as data.
+>
+> If you think you have found something the window cannot do without an engine
+> change, you are probably wrong, and the way to check is `docs/SEAM.md`. If you
+> are still sure after reading it, stop and say so. Do not write the Rust. A
+> missing capability is a conversation about scope, not a quiet commit in the
+> middle of a redesign.
 >
 > Read `docs/SEAM.md` first for what the window can ask for. Then
 > `docs/slices/07b-tour.md` §7, which is what happened the last time nobody
