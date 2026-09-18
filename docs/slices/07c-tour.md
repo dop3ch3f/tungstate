@@ -58,9 +58,9 @@ to a real folder, and re-planned:
 0 file(s) would move (0 B), 0 directories created, 0 removed, 6 left alone.
 ```
 
-Twenty minutes, before a line of inference existed. Three of the last five
-defects in this project came from building on an assumption that was never
-executed.
+Twenty minutes, before a line of inference existed — and it was the right
+twenty minutes, because had it converged the other way the whole module would
+have been built to emit policies the window refuses.
 
 ---
 
