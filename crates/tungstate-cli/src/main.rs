@@ -191,6 +191,19 @@ enum FolderAction {
     },
     /// Show every folder being governed.
     List,
+    /// Read the shape a folder already has, and write it down as rules.
+    ///
+    /// Changes nothing unless `--write` is given.
+    Learn {
+        /// The folder to read.
+        path: String,
+        /// Save the rules as the folder's own `.tungstate/policy.toml`.
+        #[arg(long)]
+        write: bool,
+        /// Use the suggested improvements rather than the shape as it stands.
+        #[arg(long)]
+        improved: bool,
+    },
     /// Stop governing a folder. Its rules and its history are untouched.
     Remove {
         /// Path to the folder to forget.
@@ -302,6 +315,11 @@ fn main() -> std::process::ExitCode {
         Command::Folder { action } => match action {
             FolderAction::Add { path, name } => folders::add(&path, name.as_deref()),
             FolderAction::List => folders::list(),
+            FolderAction::Learn {
+                path,
+                write,
+                improved,
+            } => folders::learn(&path, write, improved),
             FolderAction::Remove { path } => folders::remove(&path),
         },
         Command::Init { path, template } => folders::init(path.as_deref(), template.as_deref()),

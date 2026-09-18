@@ -15,6 +15,7 @@ pub mod classify;
 pub mod error;
 pub mod grammar;
 pub mod graph;
+pub mod learn;
 pub mod matcher;
 pub mod plan;
 pub mod policy;

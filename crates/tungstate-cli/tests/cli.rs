@@ -1572,3 +1572,80 @@ fn forgetting_a_folder_keeps_its_rules_on_disk() {
         "forgetting a folder is forgetting to watch it, not deleting its rules"
     );
 }
+
+/// A folder already organised by hand, in the shape the five-level yardstick
+/// describes: year / app / kind / extension / size band.
+fn already_organised(root: &std::path::Path) {
+    let jpeg = [0xffu8, 0xd8, 0xff, 0xe0, 0x00, 0x10, b'J', b'F', b'I', b'F'];
+    // Backdated to match the directory each sits in. A year directory is only
+    // read as a year when the files agree with it -- otherwise `2019` is just
+    // somebody's project name -- so a fixture written "now" would be read as a
+    // name, correctly, and prove nothing about years.
+    for (path, epoch_secs) in [
+        ("2024/WhatsApp/Photo/jpg/under-100MB/a.jpg", 1_717_200_000),
+        ("2024/WhatsApp/Photo/jpg/under-100MB/b.jpg", 1_717_200_000),
+        ("2025/Telegram/Photo/jpg/under-100MB/c.jpg", 1_748_736_000),
+    ] {
+        let file = root.join(path);
+        std::fs::create_dir_all(file.parent().expect("a parent")).unwrap();
+        std::fs::write(&file, jpeg).unwrap();
+        let when = std::time::UNIX_EPOCH + std::time::Duration::from_secs(epoch_secs);
+        std::fs::File::options()
+            .write(true)
+            .open(&file)
+            .expect("reopen to set the time")
+            .set_modified(when)
+            .expect("set the modification time");
+    }
+}
+
+#[test]
+fn learning_a_folder_writes_rules_that_leave_it_exactly_as_it_was() {
+    let home = sandbox();
+    let root = home.path().join("media");
+    already_organised(&root);
+
+    sandboxed(&home)
+        .args(["folder", "learn"])
+        .arg(&root)
+        .assert()
+        .success()
+        // The shape is read back, and nothing is written without `--write`.
+        .stdout(predicates::str::contains(
+            "year / name / kind / extension / size",
+        ))
+        .stdout(predicates::str::contains("nothing has been written"));
+    assert!(
+        !root.join(".tungstate/policy.toml").exists(),
+        "learning must not write unless asked"
+    );
+
+    sandboxed(&home)
+        .args(["folder", "learn", "--write"])
+        .arg(&root)
+        .assert()
+        .success();
+    let written = std::fs::read_to_string(root.join(".tungstate/policy.toml")).expect("written");
+    assert!(written.contains("WhatsApp"), "{written}");
+    assert!(
+        !written.contains("inbox"),
+        "a learned policy must not sweep what it did not explain:\n{written}"
+    );
+
+    // The point of the whole command: those rules describe the folder well
+    // enough that they would not touch it.
+    sandboxed(&home)
+        .args(["plan"])
+        .arg(&root)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("0 file(s) would move"));
+
+    // And it refuses to overwrite rules somebody already has.
+    sandboxed(&home)
+        .args(["folder", "learn", "--write"])
+        .arg(&root)
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("already has rules"));
+}

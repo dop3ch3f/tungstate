@@ -9,6 +9,7 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use tungstate_core::learn::Level;
 use tungstate_core::templates::{TEMPLATES, template};
 
 /// Where a policy lives, relative to the folder it governs.
@@ -153,5 +154,107 @@ pub fn init(path: Option<&str>, name: Option<&str>) -> ExitCode {
     println!("wrote {}", policy.display());
     println!("{}", chosen.detail);
     println!("\nnothing has moved. See what it would do:\n  tungstate plan {path}");
+    ExitCode::SUCCESS
+}
+
+/// `tungstate folder learn <PATH> [--write] [--improved]`.
+///
+/// Reads the shape a folder already has and writes it down as rules. The
+/// inverse of everything else here, and the reason it exists: somebody who has
+/// already organised a folder by hand should not have to describe it again in
+/// a language they have just met.
+pub fn learn(path: &str, write: bool, improved: bool) -> ExitCode {
+    let Ok(root) = Path::new(path).canonicalize() else {
+        eprintln!("error: cannot read `{path}`");
+        return ExitCode::FAILURE;
+    };
+
+    // `PROBE` is a constant in this workspace with a test that it parses, so a
+    // failure here is our bug and not something the user can act on.
+    let probe = tungstate_core::policy::Policy::parse(tungstate_core::learn::PROBE)
+        .expect("the probe policy parses")
+        .policy;
+    let backend = tungstate_backend::local::LocalBackend::new(root.clone());
+    let snapshot = match tungstate_attrs::survey(&backend, &probe) {
+        Ok(snapshot) => snapshot,
+        Err(error) => return crate::fail(&error),
+    };
+
+    let name = root
+        .file_name()
+        .map_or_else(|| "folder".to_string(), |n| n.to_string_lossy().to_string());
+    let learned = tungstate_core::learn::learn(&snapshot, &name);
+
+    println!("folder \"{name}\" at {}", root.display());
+    if learned.found_a_shape() {
+        let words: Vec<&str> = learned.levels.iter().map(Level::word).collect();
+        println!(
+            "  {} of {} file(s) sit in a shape {} level(s) deep",
+            learned.explains,
+            learned.of,
+            learned.levels.len()
+        );
+        println!("  shape: {}", words.join(" / "));
+    } else {
+        println!(
+            "  no shape found: {} file(s), none in a directory",
+            learned.of
+        );
+    }
+    if learned.loose > 0 {
+        println!("  {} file(s) sit loose at the top", learned.loose);
+    }
+
+    if !learned.suggestions.is_empty() {
+        println!("\nwhat would be better:");
+        for s in &learned.suggestions {
+            println!("  - {}", s.headline);
+            println!("    {}", s.why);
+        }
+    }
+
+    // Both are printed, because choosing between them is the point: the rules
+    // that keep what you have, and the same rules improved.
+    let chosen = if improved {
+        let Some(text) = learned.improved.as_deref() else {
+            eprintln!("\nerror: there is nothing to improve here");
+            return ExitCode::FAILURE;
+        };
+        text
+    } else {
+        &learned.as_is
+    };
+
+    if !write {
+        println!(
+            "\n--- rules that keep this shape {}---",
+            if improved { "(improved) " } else { "" }
+        );
+        print!("{chosen}");
+        if learned.improved.is_some() && !improved {
+            println!("\n(`--improved` shows the same rules with the suggestions applied)");
+        }
+        println!("\nnothing has been written. `--write` saves this as the folder's rules.");
+        return ExitCode::SUCCESS;
+    }
+
+    let policy = root.join(POLICY_RELATIVE);
+    if policy.exists() {
+        // Same refusal `init` makes, for the same reason: a policy is
+        // somebody's work, and this command starts them off rather than over.
+        eprintln!("error: `{}` already has rules", root.display());
+        eprintln!("edit `{}`, or move it aside first", policy.display());
+        return ExitCode::FAILURE;
+    }
+    if let Some(parent) = policy.parent()
+        && let Err(error) = std::fs::create_dir_all(parent)
+    {
+        return crate::fail(&error);
+    }
+    if let Err(error) = std::fs::write(&policy, chosen) {
+        return crate::fail(&error);
+    }
+    println!("\nwrote {}", policy.display());
+    println!("nothing has moved. `tungstate plan {path}` says what these rules would do.");
     ExitCode::SUCCESS
 }
