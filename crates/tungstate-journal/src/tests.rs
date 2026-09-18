@@ -1711,7 +1711,13 @@ fn a_folder_can_be_found_by_its_root() {
 #[test]
 fn a_lookup_path_is_resolved_even_when_the_file_is_gone() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let real = dir.path().canonicalize().expect("canonical temp dir");
+    // The canonical root *as this crate spells it*. A bare `canonicalize` keeps
+    // Windows's verbatim `\\?\` prefix, which `resolve_for_lookup` takes back
+    // off, so comparing against the bare form asserts the one spelling the
+    // function deliberately does not produce.
+    let canonical = dir.path().canonicalize().expect("canonical temp dir");
+    let real =
+        std::path::PathBuf::from(crate::without_verbatim_prefix(&canonical.to_string_lossy()));
 
     // A file that exists resolves outright.
     let here = dir.path().join("present.txt");
@@ -1726,10 +1732,18 @@ fn a_lookup_path_is_resolved_even_when_the_file_is_gone() {
     // already moved, so the old name no longer exists and cannot be
     // canonicalised at all. The deepest ancestor that does exist is resolved
     // and the rest put back on.
-    let gone = dir.path().join("subdir/deeper/moved-away.jpg");
+    // Built component by component rather than from a slash-separated string:
+    // on Windows the latter embeds forward slashes in the path, and although
+    // `Path` comparison normalises them, the expectation should not depend on
+    // that to be read as correct.
+    let gone = dir
+        .path()
+        .join("subdir")
+        .join("deeper")
+        .join("moved-away.jpg");
     assert_eq!(
         crate::resolve_for_lookup(&gone),
-        real.join("subdir/deeper/moved-away.jpg"),
+        real.join("subdir").join("deeper").join("moved-away.jpg"),
         "a path that no longer exists still resolves through its parents"
     );
 
