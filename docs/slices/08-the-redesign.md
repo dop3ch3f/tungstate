@@ -1,7 +1,7 @@
 # Slice 8: the redesign
 
-The brief for rebuilding the window. Written at the point the engine was
-locked, so that it can be handed to a fresh session whole.
+The brief for rebuilding the window, written at the point the engine was locked
+so it can be handed to a fresh session whole.
 
 ---
 
@@ -9,135 +9,137 @@ locked, so that it can be handed to a fresh session whole.
 
 > Redesign the tungstate window.
 >
-> **What this is.** Tungstate keeps folders in the shape you declared, and
-> moves files between machines without losing them. It is a Tauri app: a Rust
-> engine of about 21,500 lines across six crates, and a window of about 3,700
-> lines of Vue 3, TypeScript and CSS in `crates/tungstate-gui/ui/`. You are
-> replacing the second number.
+> ### Start here, because it is new
 >
-> **Read first, in this order:** `docs/SEAM.md` — the contract between engine
-> and window, and the list of safety properties a redesign has to keep.
-> `docs/slices/07b-tour.md` §7 — what happened the last time nobody looked at
-> the screens. `docs/DESIGN.md` §1 for what the product promises.
+> Two commands landed this week that change what the app is able to say.
+> `learn_folder` reads the shape a folder is already in. `compare_folder`
+> reports what every layout would do to that same folder, with counts and a
+> real example move.
 >
-> **The hard constraint.** This needs no Rust. Every capability is already a
-> command and every result already crosses as data. If you find yourself
-> needing an engine change, stop: that is a hole in the seam, and it belongs in
-> `docs/SEAM.md` and a separate commit, not quietly inside the redesign.
+> Until now the app made people learn its vocabulary before it would show them
+> anything. Add a folder, choose between four layouts described in sentences,
+> and only then find out what happens to your files. That order can now be
+> turned around. Somebody points at a folder, and the app shows them their own
+> files, arranged the way they already keep them, beside what each alternative
+> would do to them. Nobody has to know what a "layout" is to read that screen.
 >
-> ### What is wrong with the window today
+> Design for that. It is the interesting problem in this product and it has
+> been out of reach until now.
 >
-> It asks you to learn its vocabulary before it shows you anything. You add a
-> folder, then choose between layouts described in sentences, and only then see
-> what any of it would do to your files. The layout picker appears only for a
-> folder with no rules, so once a folder is set up there is no way to ask what
-> a different shape would have done.
+> ### The feel to aim for
 >
-> Two commands added recently change what is possible: `learn_folder` reads the
-> shape a folder is already in, and `compare_folder` reports what every layout
-> would do to it, with counts and a real example move. The window can now show
-> somebody their own folder before asking them to decide anything.
+> CleanMyMac, for the shape of the interaction. Nothing asked up front, a
+> result on screen, an obvious next move.
 >
-> ### The brief
+> Where that comparison stops working is worth keeping in view. CleanMyMac
+> deletes things and has years of reputation behind it. Tungstate moves your
+> files and has none, so the way back belongs on the same screen as the action
+> rather than in a history tab. One button is right. One button with no visible
+> undo is not.
 >
-> Point at a folder, see what we found, press one button. Take the shape of the
-> interaction from CleanMyMac: ask nothing up front, show a result, make the
-> action obvious. Note where the comparison breaks — CleanMyMac deletes things
-> and is trusted by reputation; this moves your files and has no reputation
-> yet, so the way back has to be visible at the moment it is needed rather than
-> filed in a history screen.
+> Keep four words: rules, preview, tidy up, put it back. They were argued over
+> and tested on real screens, and they are not what is wrong. The shape of the
+> interaction is being rebuilt, not the glossary.
 >
-> Keep the plain-language vocabulary: rules, preview, tidy up, put it back.
-> Those words were argued over and tested on the existing screens. The
-> interaction is what is being rebuilt, not the glossary.
+> Everything else is open, including the dark palette. It was a deliberate
+> choice for a tool that sits open during long transfers, and you may keep it,
+> invert it, or throw it away.
 >
-> The visual direction is open, and the guide's method for finding one is
-> below. Dark is the existing design and is deliberate, but it is not a
-> requirement.
+> ### Where things are
 >
-> ### What must survive, whatever it looks like
+> The window is about 3,700 lines of Vue 3, TypeScript and CSS in
+> `crates/tungstate-gui/ui/`. That is what you are replacing. Underneath it sit
+> about 21,500 lines of Rust across six crates with 467 tests, and you will not
+> need to touch any of it: every capability is already a command and every
+> result already crosses as data. If you do find yourself wanting an engine
+> change, that is a hole in the seam. Write it into `docs/SEAM.md` and commit it
+> on its own rather than folding it into the redesign.
 >
-> From `docs/SEAM.md`, and these are safety properties rather than taste. A
-> simpler screen makes them matter more, not less.
+> Read `docs/SEAM.md` first for what the window can ask for. Then
+> `docs/slices/07b-tour.md` §7, which is what happened the last time nobody
+> looked at the screens.
 >
-> 1. Nothing moves without the person having seen what would move.
+> ### Finding the look
+>
+> Follow the design method in `~/.claude/CLAUDE.md` under "Writing & Design",
+> and read `~/.claude/references/ai-world-class-designer-guide.pdf` before you
+> start. The `frontend-design` skill applies. The short version:
+>
+> Go broad first. You cannot be random on request, so bring the entropy from
+> outside: generate a random string in a shell script and derive palette, type
+> and layout from it, or work from one named and specific inspiration. Get at
+> least three genuinely different directions up before you narrow. An idea that
+> sounds bad on paper is worth one build.
+>
+> Then stop judging your own work. Screenshot the running app and hand the
+> image, not the code and not your reasoning, to a fresh critic on a stronger
+> model. Keep its prompt fixed: name the aesthetic, say how a good studio would
+> execute it, list the biggest gaps, rank it against four real professional
+> examples, score it out of ten. Watch whether the score is still moving after
+> a round or two before spending more.
+>
+> Then take things away. Restraint is most of what separates this from
+> template output, and the polish pass is mostly deletion. Prefer native
+> components over custom ones, and real images, patterns or flat colour over
+> gradients and glows built in code.
+>
+> For the copy, treat your first draft as lorem ipsum that shows the structure.
+> Write it, then audit it against the tells in the guide, then rewrite. Run the
+> `humanizer` skill on anything a user will read. Do as many rounds as it takes
+> rather than trying to dodge the tells while drafting.
+>
+> ### Five things that have to stay true
+>
+> These are safety properties rather than taste, and a screenshot cannot reveal
+> any of them. Full versions in `docs/SEAM.md`.
+>
+> 1. Nothing moves until the person has seen what would move.
 > 2. Everything is reversible, and the way back is visible where it is needed.
->    `put_back` takes any plan id, so any past reorganisation can be offered.
-> 3. A count of files and a count of operations are different numbers. Slice 7b
+>    `put_back` accepts any plan id, so any past reorganisation can be offered.
+> 3. Files moved and operations performed are different numbers. Slice 7b
 >    shipped "moved 9 file(s)" for five moved files.
-> 4. "Left alone" has three different causes — no rule claimed it, it is inside
->    its cooldown, or it changed while we looked. A screen that collapses those
->    into one word hides the only question worth asking.
+> 4. "Left alone" has three causes: no rule claimed it, it is inside its
+>    cooldown, or it changed while we looked. Collapsing those into one word
+>    hides the only question worth asking.
 > 5. Directories removed matters as much as files moved. It is the number that
->    says a layout is replacing a shape rather than adding to one.
+>    shows a layout replacing a shape rather than adding to one.
 >
-> ### How to work
->
-> Follow the design method in `~/.claude/CLAUDE.md` ("Writing & Design"), and
-> read `~/.claude/references/ai-world-class-designer-guide.pdf` before starting.
-> The `frontend-design` skill is installed and applies. In short:
->
-> **Discover.** Go broad before deep. You cannot be random on request, so bring
-> entropy from outside: generate a random string with a shell script and derive
-> palette, type and layout from it, or work from a named, specific inspiration.
-> Produce at least three genuinely different directions before narrowing. Ideas
-> that sound bad are worth one try.
->
-> **Define.** Do not judge your own work. Screenshot the running app and hand
-> the image — not the code, not this conversation — to a fresh-context critic
-> on a stronger model. Keep the critic's prompt fixed: name the aesthetic, say
-> how a top studio would execute it, list the biggest gaps, rank it against
-> four real professional examples, score out of ten. Check whether the score is
-> still moving after one or two rounds before spending more.
->
-> **Deliver.** Restraint reads premium, and the polish pass is mostly deletion.
-> Prefer native components over custom ones. Prefer real images, patterns or
-> solid colour over gradients and glows built in code.
->
-> **Copy.** Treat your first draft as lorem ipsum: it shows the structure, then
-> every line gets rewritten in one plain voice. Draft it, then audit against
-> the tells listed in the guide, then rewrite. Do that as many rounds as it
-> takes rather than trying to avoid the tells while writing.
->
-> ### Verification, which is not optional here
+> ### Then look at it
 >
 > Three of the last five screen defects in this project shipped green, and
 > slice 7b found five more by opening the window that 435 passing tests had
-> not. Use the capture method recorded in memory
-> (`tungstate-screen-check-method`): one window, by its CoreGraphics id,
-> scoped to the app's own pid. Never a region capture — it photographs whatever
-> is in front of the rectangle. Remember the preview is scaled: multiply
-> coordinates read off it by 1.08.
+> missed. Use the capture method in memory (`tungstate-screen-check-method`):
+> one window, by its CoreGraphics id, scoped to the app's own pid. Never a
+> region capture, which photographs whatever sits in front of the rectangle.
+> Coordinates read off the preview need multiplying by 1.08.
 >
-> Every state gets looked at, not inferred. Before declaring it done:
+> Every state gets looked at rather than inferred. Before calling it done:
 > `cargo fmt --all --check`, `cargo clippy --all-targets --locked -- -D
 > warnings`, `cargo test --locked`, `npm run build`, and CI green on Linux,
 > macOS and Windows.
 >
-> ### Stopping criteria
+> ### When to stop
 >
-> Stop and show me when the critic scores eight or higher twice running with no
-> new gaps named, or when two consecutive rounds move the score by less than a
-> point. Do not keep polishing past that without saying so.
+> Stop when the critic scores eight or better twice running with no new gaps
+> named, or when two rounds in a row move the score by less than a point. Say
+> so rather than quietly polishing past it.
 >
-> Write `docs/slices/08-tour.md` as you go: what you tried, what the critic
+> Keep `docs/slices/08-tour.md` as you go: what you tried, what the critic
 > said, what you threw away, and what you would still change.
 
 ---
 
-## Why the brief is shaped this way
-
-Three things in it are deliberate and easy to undo by accident.
+## Three choices in the brief worth keeping
 
 **It does not list the design tells to avoid.** The guide is explicit that
-banning them up front makes a model overthink and invent stranger ones. The
-instruction is draft, audit, rewrite.
+banning them up front makes a model overthink and invent stranger ones. Draft,
+audit, rewrite.
 
-**It names what must survive, and nothing about how it should look.** The
-safety properties are the part that cannot be rediscovered by a critic looking
-at a screenshot: no image shows that "left alone" has three causes.
+**It names what must stay true and says nothing about how the app should
+look.** The safety properties are the part a critic staring at a screenshot
+cannot recover. No image shows that "left alone" has three causes.
 
-**It sends the screenshot to a critic that cannot see the code.** A builder
-scoring its own work is the failure this whole project keeps meeting in other
-costumes — 435 green tests and a window telling somebody it had moved nine of
-their files.
+**The critic never sees the code.** A builder scoring its own work is the
+failure this project keeps running into wearing different clothes, most
+recently 435 green tests and a window reporting that it had moved nine files
+when it moved five.
