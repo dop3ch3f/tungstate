@@ -142,9 +142,129 @@ digit and the fixture silently backdates half its files to the wrong day.
 
 ---
 
+## 2. Three directions, and where they came from
+
+The brief asks for at least three genuinely different directions before
+narrowing, and is specific about why asking a model for variety does not
+produce any: asked to be unique it returns the most probable version of
+unique. The variety has to come from outside.
+
+So `scripts/seed.sh` prints a random string, and a mapping recorded here turns
+it into design decisions. The mapping was written before the seeds were drawn:
+
+| Property | Derived from |
+|---|---|
+| base hue | sum of character codes, mod 360 |
+| ground | count of digits, mod 4 → near-black / mid-grey / paper-white / ink-on-cream |
+| density | count of capitals, mod 3 → tight / normal / airy |
+| type pairing | longest run of letters, mod 4 |
+| radius | squared if the string contains `/` or `+`, else rounded |
+| where the accent is spent | sum of character codes, mod 4 |
+
+The three seeds, and what they gave:
+
+```
+A  O78kyuj9pqQf6spnR7sVw7PYaR3AXpIX
+   ink-on-cream · airy · serif text + grotesque figures · rounded
+   accent on the thing you have chosen
+
+B  VzSvLYkYxGnz7wODb4pMDdMUbJnUsLXh
+   paper-white, warm · normal · mono throughout · rounded
+   accent on what is live now
+
+C  xYxWfgJunLJWLZWKARK0febtYtFqFxpT
+   mid-grey, warm-green · airy · humanist + mono · rounded
+   accent on what would change
+```
+
+**One intervention, recorded rather than hidden.** The first three seeds all
+landed on a light ground, because two of the four ground values are light and
+three draws went that way. That is a real result and not a bad one, but it
+would have left nothing dark to compare against, and the dark palette was a
+deliberate choice for a tool that sits open during long transfers. So C's seed
+was redrawn until the ground came out dark. It took one draw. Nothing else was
+redrawn, and the mapping was not adjusted after the fact.
+
+The seed sets palette, type and density. It does not set composition, and
+composition is where the three actually differ:
+
+- **A, the measuring instrument.** One column, one row per way of filing, the
+  figures set large and tabular so the eye compares down the column rather than
+  reading each row.
+- **B, the report.** A printed report of the kind a line printer used to
+  produce. Monospaced throughout, column-aligned, ruled hairlines, no cards and
+  no containers.
+- **C, the workbench.** A work surface. Each way of filing is a tile carrying a
+  bar of the folder itself: the blue part is what that layout would move, the
+  grey part is what it would leave.
+
+### They are fed real answers, not invented ones
+
+`src/looks/captured.ts` holds output from `tungstate plan --json` and
+`tungstate folder learn` run against `messy-downloads/`. Every number, name,
+path and sentence is the engine's.
+
+This is not fussiness. A mockup fed invented data gets comfortable string
+lengths and tidy two-digit numbers, and then the real screen arrives with
+`Screenshot 2026-09-01 at 11.02.44.png → Images/Screenshot 2026-09-01 at
+11.02.44.png` and has nowhere to put it. All three directions had to deal with
+that path, and they deal with it differently, which is itself part of what is
+being judged.
+
+The two rows a mockup would never invent are in there too: the
+`(the rules you have)` row with an empty summary, and the same row with
+`settles: false`, which is the one refusal the window keeps.
+
+### What building them found
+
+Three defects, all the same family, all invisible without opening the window.
+
+**A global class name reached into a component that never asked for it.** The
+first direction used `class="sheet"` and `class="lede"` for its own layout.
+Both already exist in `styles.css`, where `.lede` sets `color: var(--light)`.
+On a cream ground that is near-white on near-white: the folder name and the
+opening paragraph rendered as faint smudges. Nothing failed. The fix was to
+prefix every class in each direction — `a-`, `b-`, `c-` — so the stylesheet
+being replaced cannot reach in while it is still loaded.
+
+**A selector that matched nothing, again.** `.a-fig.sub` in the stylesheet
+against `class="a-fig a-sub"` in the template, so the two smaller figures lost
+their stacking and rendered as `6made`. This is the same defect slice 7b found
+eleven of, and it took about four minutes to find *because a script was
+looking*, rather than an afternoon of squinting.
+
+That script is the interesting part. It reads each component, collects the
+classes its template uses and the classes its styles define, and prints the
+difference both ways. It found five more misses immediately. It also had a bug
+worth keeping: it took everything between `<template>` and the first
+`</template>`, and Vue templates contain nested `<template v-if>` elements, so
+it silently stopped reading a third of the way down the file and reported the
+rest as clean. The same assumption is why the prefixing pass missed those
+classes in the first place. Both now use the *last* `</template>`, and the real
+checker in the next commit inherits the lesson.
+
+**A blanket rule outranked the rule it was protecting.** Forcing colour with
+`.c-bench button { color: inherit }` beats `.c-go { color: ... }`, because a
+class plus a type selector outranks a class alone. The primary button lost its
+dark text and turned pale blue on pale blue. Restating it as
+`.c-bench .c-go` fixed it. Specificity is not a style question here: the button
+was unreadable.
+
+### What is deliberately not in them
+
+Each direction is one screen, not an app. There is no preview, no tidy, no put
+it back, no drain half. Building three whole applications to choose one is the
+version of going broad that cannot be afforded, and the composition question —
+how does a folder and eight possible futures for it fit on one screen — is
+answerable from this screen alone.
+
+---
+
 ## What is still not verified
 
 - The script has only been run on macOS. `touch -t`, `dd ... count=0 seek=`
   and sparse files all behave differently enough elsewhere that Linux is a
   guess until someone runs it.
-- Nothing has been screenshotted yet.
+- The three directions have been photographed at 1080x720 only. Neither the
+  860x560 minimum nor any state other than this one screen has been seen.
+- Nothing outside the comparison screen has been designed at all yet.

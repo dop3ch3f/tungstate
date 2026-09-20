@@ -11,6 +11,25 @@ import ActivityView from "./components/ActivityView.vue";
 import ConnectionsView from "./components/ConnectionsView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
+// --- slice 8, temporary --------------------------------------------------
+// Three design directions, switched with 1/2/3; 0 returns to the app as it is
+// today, so the incumbent is one keypress away while they are being judged.
+// The Tauri window has no address bar, so a query string is not available.
+// This block and `src/looks/` both go when a direction is chosen.
+import LookA from "./looks/LookA.vue";
+import LookB from "./looks/LookB.vue";
+import LookC from "./looks/LookC.vue";
+const look = ref<"A" | "B" | "C" | null>(null);
+function pickLook(e: KeyboardEvent) {
+  if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
+  if (e.key === "0") look.value = null;
+  if (e.key === "1") look.value = "A";
+  if (e.key === "2") look.value = "B";
+  if (e.key === "3") look.value = "C";
+}
+window.addEventListener("keydown", pickLook);
+// --- end slice 8, temporary ----------------------------------------------
+
 import { api, on, bytes, type Place, type Summary, type ConflictAsk, type Link, type Leg , type InterruptedRun, type Began, type IdenticalAsk, type Connection, type Accepted, type Preview} from "./api";
 
 type Tab =
@@ -338,7 +357,10 @@ function browseAt(location: string) {
 </script>
 
 <template>
-  <div class="frame">
+  <LookA v-if="look === 'A'" />
+  <LookB v-else-if="look === 'B'" />
+  <LookC v-else-if="look === 'C'" />
+  <div v-else class="frame">
     <header class="topbar chrome">
       <div class="wordmark"><Mark :size="20" /><span class="name">tung<span>state</span></span></div>
       <nav class="tabs">
