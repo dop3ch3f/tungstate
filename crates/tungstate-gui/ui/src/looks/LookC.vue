@@ -237,7 +237,9 @@ h2 {
 .c-refuse { font-size: 13px; color: #e2b05f; margin-top: 12px; }
 .c-why { font-size: 11.5px; color: var(--quiet); line-height: 1.45; margin-top: 3px; }
 
-/* See LookA: the stylesheet being replaced is still loaded. */
+/* The stylesheet this is replacing is still loaded, and it colours elements
+   this screen also uses. Rather than chase each collision, every text element
+   here is given its colour outright. */
 .c-bench h1, .c-bench h2, .c-bench p, .c-bench li, .c-bench span,
 .c-bench b, .c-bench i, .c-bench button {
   color: inherit;
