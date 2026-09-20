@@ -250,6 +250,25 @@ dark text and turned pale blue on pale blue. Restating it as
 `.c-bench .c-go` fixed it. Specificity is not a style question here: the button
 was unreadable.
 
+### The one that was kept
+
+**C, the workbench.** The deciding difference was not palette: it was that C
+shows all eight ways of filing at once and the other two show three. On a
+screen whose entire job is comparison, making someone scroll to see half the
+options is not a small cost. The bar on each tile is the other half of the
+argument — it answers "how much of my folder does this touch" before any number
+is read, which is exactly the question somebody who does not know what a layout
+is would ask first.
+
+A and B are deleted rather than parked. Keeping a losing direction around is
+how a codebase ends up with two half-finished design systems.
+
+What A and B were better at, which the next rounds should try to recover:
+A's figures were genuinely comparable down a column, because they were tabular
+and aligned; C's are inside tiles and cannot be scanned the same way. B was
+the most restrained of the three, and restraint is the thing this project keeps
+having to add back later.
+
 ### What is deliberately not in them
 
 Each direction is one screen, not an app. There is no preview, no tidy, no put
