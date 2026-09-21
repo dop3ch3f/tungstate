@@ -26,26 +26,9 @@ const SRC = join(ROOT, "src");
 const ALLOW = new Set([]);
 
 // Files still on the old stylesheet, skipped until they are deleted. This list
-// only ever shrinks; when it is empty the migration is done.
-const LEGACY = new Set(
-  [
-    "styles.css",
-    "api.ts",
-    "App.vue",
-    "components/ActivityView.vue",
-    "components/ConnectionModal.vue",
-    "components/ConnectionsView.vue",
-    "components/FindView.vue",
-    "components/FoldersView.vue",
-    "components/LinksView.vue",
-    "components/Mark.vue",
-    "components/Pane.vue",
-    "components/StorageView.vue",
-    "components/SyncModal.vue",
-    "components/TransfersView.vue",
-    "components/Welcome.vue",
-  ].map((p) => join(SRC, p)),
-);
+// only ever shrinks; it is empty now, which is what "the migration is done"
+// looks like.
+const LEGACY = new Set([]);
 
 const problems = [];
 const fail = (file, line, rule, message) =>
@@ -101,8 +84,17 @@ function classesUsed(tpl, file) {
       );
       continue;
     }
-    for (const q of body.matchAll(/'([\w-]+)'|"([\w-]+)"/g)) out.add(q[1] ?? q[2]);
-    for (const k of body.matchAll(/(?:^|[{,])\s*([a-zA-Z][\w-]*)\s*:/g)) out.add(k[1]);
+    if (body.trim().startsWith("{")) {
+      // An object binding: only the keys are class names. A quoted string on
+      // the right of a `:` is a value being compared, not a class -- reading
+      // those made `nav.view === 'history'` look like a class nobody styled.
+      for (const k of body.matchAll(/(?:^|[{,])\s*'([\w-]+)'\s*:/g)) out.add(k[1]);
+      for (const k of body.matchAll(/(?:^|[{,])\s*"([\w-]+)"\s*:/g)) out.add(k[1]);
+      for (const k of body.matchAll(/(?:^|[{,])\s*([a-zA-Z][\w-]*)\s*:/g)) out.add(k[1]);
+    } else {
+      // An array or an expression: every quoted string in it is a candidate.
+      for (const q of body.matchAll(/'([\w-]+)'|"([\w-]+)"/g)) out.add(q[1] ?? q[2]);
+    }
   }
   return out;
 }
