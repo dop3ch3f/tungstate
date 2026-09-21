@@ -649,6 +649,77 @@ still drawing. It lives at `$HOME/.tungstate-demo` now.
 
 ---
 
+## 7. Looking at the states the brief says only looking finds
+
+Fifteen or so of the roughly ninety-five states have been opened and
+photographed. Three defects came out of it, and none of them is visible in the
+code.
+
+**A folder that already had rules did not say so.** The comparison screen asks
+`f.current.has_rules`, which reads the *registry*. But `give_rules` refuses on
+the presence of a **file**, and a folder can have a policy without ever having
+been registered — which is exactly the state somebody is in the first time they
+point at a folder they set up from the command line. The screen offered seven
+layouts and an enabled button that would have thrown.
+
+The fix is to stop asking the wrong question. `compare_folder` returns the
+folder's own rules as its first row when and only when the file exists, so the
+presence of that row *is* the answer:
+
+```ts
+const mine = computed(() => f.outcomes.value.find((o) => o.summary === "") ?? null);
+```
+
+One source of truth, and it comes from the same call that draws the rest of the
+screen.
+
+**The preview's heading was the wrong name.** `PreviewView.folder` is the name
+the *policy file* declares. A folder called `messy-downloads` governed by the
+`downloads` layout rendered as "downloads", so the heading named a layout and
+the path underneath named a folder.
+
+**A sentence that had stopped being true.** After an undo the screen still
+said "nothing here has been reorganised yet", which was the right sentence
+before the tidy and the wrong one after it.
+
+### And one thing that was not a defect
+
+A faint repeating mark kept appearing in the rail in every screenshot, always
+at the height of a table row. It looked exactly like content bleeding under the
+navigation. Cropping the capture and looking at that strip on its own showed a
+flat field of one colour: the marks are an artefact of the **viewer**
+downscaling a 2160px capture to 2000px, not of the application.
+
+Worth recording because the cost runs both ways. Slice 7b's lesson is that a
+screenshot shows what tests cannot. This is the other half: a screenshot can
+also show what is not there, and the answer is the same either way — crop in
+and look again rather than start editing CSS.
+
+### What driving the window by hand is actually like
+
+Every click is computed from a screenshot: read the coordinate off the preview,
+multiply by 1.08 because the viewer downscales, halve it because the capture is
+a 2x backing store, add the window origin. Get any step wrong and the click
+lands on nothing, which is indistinguishable from a button that does not work.
+
+Two traps beyond the ones already in memory:
+
+- **The window eats the first click after it is raised.** Every sequence has to
+  click once to focus and then again to act, or the first instruction is
+  silently swallowed.
+- **Coordinates die when the layout changes.** A walk written against the
+  screen before the rail existed clicked 186 pixels to the left of everything
+  afterwards and produced four screenshots of the same unchanged screen. They
+  were only caught by comparing checksums.
+
+And the dev server had to go. `npm run dev` kept being killed between steps,
+and a window pointed at a dead `localhost:5173` is blank white, which looks
+exactly like a crash. Building with `--features tauri/custom-protocol` embeds
+`ui/dist` and removes the dependency entirely, at the cost of a 35-second Rust
+rebuild per iteration. For driving a window by hand that is the better trade.
+
+---
+
 ## What is still not verified
 
 - The script has only been run on macOS. `touch -t`, `dd ... count=0 seek=`
@@ -657,10 +728,10 @@ still drawing. It lives at `$HOME/.tungstate-demo` now.
 - **The drain half is untouched.** Links, Connections, Find, Storage and the
   two-pane browser are still the old screens on the old stylesheet, reachable
   on `0`.
-- Of roughly 95 states, about a dozen have been looked at. Not looked at yet:
-  the never-settles refusal, broken rules, an empty folder, a folder that
-  already has rules, the cooldown wait, a tidy that skips or fails, and every
-  state in the drain half.
+- Of roughly 95 states, about fifteen have been looked at. Still not looked
+  at: broken rules, an empty folder, the cooldown wait, a tidy that skips or
+  fails, and **every state in the drain half** -- it has been opened and its
+  panes render, but no transfer has been run through the new screens.
 - The blocking tidy has not been timed on `huge/` (5,000 files), so whether the
   window merely goes quiet or actually freezes is still unknown.
 - 1080x720 only. The 860x560 minimum has not been looked at once.

@@ -147,10 +147,6 @@ const current = computed(() =>
   registered.value.find((f) => f.root === root.value) ?? null,
 );
 
-/** Whether `give_rules` would refuse. It will not overwrite a policy, so a
- *  folder that already has one can only be compared against, not re-filed. */
-const hasRulesAlready = computed(() => current.value?.has_rules ?? false);
-
 export function useFolders() {
   return {
     phase,
@@ -164,7 +160,6 @@ export function useFolders() {
     busy,
     problem,
     current,
-    hasRulesAlready,
     listRegistered,
     look,
     open,

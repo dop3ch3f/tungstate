@@ -63,7 +63,7 @@ const shape = computed(() => {
         The rules already in this folder are not among them: they would move the
         same files every run.
       </p>
-      <p class="caveat" v-else-if="f.hasRulesAlready.value">
+      <p class="caveat" v-else-if="mine">
         This folder already has rules, so these are shown for comparison only.
         Changing them means editing
         <span class="path">.tungstate/policy.toml</span> yourself.
@@ -110,7 +110,7 @@ const shape = computed(() => {
         <div class="act">
           <Button
             look="primary"
-            :disabled="!chosen || f.hasRulesAlready.value"
+            :disabled="!chosen || !!mine"
             @click="chosen && f.choose(chosen)"
           >Give this folder these rules</Button>
           <span class="safe">You will see every move before anything happens.</span>
@@ -144,7 +144,7 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
    rather than near it. `minmax(0, 1fr)` and not `1fr`: a bare `1fr` has an
    `auto` minimum, so the longest description widens column one in its own row
    alone and every row lands its figures somewhere different. */
-.table { --cols: minmax(0, 1fr) 84px 92px 88px 88px; margin-top: var(--s3); }
+.table { --cols: minmax(0, 1fr) 84px 92px 88px 88px; margin-top: var(--s3); padding-bottom: var(--s4); }
 
 .key {
   display: grid;
