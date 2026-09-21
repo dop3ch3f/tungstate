@@ -453,6 +453,80 @@ if it says *what a thing is* rather than where it sits: `.path`, `.mono`,
 
 ---
 
+## 5. Making "moved 9 files" impossible to write
+
+The worst defect slice 7b found was not a styling slip. Tidying a folder
+promised "5 of 6 files would move" and then reported **"moved 9 file(s)"**.
+`Applied::done` counts *operations*, and that plan also made three directories
+and removed one: 5 + 3 + 1 = 9. Somebody who read both numbers was told their
+folder had been rearranged nearly twice as much as it was, and it survived 435
+passing tests because nothing tested the sentence.
+
+`docs/SEAM.md` made it safety property 3. `src/lib/counts.ts` makes it a
+compile error.
+
+```ts
+declare const isFileCount: unique symbol;
+export type FileCount = number & { readonly [isFileCount]: true };
+const seal = (n: number) => n as FileCount;
+
+export const moved = (done: TidyDone): FileCount => seal(done.moved);
+export const wouldMove = (view: PreviewView): FileCount => seal(view.files);
+```
+
+The trick is what is **not** there: no `asFileCount(n: number)`. A `FileCount`
+cannot be made from an arbitrary number at all. The only way to get one is to
+hand over the engine value that genuinely is a count of files, and every one of
+those has a named accessor. Everything else — `moves.length`, `ops.length`, a
+sum of files and directories — is a plain `number` and structurally not
+assignable.
+
+**Rust note for the tour:** this is the same idea as a newtype. `struct
+FileCount(usize)` in Rust makes a count of files a different type from a count
+of operations, so the compiler refuses to confuse them even though both are
+`usize` underneath. TypeScript has no newtypes, so the same effect is faked by
+intersecting `number` with a property keyed by a symbol nobody else can name.
+It is a phantom: `seal` compiles to nothing and the value at runtime is just a
+number. The whole mechanism exists at type-check time and then evaporates.
+
+Proved, rather than assumed:
+
+```
+src/proof.ts(6,28): error TS2345: Argument of type 'number' is not
+  assignable to parameter of type 'FileCount'.
+```
+
+That was `files(view.moves.length)` — the bug, written on purpose. The raw
+field `done.moved` is refused too; only `moved(done)` passes. `vue-tsc` runs
+inside `npm run build`, which CI runs on Linux, macOS and Windows.
+
+Directories get the same treatment for the opposite reason. `DirCount` is a
+separate type because safety property 5 says directories removed is the number
+that says a layout is *replacing* a shape rather than adding to one. Keeping
+them un-addable to a `FileCount` is how the two numbers stay two numbers.
+
+### The rest of the layer
+
+`engine/types.ts` is data only — no Vue, no Tauri — so a screen that needs to
+know what a `PreviewView` is does not pull `@tauri-apps/api` into its module
+graph to find out. The old `api.ts` mixed fifty `invoke` wrappers with
+`bytes()`, `kind()` and `mark()`, which is why every component imported `api`
+even when it only wanted to format a number.
+
+`engine/commands.ts` holds the calls, grouped by the question being asked the
+way `SEAM.md` groups them. `engine/events.ts` holds the twelve
+`transfer://` listeners, with a note at the top that tidying emits none of
+them, so nobody reaches for a progress bar that cannot exist.
+
+`lib/tone.ts` closes a live bug. `TransfersView.vue:218` does
+`:class="row.state"` and `ActivityView.vue` does `:class="op.status"`: an
+engine string put straight into the DOM. Add an outcome on the Rust side and
+the row renders with no rule at all — unstyled, not broken, nothing fails. That
+is the same family as the four selectors matching nothing, arriving from the
+other direction. Every such map is now total, with an explicit fallback.
+
+---
+
 ## What is still not verified
 
 - The script has only been run on macOS. `touch -t`, `dd ... count=0 seek=`
