@@ -65,7 +65,7 @@ async function remove(name: string) {
 <template>
   <div class="cx-wrap">
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
-    <Empty v-if="!all.length" line="No connections yet. One is needed to reach a NAS over FTP; a mounted volume needs none." />
+    <Empty v-if="!all.length" line="No connections yet. You need one to reach a NAS over FTP. A volume you have mounted in Finder needs none." />
     <div class="cx-row" v-for="c in all" :key="c.name">
       <div class="cx-who">
         <span class="cx-name">{{ c.name }}</span>

@@ -165,8 +165,8 @@ const WHERE = { files: "files", runs: "runs", links: "links", connections: "conn
       <h2 class="dh-qt">That file is already there, byte for byte</h2>
       <p class="path">{{ t.identical.value.path }}</p>
       <p class="dh-qw">
-        Nothing needs sending. You asked to move, so the question is only whether
-        to remove this copy: {{ bytes(t.identical.value.size) }} back.
+        Nothing needs sending. You asked to move, so the only question is
+        whether to remove this copy and get back {{ bytes(t.identical.value.size) }}.
       </p>
       <label class="dh-tick"><input type="checkbox" v-model="applyAll" /> do this for the rest of them</label>
       <div class="dh-qf">

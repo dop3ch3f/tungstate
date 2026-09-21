@@ -776,6 +776,38 @@ lookup, and now this. The matrix pays for itself every time.
 
 ---
 
+## 8. The copy pass
+
+The brief says to treat first-draft copy as placeholder text, audit it against
+the tells, and rewrite. Most of the window's sentences survived the audit,
+because they were written against the engine's own numbers rather than drafted
+to sound reassuring. What did not survive:
+
+**Nine em dashes, all inherited.** Every choice in the transfer dialog read
+`hash — compare fingerprints`, `rename — keep both` and so on. They came
+across unchanged from the old `api.ts`, where nobody had audited them because
+nobody had been asked to. Each one is now a colon. The em dash is the single
+most reliable tell there is, and nine of them in one dropdown is the kind of
+thing a reader registers without being able to say why.
+
+**A sentence that argued with itself.** The left-alone view said *"Each of
+these has its own reason, and they are not the same reason."* That is the same
+claim twice, the second time defensively. It says *"Each of these was left for
+a different reason"* now, which is what safety property 4 is asking the screen
+to make obvious.
+
+**Three smaller ones.** A passive (`One is needed to reach a NAS`), a
+placeholder too terse to parse (`leave blank not to`), and a sentence that
+trailed off into a bare figure (`remove this copy: 2.4 MB back`).
+
+What was deliberately left alone: *"Copy one, check it arrived intact, then
+remove the original"* is three clauses, which is the rule-of-three tell on
+paper. But it is the literal order of operations the engine performs, and
+turning it into two for the sake of the rule would make it less true.
+Recognising the false positive is part of the pass.
+
+---
+
 ## What is still not verified
 
 - The script has only been run on macOS. `touch -t`, `dd ... count=0 seek=`

@@ -27,7 +27,7 @@ onMounted(() => f.listRegistered());
       <Notice tone="bad" v-if="f.problem.value">{{ f.problem.value }}</Notice>
 
       <section class="known" v-if="f.registered.value.length">
-        <h2>Folders you have already</h2>
+        <h2>Folders you have added</h2>
         <button
           v-for="folder in f.registered.value"
           :key="folder.root"

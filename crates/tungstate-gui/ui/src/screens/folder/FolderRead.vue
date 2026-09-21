@@ -88,7 +88,7 @@ const shape = computed(() => {
         >
           <span class="wayname">{{ o.name }}</span>
           <span class="said">
-            {{ o.summary }}<template v-if="!o.settles"> — these would never settle</template>
+            {{ o.summary }}<template v-if="!o.settles"> (these would never settle)</template>
           </span>
           <span class="num n-move">{{ movedBy(o) }}</span>
           <span class="num">{{ made(o) }}</span>

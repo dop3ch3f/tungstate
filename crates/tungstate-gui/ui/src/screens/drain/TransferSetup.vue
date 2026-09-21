@@ -87,7 +87,7 @@ const count = computed(() => props.legs.reduce((n, l) => n + l.names.length, 0))
       </label>
       <label>
         <span class="set-lbl">save this pair as</span>
-        <input v-model="saveAs" placeholder="leave blank not to" />
+        <input v-model="saveAs" placeholder="leave blank to skip" />
       </label>
     </div>
 

@@ -94,7 +94,7 @@ async function confirmPutBack() {
       <!-- What the tidy just did, worded from TidyDone and nothing else. -->
       <Notice tone="plain" v-if="f.tidied.value" class="did">
         <template v-if="f.tidied.value.already_tidy">
-          Nothing to do — this folder already matches its rules.
+          Nothing to do: this folder already matches its rules.
         </template>
         <template v-else>
           Moved {{ files(moved(f.tidied.value)) }}.
@@ -182,7 +182,7 @@ async function confirmPutBack() {
              collapsed into a single word, which is what the property asks. -->
         <div class="alone" v-else-if="view === 'alone'">
           <p class="hint" v-if="p.left_alone.length">
-            Each of these has its own reason, and they are not the same reason.
+            Each of these was left for a different reason.
           </p>
           <ul>
             <li v-for="a in p.left_alone" :key="a.path">

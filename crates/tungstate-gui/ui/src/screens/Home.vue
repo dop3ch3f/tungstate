@@ -75,7 +75,7 @@ onMounted(async () => {
       </div>
 
       <p class="last" v-if="latest">
-        Last thing that happened: {{ latest.kind }} {{ when(latest.started_at) }}.
+        Last activity: {{ latest.kind }}, {{ when(latest.started_at) }}.
         <Button look="link" @click="nav.go('history')">Everything that has happened</Button>
       </p>
     </div>
