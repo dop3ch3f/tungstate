@@ -695,6 +695,43 @@ screenshot shows what tests cannot. This is the other half: a screenshot can
 also show what is not there, and the answer is the same either way — crop in
 and look again rather than start editing CSS.
 
+### The drain half, and the number it was getting wrong
+
+Six hundred megabytes of real files moved through the new screens, verified by
+hash on arrival, originals removed, and the ledger drawn from live events. It
+worked first time, which is what happens when the logic underneath was already
+right and only the drawing changed.
+
+But the sentence at the end said:
+
+> Finished. Moved 3, already there 0, set aside 0, left here 0, failed 0.
+> **0 B reclaimed.**
+
+Six hundred megabytes had just left this machine. `Summary.recovered` is not
+bytes and is not reclaimed space — the Rust says so directly:
+
+```rust
+/// Interrupted operations cleaned up before this run started.
+pub recovered: u64,
+```
+
+It is a **count of operations from an earlier run**, and the window was
+formatting it as bytes and calling it reclaimed. It would have read "0 B" after
+every clean transfer anybody ever made, and "2 B" after a resumed one.
+
+This is slice 7b's defect exactly, in new clothes: a sentence that parses,
+renders and reads as true, built from a number that means something else. It
+was carried over from the screen being replaced without anybody asking what the
+field was. The fix is `Summary.bytes`, which the Rust documents as "bytes
+successfully transferred", and `recovered` and `pruned` now get sentences that
+say what they actually count:
+
+> Finished. Moved 3 files, 600 MB.
+
+The zero rows are gone too. "already there 0, set aside 0, left here 0,
+failed 0" is four facts nobody needed, and dropping them is what made room to
+notice that the fifth was wrong.
+
 ### What driving the window by hand is actually like
 
 Every click is computed from a screenshot: read the coordinate off the preview,
@@ -730,8 +767,9 @@ rebuild per iteration. For driving a window by hand that is the better trade.
   on `0`.
 - Of roughly 95 states, about fifteen have been looked at. Still not looked
   at: broken rules, an empty folder, the cooldown wait, a tidy that skips or
-  fails, and **every state in the drain half** -- it has been opened and its
-  panes render, but no transfer has been run through the new screens.
+  fails. In the drain half, one real 600MB move has been run end to end; the
+  conflict and identical dialogs, a resumed run, a quarantine, stopping a run
+  and every connection state have not been seen.
 - The blocking tidy has not been timed on `huge/` (5,000 files), so whether the
   window merely goes quiet or actually freezes is still unknown.
 - 1080x720 only. The 860x560 minimum has not been looked at once.

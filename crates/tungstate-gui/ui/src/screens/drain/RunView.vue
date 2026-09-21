@@ -38,7 +38,14 @@ const DOT = {
 } as const;
 const dot = (state: string) => DOT[toneOfOutcome(state)];
 
-const reclaimed = computed(() =>
+/** Bytes that have arrived and been verified. On a move this is also the space
+ *  freed on this machine, which is the number the whole product exists for.
+ *
+ *  Not `Summary.recovered`, which is "interrupted operations cleaned up before
+ *  this run started" -- a count of operations. Formatting that as bytes and
+ *  calling it reclaimed produced "0 B reclaimed" at the end of a 600MB move,
+ *  which is the same defect slice 7b shipped wearing different clothes. */
+const moved = computed(() =>
   t.rows.value
     .filter((r) => r.state === "transferred")
     .reduce((n, r) => n + r.size, 0),
@@ -55,7 +62,8 @@ const planned = computed(() => t.rows.value.length);
     </Notice>
 
     <div class="run-readout" v-if="planned">
-      <span class="run-mass num">{{ bytes(reclaimed) }}</span>
+      <span class="run-mass num">{{ bytes(moved) }}</span>
+      <span class="run-of">moved</span>
       <span class="run-of">
         <b class="num">{{ t.settled.value }}</b> of <b class="num">{{ planned }}</b> files
       </span>
@@ -88,9 +96,27 @@ const planned = computed(() => t.rows.value.length);
         </template>
         <template v-else-if="t.summary.value.cancelled">Stopped when you asked.</template>
         <template v-else>Finished.</template>
-        Moved {{ t.summary.value.transferred }}, already there {{ t.summary.value.already_present }},
-        set aside {{ t.summary.value.quarantined }}, left here {{ t.summary.value.skipped }},
-        failed {{ t.summary.value.failed }}. {{ bytes(t.summary.value.recovered) }} reclaimed.
+        Moved {{ t.summary.value.transferred }} files, {{ bytes(t.summary.value.bytes) }}.
+        <template v-if="t.summary.value.already_present">
+          {{ t.summary.value.already_present }} were already there.
+        </template>
+        <template v-if="t.summary.value.quarantined">
+          {{ t.summary.value.quarantined }} set aside for you.
+        </template>
+        <template v-if="t.summary.value.skipped">
+          {{ t.summary.value.skipped }} left here.
+        </template>
+        <template v-if="t.summary.value.failed">
+          {{ t.summary.value.failed }} could not be moved; their originals are untouched.
+        </template>
+        <template v-if="t.summary.value.pruned">
+          {{ t.summary.value.pruned }} source director{{ t.summary.value.pruned === 1 ? "y" : "ies" }}
+          removed, because the move emptied {{ t.summary.value.pruned === 1 ? "it" : "them" }}.
+        </template>
+        <template v-if="t.summary.value.recovered">
+          {{ t.summary.value.recovered }} unfinished operation{{ t.summary.value.recovered === 1 ? "" : "s" }}
+          from an earlier run {{ t.summary.value.recovered === 1 ? "was" : "were" }} cleaned up first.
+        </template>
       </Notice>
       <ul class="run-failures" v-if="t.summary.value.failures.length">
         <li v-for="fail in t.summary.value.failures" :key="fail.path">
