@@ -347,13 +347,16 @@ fn give_rules(root: String, layout: String) -> Result<(), String> {
 }
 
 /// Read the shape a folder already has, without changing anything.
-#[tauri::command]
+///
+/// `async` here and on the four commands below: a plain command runs on the
+/// main thread on macOS, and these walk the whole folder, so the window froze.
+#[tauri::command(async)]
 fn learn_folder(root: String) -> Result<govern::LearnedView, String> {
     govern::learn(Path::new(&root))
 }
 
 /// What every starting layout would do to this folder, side by side.
-#[tauri::command]
+#[tauri::command(async)]
 fn compare_folder(root: String) -> Result<Vec<tungstate_core::compare::Outcome>, String> {
     govern::compare(Path::new(&root))
 }
@@ -363,12 +366,12 @@ fn rules_text(root: String) -> Result<String, String> {
     govern::rules_text(&PathBuf::from(root))
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn folder_preview(root: String, state: State<'_, App>) -> Result<govern::PreviewView, String> {
     govern::preview(&PathBuf::from(root), &state.journal)
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn tidy_folder(root: String, state: State<'_, App>) -> Result<govern::TidyDone, String> {
     let path = PathBuf::from(&root);
     let backend = tungstate_backend::local::LocalBackend::new(path.clone());
@@ -410,7 +413,7 @@ fn tidy_folder(root: String, state: State<'_, App>) -> Result<govern::TidyDone, 
     })
 }
 
-#[tauri::command]
+#[tauri::command(async)]
 fn put_back(root: String, plan: i64, state: State<'_, App>) -> Result<govern::PutBackDone, String> {
     let path = PathBuf::from(&root);
     let backend = tungstate_backend::local::LocalBackend::new(path.clone());

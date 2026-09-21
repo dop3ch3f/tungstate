@@ -830,10 +830,14 @@ inside that handler (`tauri-2.11.5/src/ipc/protocol.rs`,
 thread is not running: nothing repaints, nothing animates, and on a folder of
 a hundred thousand files the pointer would become a beachball.
 
-**The fix is one word per command** — `#[tauri::command(async)]` moves the
-call onto a worker thread — and it is Rust, so it is not in this slice. The
-brief is explicit that a missing capability is a conversation rather than a
-quiet commit, and this is raised as one.
+**The fix is one word per command.** `#[tauri::command(async)]` moves the
+call onto a worker thread. It is Rust, so it was raised rather than committed
+quietly, and was then approved: `learn_folder`, `compare_folder`,
+`folder_preview`, `tidy_folder` and `put_back` are now async. With the window
+live during a tidy, a second click could start a second tidy on the same
+folder, so `run()` in `useFolders.ts` now refuses to start while another call
+is in flight. It compiles, passes the suite and CI; the window has not yet been
+watched staying live through the 5,000-file tidy.
 
 What the window could do, it did. The "working" state was being set and then
 never drawn: Vue updates the DOM in a microtask, and the blocking call was

@@ -32,15 +32,14 @@ const painted = () =>
 /** Run an engine call, keeping the one error slot and the one busy slot
  *  honest. Errors cross as bare sentences, so there is nothing to unwrap. */
 async function run<T>(what: string, work: () => Promise<T>): Promise<T | null> {
+  // The folder commands run off the main thread, so the window stays live
+  // while one works and a second click could start a second tidy on the same
+  // folder. One at a time; every caller already chains its calls in sequence.
+  if (busy.value) return null;
   busy.value = what;
   problem.value = null;
-  // `learn_folder`, `compare_folder`, `folder_preview` and `tidy_folder` are
-  // synchronous commands, and on macOS Tauri runs those on the main thread, so
-  // the window cannot repaint until they return: 4.6s for 5,000 files in a
-  // debug build. Without this wait the "working" message is set and never
-  // drawn, and the window just looks hung. With it, the message is at least on
-  // screen for the freeze. The real fix is `#[tauri::command(async)]`, which is
-  // a Rust change and outside this slice.
+  // Let "working" reach the screen before the call, so a fast answer never
+  // looks like nothing happened and a slow one never looks hung.
   await painted();
   try {
     return await work();
