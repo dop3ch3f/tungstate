@@ -836,8 +836,9 @@ quietly, and was then approved: `learn_folder`, `compare_folder`,
 `folder_preview`, `tidy_folder` and `put_back` are now async. With the window
 live during a tidy, a second click could start a second tidy on the same
 folder, so `run()` in `useFolders.ts` now refuses to start while another call
-is in flight. It compiles, passes the suite and CI; the window has not yet been
-watched staying live through the 5,000-file tidy.
+is in flight. Watched on the 5,000-file root: the rail's hover
+still drew mid-tidy, the result read "Moved 5000 files.", and Put it back
+returned all 5,000.
 
 What the window could do, it did. The "working" state was being set and then
 never drawn: Vue updates the DOM in a microtask, and the blocking call was
