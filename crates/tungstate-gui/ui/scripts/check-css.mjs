@@ -17,8 +17,14 @@
 
 import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const ROOT = new URL("..", import.meta.url).pathname;
+// `new URL(..).pathname` is a URL path, not a filesystem path. On Windows it
+// is `/D:/a/tungstate/...`, and joining that produces `D:\D:\a\...` -- a
+// doubled drive letter and an ENOENT. `fileURLToPath` is the one that knows
+// the difference. Windows has now caught a real bug in three slices running,
+// which is the argument for the matrix.
+const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const SRC = join(ROOT, "src");
 
 // Classes that are legitimately used without a rule of their own, each with a

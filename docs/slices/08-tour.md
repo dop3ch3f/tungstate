@@ -755,6 +755,25 @@ exactly like a crash. Building with `--features tauri/custom-protocol` embeds
 `ui/dist` and removes the dependency entirely, at the cost of a 35-second Rust
 rebuild per iteration. For driving a window by hand that is the better trade.
 
+### Windows caught it again
+
+The first push went red on `windows-latest` only, in the checker itself:
+
+```
+Error: ENOENT: no such file or directory, scandir
+  'D:\D:\a\tungstate\tungstate\crates\tungstate-gui\ui\src'
+```
+
+A doubled drive letter. `new URL("..", import.meta.url).pathname` returns a
+**URL** path, which on Windows is `/D:/a/tungstate/...` — a leading slash and
+a drive letter. Joining that onto anything gives `D:\D:\...`. On macOS and
+Linux the same expression is simply the path, which is why it worked
+everywhere it was run. `fileURLToPath` is the one that knows the difference.
+
+That is three slices in a row where the Windows leg of the matrix found a real
+bug nothing else did: the journal's verbatim prefix, the path separator in a
+lookup, and now this. The matrix pays for itself every time.
+
 ---
 
 ## What is still not verified
