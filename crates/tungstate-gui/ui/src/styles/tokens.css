@@ -1,0 +1,83 @@
+/* Tungstate.
+ *
+ * Scheelite is calcium tungstate: a dense grey mineral that fluoresces
+ * blue-white under ultraviolet. The interface is that mineral seen in daylight
+ * rather than under the lamp -- a warm olive-charcoal work surface -- and the
+ * fluorescence is spent only on what is live or chosen. Dark is the design and
+ * not a default: this is a tool that sits open while a transfer runs for an
+ * hour.
+ *
+ * The only file in the project that contains a literal colour, a literal type
+ * size, a literal duration or a literal radius. `scripts/check-css.mjs`
+ * enforces that, and enforces that nothing outside this file reaches for a
+ * `--raw-` token: the raw palette is the implementation and the semantic layer
+ * below it is the interface. Re-tinting the whole application is editing the
+ * first block; re-deciding what a colour means is editing the second.
+ */
+
+:root {
+  /* The palette. Named for what they are, used by nobody directly. */
+  --raw-bench: #3b3e37;
+  --raw-bench-lift: #41453d;
+  --raw-bench-high: #4a4e44;
+  --raw-bench-edge: #4a4e43;
+  --raw-chalk: #eef0e9;
+  --raw-chalk-dim: #e6e8e0;
+  --raw-ash: #a2a797;
+  --raw-ash-deep: #7c8274;
+  --raw-slate: #24271f;
+  --raw-fluoresce: #7fd4ff;
+  --raw-fluoresce-ink: #0a2230;
+  --raw-amber: #e0b45f;
+  --raw-green: #6fcf97;
+  --raw-rust: #e2705f;
+
+  /* What they mean. Everything else in the project uses these. */
+  --surface: var(--raw-bench);
+  --surface-hover: var(--raw-bench-lift);
+  --surface-raised: var(--raw-bench-high);
+  --edge: var(--raw-bench-edge);
+
+  --text: var(--raw-chalk);
+  --text-quiet: var(--raw-ash);
+  --text-faint: var(--raw-ash-deep);
+
+  /* Spent on the thing that is live or chosen, and on nothing else. The brand
+     reserves this colour for the file being verified right now; a screen where
+     nothing is live spends it on the row you have picked. */
+  --accent: var(--raw-fluoresce);
+  --accent-ink: var(--raw-fluoresce-ink);
+
+  /* A filled control on a dark ground, which is not the accent: a button is
+     not a thing that is live. */
+  --control: var(--raw-chalk-dim);
+  --control-ink: var(--raw-slate);
+
+  --hold: var(--raw-amber);
+  --ok: var(--raw-green);
+  --bad: var(--raw-rust);
+
+  /* Type. Four sizes, because a table with a heading, a caption and column
+     labels needs four and does not need six. */
+  --font: "Avenir Next", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --display: 23px;
+  --body: 14.5px;
+  --small: 12.5px;
+  --fine: 11.5px;
+
+  /* Space, on a four. */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 22px;
+  --s6: 32px;
+
+  --radius: 6px;
+  --radius-lg: 8px;
+
+  --quick: 90ms;
+  --slow: 220ms;
+  --ease: cubic-bezier(0.2, 0, 0.2, 1);
+}

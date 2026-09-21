@@ -380,6 +380,79 @@ screenshot, which is the argument this project keeps re-learning.
 
 ---
 
+## 4. A script that reads the CSS nobody reads
+
+Slice 7b opened the window and found eleven defects. Four of them were one
+thing: **a selector that matches nothing.** `.mono` used three times and
+defined nowhere. `.path` scoped to `.ledger .path`, so the two paths written
+in prose lost it. `.spacer` defined only under `.topbar`, so the toolbar it
+was written for matched nothing and its buttons never moved right.
+`aria-current` bound in three places with no rule to draw it.
+
+Every one renders as *slightly wrong* rather than as an error. Nothing fails,
+so nothing tells you. Building the three directions produced three more of the
+same family before a single real screen existed.
+
+There is no off-the-shelf fix inside the constraint of not adding a
+heavyweight dependency. Stylelint needs a plugin and a config and still would
+not cross the template-to-stylesheet boundary. CSS Modules do not help either:
+`$style.typo` is `undefined` at runtime and typed `string` by Vue, so it fails
+silently in exactly the same way.
+
+So: `ui/scripts/check-css.mjs`. Node, no dependencies, about 200 lines, and
+wired into `npm run build` ahead of `vue-tsc`. CI already runs `npm run build`
+on Linux, macOS and Windows, so this guards all three with no workflow change.
+
+Six rules, each traceable to something that shipped:
+
+| Rule | The defect it would have caught |
+|---|---|
+| `unstyled-class` | `.mono`, used three times, defined nowhere |
+| `orphan-selector` | `.conns .addr.root`, a dead token nothing matched |
+| `undrawn-state` | `aria-current` on the open folder and the active view, neither drawn |
+| `undeclared-token` | a `var(--x)` that falls back to nothing, silently |
+| `raw-token-leak` | a component reaching past the semantic layer into the palette |
+| `template-literal-class` | a backtick class binding, which cannot be checked at all |
+
+It was tested against a file written to break all six before it was committed,
+because a checker that is itself wrong reddens three platforms at once. It
+catches all six.
+
+### The bug it had, which is the bug it exists to catch
+
+The first version read everything between `<template>` and the **first**
+`</template>`. Vue templates contain nested `<template v-if>` elements, so it
+stopped a third of the way down the file and reported the rest as clean. Worse,
+the same assumption had already been written into the script that prefixed the
+directions' class names, which is why three classes in one file were renamed in
+the stylesheet and not in the markup, and `.a-fig.sub` quietly matched nothing.
+
+The same wrong idea, written twice, producing the exact defect the tool was
+being built to find. It reads to the **last** `</template>` now.
+
+### What it cannot do, said plainly
+
+It proves existence, not correctness. It cannot see that a row is three pixels
+too tall, that a colour is wrong, or that the layout breaks at 860px. Those are
+what §3 and the state walk are for. It also cannot follow a computed class
+name, which is why a backtick binding is an error rather than a warning: a
+lookup object reads better anyway.
+
+### The tokens underneath it
+
+`src/styles/tokens.css` is the only file in the project with a literal colour,
+size, duration or radius, and the checker enforces it. It is two layers: a raw
+palette named for what the colours are, and a semantic layer naming what they
+mean. Nothing outside the file may reach for a raw token. Re-tinting the whole
+application is editing the first block; re-deciding what a colour *means* is
+editing the second.
+
+`base.css` holds the reset and three classes. A class earns a place there only
+if it says *what a thing is* rather than where it sits: `.path`, `.mono`,
+`.num`. That is slice 7b's generalisation kept rather than relearned.
+
+---
+
 ## What is still not verified
 
 - The script has only been run on macOS. `touch -t`, `dd ... count=0 seek=`

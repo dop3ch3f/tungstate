@@ -5,8 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vue-tsc --noEmit && vite build",
-    "preview": "vite preview"
+    "build": "node scripts/check-css.mjs && vue-tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "check": "node scripts/check-css.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",
