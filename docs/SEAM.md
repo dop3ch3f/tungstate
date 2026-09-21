@@ -97,8 +97,14 @@ important rather than less:
 1. **Nothing moves without the person having seen what would move.** The
    preview exists so the button is never a guess.
 2. **Everything is reversible, and the way back is visible at the moment it is
-   needed** — not buried in a history screen. `put_back` takes any plan id, so
-   the window may offer any past reorganisation, not only the most recent.
+   needed** — not buried in a history screen. `put_back` takes any plan id, but
+   nothing in the seam lists plan ids: `OpView` carries none, the plans table
+   is not exposed, and `history` matches a path exactly, so it returns nothing
+   for a folder root. What the window can reach is `PreviewView.undoable`, the
+   most recent reorganisation of that folder that can still be put back. Slice
+   8 offers that one beside the button that caused it. Offering older ones
+   needs a command that lists a folder's plans, which would be an addition to
+   this seam rather than a change to it.
 3. **A count of files and a count of operations are different numbers.** A plan
    makes and removes directories too. Slice 7b shipped "moved 9 file(s)" for
    five moved files.

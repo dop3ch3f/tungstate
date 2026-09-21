@@ -25,11 +25,23 @@ const putBackCount = ref<number | null>(null);
 const busy = ref<string | null>(null);
 const problem = ref<string | null>(null);
 
+/** Two frames: one for Vue to flush the DOM, one for the browser to paint it. */
+const painted = () =>
+  new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+
 /** Run an engine call, keeping the one error slot and the one busy slot
  *  honest. Errors cross as bare sentences, so there is nothing to unwrap. */
 async function run<T>(what: string, work: () => Promise<T>): Promise<T | null> {
   busy.value = what;
   problem.value = null;
+  // `learn_folder`, `compare_folder`, `folder_preview` and `tidy_folder` are
+  // synchronous commands, and on macOS Tauri runs those on the main thread, so
+  // the window cannot repaint until they return: 4.6s for 5,000 files in a
+  // debug build. Without this wait the "working" message is set and never
+  // drawn, and the window just looks hung. With it, the message is at least on
+  // screen for the freeze. The real fix is `#[tauri::command(async)]`, which is
+  // a Rust change and outside this slice.
+  await painted();
   try {
     return await work();
   } catch (e) {

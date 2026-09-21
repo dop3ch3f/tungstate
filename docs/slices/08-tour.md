@@ -808,22 +808,77 @@ Recognising the false positive is part of the pass.
 
 ---
 
+## 9. The one place the seam does not hold, and it is not a missing command
+
+The plan named a risk: *a long tidy may freeze the window, not merely go
+quiet.* It does, and the reason is in Tauri rather than in anything this
+slice wrote.
+
+Timed with the command line on the 5,000-file fixture, debug build:
+
+| call | what waits on it | time |
+|---|---|---|
+| `compare_folder` | the reading screen | 1.9s |
+| `tidy_folder` | Tidy up | 4.6s |
+
+All four folder commands that do real work — `learn_folder`,
+`compare_folder`, `folder_preview`, `tidy_folder` — are declared as plain
+synchronous functions. On macOS the IPC request arrives through a custom URL
+scheme handler, which runs on the main thread, and a synchronous command runs
+inside that handler (`tauri-2.11.5/src/ipc/protocol.rs`,
+`webview/mod.rs::on_message`). So for the length of the call the window's UI
+thread is not running: nothing repaints, nothing animates, and on a folder of
+a hundred thousand files the pointer would become a beachball.
+
+**The fix is one word per command** — `#[tauri::command(async)]` moves the
+call onto a worker thread — and it is Rust, so it is not in this slice. The
+brief is explicit that a missing capability is a conversation rather than a
+quiet commit, and this is raised as one.
+
+What the window could do, it did. The "working" state was being set and then
+never drawn: Vue updates the DOM in a microtask, and the blocking call was
+dispatched in the same task, so the thread froze before the browser painted.
+`useFolders.run()` now waits two animation frames — one for Vue to flush, one
+for the browser to paint — before handing over. The message is on screen for
+the freeze. The pulse beside it does not pulse, because nothing does.
+
+This is also why the reading screen offers no cancel button. There would be
+nothing to press it with.
+
+### And the input that went somewhere else
+
+Driving the window by synthetic clicks and keystrokes assumes the window is in
+front. Towards the end of the session macOS stopped letting a background
+process bring it forward, and another application kept the focus. The
+screenshots still looked right, because `screencapture -l` reads the window's
+own buffer whether or not anything covers it, but the clicks and the typed
+path were going to whatever was in front. The walk stopped there.
+
+Worth adding to the method: **check which application is frontmost before
+every sequence of input, not only which window is being photographed.** A
+capture that looks right proves nothing about where the last click landed.
+
+---
+
 ## What is still not verified
 
-- The script has only been run on macOS. `touch -t`, `dd ... count=0 seek=`
-  and sparse files all behave differently enough elsewhere that Linux is a
-  guess until someone runs it.
-- **The drain half is untouched.** Links, Connections, Find, Storage and the
-  two-pane browser are still the old screens on the old stylesheet, reachable
-  on `0`.
-- Of roughly 95 states, about fifteen have been looked at. Still not looked
-  at: broken rules, an empty folder, the cooldown wait, a tidy that skips or
-  fails. In the drain half, one real 600MB move has been run end to end; the
-  conflict and identical dialogs, a resumed run, a quarantine, stopping a run
-  and every connection state have not been seen.
-- The blocking tidy has not been timed on `huge/` (5,000 files), so whether the
-  window merely goes quiet or actually freezes is still unknown.
-- 1080x720 only. The 860x560 minimum has not been looked at once.
-- macOS only. Nothing has been seen on Linux or Windows.
-- The critic scored a six, not an eight. The stopping rule was the plateau
+- **A tidy blocks the window's UI thread.** Measured at 4.6s for 5,000 files
+  in a debug build; the release build and a large real folder are untimed. Not
+  fixable without the Rust change in §9.
+- **About twenty of roughly ninety-five states have been looked at.** Seen: the
+  start screen, the comparison on six fixture folders (including never-settles
+  and already-has-rules), preview, left alone, the tidy and put-back dialogs
+  and results, Home, the drain panes, the transfer dialog, a finished 600MB
+  move. Not seen: broken rules, the empty folder, the cooldown wait, a tidy
+  that skips or fails, the reading screen on a large folder, the conflict and
+  identical dialogs, a resumed or cleaned-up run, a quarantine, stopping a run,
+  links with content, connections with content, history with content, and
+  every error state.
+- **1080x720 only.** The 860x560 minimum has never been opened.
+- **macOS only by eye.** CI is green on Linux, macOS and Windows, which proves
+  it builds and the checks pass there, not that it looks right.
+- **The critic scored a six, not an eight.** The stopping rule was the plateau
   clause, not the quality clause.
+- **No generated imagery was used.** It was approved, and the direction that
+  won is a flat work surface with nothing it needed an image for. That is a
+  decision, not an omission, but it was not put back to the user.
