@@ -18,7 +18,7 @@ The one-line pitch that should survive every decision below:
 
 > **A reconciliation controller for filesystems.** You declare the desired shape of a tree. Tungstate continuously computes the diff between desired and actual, and applies it safely. Like Kubernetes controllers or Terraform, but the resources are files.
 
-That framing is what separates it from Hazel / organize / Maid (imperative "if X then move" rules with no notion of desired state, no drift detection, no undo, no remotes) and from rclone / Syncthing (sync, not structure).
+That framing is what separates it from Hazel / organize / Maid (imperative "if X then move" rules with no notion of desired state, no drift detection, no undo, no remotes) and from rclone / Syncthing (sync, not structure). **Qualified in slice 9b (§4d):** tungstate does keep a set of folders in step, but as declared desired state of a second kind, the equality of several trees, previewed, journalled and reversible like the first. What those tools lack is not sync; it is the desired state.
 
 ---
 
@@ -306,6 +306,72 @@ tungstate log --folder x --since 1d
 tungstate blame <dir>            for every file here: how and when did it get here (its Source)
 ```
 The `{Source}` template variable and `undo` both read from this journal. Building it early makes everything downstream cheaper.
+
+## 4d. Folder sync: a set of folders kept in step (DECIDED: scoped as slices 9b–9e)
+
+The drain moves a file once and forgets it. A **sync** remembers what every
+member of a set of folders looked like after the last run, and on each run
+makes the set true again in the direction the user chose. Members are ends in
+the ordinary grammar (`~/CapCut`, `nas:capcut`, `ftp:capcut`), any number of
+them, local or on any connection. Full specification in
+`docs/slices/09b-folder-sync.md`; this section records the shape.
+
+**Two knobs, not four modes.** A direction and an `--exact` switch:
+
+| direction | without `--exact` | with `--exact` |
+|---|---|---|
+| `--push` (the anchor sends) | every member ⊇ anchor | every member == anchor |
+| `--pull` (the anchor receives) | anchor ⊇ every member | anchor == union of members |
+| `--all` | every member == union of all | adds, edits and deletes propagate everywhere |
+
+`--push` and `--pull` name an **anchor** (the first member unless `--anchor`);
+`--all` has none. Without `--exact` nothing is ever removed and a hand deletion
+is copied back from another member; `tungstate sync forget` is the deletion
+that sticks.
+
+**A leg is a link.** Bytes move between two members at a time through the
+transfer engine (§4b) with the source kept, as a link the sync owns and the
+Links tab hides. Resume, the no-rename commit path, quarantine, progress, Stop
+and the governor are inherited, not rebuilt. Between two remote members a leg
+reads through this machine, and the preview says so.
+
+**An append-only baseline per member.** For each (member, path) the journal
+keeps the hash, size and modification time *as that member reported it* after
+the last run that touched it, plus the plan that wrote the row. Current state
+is the latest row whose plan is not undone, so `undo` of a run retires its
+baseline with the mark it already makes. A member is compared only with its
+own previous reading; modification times never cross members (§9 forbids
+ordering across backends, and FTP rounds to the minute). A member that reports
+no times is hashed instead, and the plan says so.
+
+**One desired content per path, then direction.** Each member is classified
+against its own baseline (`new`, `changed`, `unchanged`, `deleted`, `missing`),
+the set's desired content is decided from that (one changed hash wins; two or
+more is a conflict; an edit beats a deletion; a deletion propagates only with
+`--exact`), and only then does the direction decide who may send and who may
+receive. The decision is a pure function in `tungstate-core`, property-tested
+for convergence and for the hash multiset being preserved.
+
+**Removal is one knob per sync.** `on_remove = set-aside | delete`, default
+`set-aside` into the member's set-aside area (§4, rail 2), journalled and
+undoable; `delete` for the archive that exists to reclaim space. On a member
+that cannot rename (FTP via OpenDAL) set-asides are refused with the reason
+and additive copies proceed, the rule `replace` already follows.
+
+**Conflicts are asked about, never decided by clock.** `on_conflict` reuses
+the link vocabulary: `quarantine` (default) asks in the window and, unattended,
+parks the other members' versions beside each member's own, named after the
+member they came from; `rename` keeps both in place; `skip` leaves the path.
+`replace` and `newer-wins` are not offered.
+
+**An empty member is never a deleted member.** A member listing nothing where
+its baseline holds files, or removals past the blast limits on any member, is
+refused without `--yes`; `RootToken` is pinned per file. This is the failure
+every cloud sync client has shipped once.
+
+**Triggers.** On demand, on app launch (9d), continuously while the window is
+open with the watcher for local members and polling for remote ones (9e), and
+unattended through the daemon (slice 10), all calling one function.
 
 ## 5. Duplicate handling
 
@@ -669,6 +735,8 @@ Slices 0–4b are "v0.1: the drain works and I trust it, over a mount and over F
 - **DECIDED** Tungstate runs on every machine as a node; NAS self-governs; peer transfer protocol in v0.3 (§6b). Source handling is an explicit `--move` / `--move --trash` / `--copy` choice per link, no silent default (§4b). `[[rule]]` noun; policy at `<folder>/.tungstate/policy.toml` (§2). Rename filters, `adopt` intent, notification rules, stub option, LAN auth (§2, §8).
 
 - **DECIDED (slice 5)** Precedence is **first match in file order**; `priority` is removed and the load-time ambiguity error becomes a shadowing *warning* (§2). The reason it is safe to be this simple is that reconciliation is convergent, so a mis-ordered rule reverts with the rule. `tungstate-attrs` is its own crate so `tungstate-core` stays I/O-free (§7). Attributes have cost tiers and `Backend` gains a defaulted `read_prefix` (§7). `--json` is established on `explain` and nowhere else yet.
+
+- **DECIDED (2026-09-21, slices 9b–9e scoped)** Folder sync across a set of members (§4d): two knobs, `--push | --pull | --all` and `--exact`, with an anchor for the one-way forms; a leg is a link; an append-only per-member baseline, current by query; members compared only with themselves; nothing removed unless `on_remove` says how, default set-aside, and `sync forget` as the deletion that sticks; conflicts asked about and parked unattended, never decided by clock; the empty-member rail. Scheduled after dedup and the watcher, before the daemon. The introduction's "sync, not structure" is qualified, not withdrawn.
 
 Every part has now been brainstormed at least once. Nothing remains OPEN.
 
