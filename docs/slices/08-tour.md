@@ -279,11 +279,116 @@ answerable from this screen alone.
 
 ---
 
+## 3. Six rounds with a critic that never saw the code
+
+The method the brief points at is specific about why a builder cannot judge its
+own work: it reviews its own decisions and its own reasoning along with the
+pixels. So the critic here got a screenshot and nothing else. Fresh context
+every round, a stronger model, the same prompt every time, and no sight of the
+code, the repository, or its own previous answers.
+
+The prompt is fixed and lives in the tour rather than in the repo, because it
+is method rather than product: name the aesthetic, say how a top studio would
+execute it, list the biggest gaps element by element, rank the screenshot
+against four named professional applications, score it out of ten.
+
+### The scores, and the honest reading of them
+
+| Round | Score | What changed going in |
+|---|---|---|
+| 1 | 5 | the first build: eight tiles in a grid |
+| 2 | 6 | a list with aligned columns; the grid deleted |
+| 3 | 5.5 | bars deleted, one selection state, a measure |
+| 4 | 5.5 | one accent, no callout, constant row height |
+| 5 | 6 | figures on the row's baseline, plain column names |
+| 6 | 6 | one left edge, inset footer, hollow middle closed |
+
+**It never reached eight, and it ranked the screen fifth of five in every
+round**, behind Things 3, Linear, iA Writer and Arc. The brief says to say so
+rather than quietly polishing past it, so: this is a six, by a critic that
+scores hard and was asked to rank against four of the best-made applications
+on the platform.
+
+The stopping rule fired twice over. Rounds 3 to 4 moved the score by zero and
+rounds 5 to 6 moved it by zero, and the brief stops at two consecutive rounds
+moving less than a point. What is still on the critic's list at the end is
+mostly things it has said before and that were answered deliberately rather
+than missed: it wants the primary button to carry an accent, and the brand
+reserves that colour for what is live or chosen; it wants fewer text styles
+than a table with a heading, a caption and column labels can honestly have.
+
+### What the critic was worth
+
+Three findings paid for the whole exercise, and none of them were about taste.
+
+**It caught a real inconsistency in the numbers.** Round 1, first item: the
+sidebar said "28 of 30 files" and every row said "of 31". That is not a
+rendering slip. `learn_folder` counts files the probe policy did not ignore;
+`compare_folder` counts every entry it walked. Same folder, same moment, two
+denominators, and the redesigned screen is the first surface in this project
+that would ever have shown them side by side. The window now states one total
+and only one.
+
+**It named the grid as a dashboard.** The first build drew eight tiles each
+with its own bar. Eight bars in eight boxes share no axis, so the one thing
+the screen exists to do — compare — was the one thing it could not do. That
+charge turned the screen into a list and is the single largest change across
+all six rounds.
+
+**It kept finding the same fault under different names.** Too many accents,
+said three times in different words. Wrapped headers, said twice. A note made
+twice by a critic that cannot remember its last answer is worth much more than
+a note made once, and that rule decided what got acted on.
+
+### The instrument was broken for four rounds
+
+Round 4 complained the proportions were "off by roughly 1.5x throughout": the
+body copy at 22-24px, rows 108px tall, a title larger than any Mac app needs.
+None of that was true. The body is 14.5px and the rows are 54.
+
+`screencapture` returns the window's backing store, which on this display is
+2x. The critic was reading device pixels as points and marking the design down
+for being twice the size it is. Three of round 4's eleven findings came from
+that and were worthless.
+
+The fix is one line — `sips -z 720 1080` before handing the image over — and
+the lesson is larger than the fix: **a critic that measures needs to be given
+the units it thinks it is measuring in.** Rounds 5 and 6 were run on
+correctly-scaled images, which is why their complaints turned concrete: a
+button five pixels from the window edge, two left margins 12px apart, a rule
+that stops where the selection band does not.
+
+### Three defects only looking found, again
+
+- **A sentence that was there and could not be read.** The note explaining why
+  the folder's own rules are not offered rendered at the dimmest grey in the
+  palette at 11.5px. It was in the DOM, it was in the screenshot, and it was
+  invisible.
+- **Then the same sentence hidden behind the furniture.** Made readable, it
+  moved below the fold, where the sticky footer drew straight over it. The
+  content overflowed by about thirty pixels and the thing it hid was the one
+  sentence on the screen that explains a refusal.
+- **A grid that was not a grid.** Every row is a `<button>`, and a button
+  shrinks to fit. Seven rows meant seven grids of seven different widths, each
+  landing its figures somewhere else, under headers that belonged to none of
+  them. `width: 100%` fixed it. Before that, `1fr` had already had to become
+  `minmax(0, 1fr)`, because a bare `1fr` has an `auto` minimum and the longest
+  description was widening its own row alone.
+
+None of the three is visible in code review. All three are obvious in a
+screenshot, which is the argument this project keeps re-learning.
+
+---
+
 ## What is still not verified
 
 - The script has only been run on macOS. `touch -t`, `dd ... count=0 seek=`
   and sparse files all behave differently enough elsewhere that Linux is a
   guess until someone runs it.
-- The three directions have been photographed at 1080x720 only. Neither the
-  860x560 minimum nor any state other than this one screen has been seen.
-- Nothing outside the comparison screen has been designed at all yet.
+- Only one screen exists. There is no preview, no tidy, no put it back, and
+  no drain half yet, and the comparison screen is drawn from captured data
+  rather than from a live call.
+- 1080x720 only. The 860x560 minimum has not been looked at once.
+- macOS only. Nothing has been seen on Linux or Windows.
+- The critic scored a six, not an eight. The stopping rule was the
+  plateau clause, not the quality clause.

@@ -1,253 +1,270 @@
-<!-- Direction C — the workbench.
+<!-- The workbench, round 4.
      Seed: xYxWfgJunLJWLZWKARK0febtYtFqFxpT
-     mid-grey, warm-green · airy · humanist + mono · rounded ·
-     the accent spent on what would change.
 
-     The thesis: a work surface rather than a document. Each way of filing is a
-     tile you can pick up, and every tile carries a bar of the folder itself —
-     the blue part is what that layout would move, the grey part is what it
-     would leave. The numbers are still there, but the shape of the answer
-     arrives before you read any of them. -->
+     Scores so far: 5, 6, 5.5. The notes that repeated across rounds are the
+     ones acted on here, because a note made twice by a critic that has not
+     seen its own last answer is worth more than a note made once:
+
+       four accents (amber rail, blue rail, cream button, olive fill) -> one
+       a warning callout drawn as a framework default            -> plain text
+       column headers wrapping onto two lines                    -> one line
+       the selected row changing height and breaking the rhythm  -> it cannot
+       a wordmark competing with the one in the title bar        -> gone
+       six type sizes                                            -> four
+
+     The example move now lives above the action instead of inside the row, so
+     choosing a row cannot change the height of the table. -->
 <script setup lang="ts">
 import { ref, computed } from "vue";
 import { outcomes, refusals, learned, FOLDER, FOLDER_PATH, bytes } from "./captured";
 
 const chosen = ref<string | null>("media");
-const rows = computed(() => [refusals[0], ...outcomes]);
 const pickable = (o: (typeof outcomes)[number]) => o.loads && o.settles;
-const share = (o: (typeof outcomes)[number]) => Math.round((o.files / o.of) * 100);
-const picked = computed(() => rows.value.find((r) => r.name === chosen.value) ?? null);
+const picked = computed(() => outcomes.find((o) => o.name === chosen.value) ?? null);
+
+// The folder's own rules are not a candidate: they are the situation you are
+// already in. They are stated once, in a sentence, rather than given a row in
+// a table of things you can choose.
+const current = refusals[0];
+const total = computed(() => outcomes[0]?.of ?? 0);
 </script>
 
 <template>
   <div class="c-bench">
-    <aside>
-      <div class="c-brand">
-        <svg class="c-mark" viewBox="0 0 32 32" aria-hidden="true">
-          <rect x="1" y="1" width="30" height="30" rx="5" fill="none" stroke="currentColor" />
-          <text x="16" y="21" text-anchor="middle" class="c-wo">WO</text>
-        </svg>
-      </div>
+    <div class="c-hold">
       <h1>{{ FOLDER }}</h1>
-      <p class="c-path">{{ FOLDER_PATH }}</p>
+      <p class="c-where">
+        <span class="c-path">{{ FOLDER_PATH }}</span>
+        <button class="c-other">Point at another folder</button>
+      </p>
 
-      <div class="c-asis">
-        <p class="c-big">
-          <b>{{ learned.loose }}</b> of {{ learned.of }} files sit loose at the top
-        </p>
-        <p class="c-sub">
-          The {{ learned.explains }} that do not are one directory deep. There is
-          little shape here to keep.
-        </p>
-      </div>
+      <p class="c-state">
+        {{ learned.loose }} files sit loose at the top. The rest are one
+        directory deep.
+      </p>
 
-      <ul class="c-sug">
-        <li v-for="s in learned.suggestions" :key="s.headline">{{ s.headline }}</li>
-      </ul>
+      <h2 class="c-head">Ways you could file these {{ total }} files</h2>
+      <p class="c-note" v-if="current && !current.settles">
+        The rules already in this folder are not among them: they would move the
+        same files every run.
+      </p>
 
-      <div class="c-spacer"></div>
+      <div class="c-table">
+        <div class="c-key">
+          <span class="c-kway"></span>
+          <span class="c-knum">moving</span>
+          <span class="c-knum">new folders</span>
+          <span class="c-knum">emptied</span>
+          <span class="c-knum">size</span>
+        </div>
 
-      <div class="c-chose" v-if="picked && pickable(picked)">
-        <span class="c-lbl">for instance</span>
-        <p class="c-from">{{ picked.example?.from }}</p>
-        <p class="c-to">→ {{ picked.example?.to }}</p>
-      </div>
-      <button class="c-go" :disabled="!chosen">Give this folder these rules</button>
-      <p class="c-safe">Nothing moves until you have seen all of it.</p>
-    </aside>
-
-    <main>
-      <h2>Ways you could file them</h2>
-      <div class="c-grid">
         <button
-          v-for="o in rows"
+          v-for="o in outcomes"
           :key="o.name"
-          class="c-tile"
-          :class="{ 'c-on': chosen === o.name, 'c-off': !pickable(o) }"
+          class="c-row"
+          :class="{ 'c-on': chosen === o.name }"
           :disabled="!pickable(o)"
           @click="chosen = o.name"
         >
-          <span class="c-nm">{{ o.name }}</span>
-          <span class="c-sm">{{ o.summary || "the rules already here" }}</span>
-
-          <template v-if="pickable(o)">
-            <span class="c-bar" :title="`${o.files} of ${o.of}`">
-              <i :style="{ width: share(o) + '%' }"></i>
-            </span>
-            <span class="c-num"><b>{{ o.files }}</b> of {{ o.of }} would move</span>
-            <span class="c-dirs">
-              <span>{{ o.created }} made</span>
-              <span>{{ o.removed }} emptied</span>
-              <span>{{ bytes(o.bytes) }}</span>
-            </span>
-          </template>
-          <template v-else>
-            <span class="c-refuse">{{ o.loads ? "never settles" : "will not load" }}</span>
-            <span class="c-why">
-              {{ o.loads
-                ? "these rules would keep moving the same files for ever"
-                : "the file has a mistake in it, on line 7" }}
-            </span>
-          </template>
+          <span class="c-name">{{ o.name }}</span>
+          <span class="c-said">{{ o.summary }}</span>
+          <span class="c-num c-moves">{{ o.files }}</span>
+          <span class="c-num">{{ o.created }}</span>
+          <span class="c-num">{{ o.removed }}</span>
+          <span class="c-num">{{ bytes(o.bytes) }}</span>
         </button>
       </div>
-    </main>
+
+      <footer class="c-foot">
+        <p class="c-eg" v-if="picked?.example">
+          <span class="c-egl">for example</span>
+          <span class="c-from">{{ picked.example.from }}</span>
+          <span class="c-arrow">becomes</span>
+          <span class="c-to">{{ picked.example.to }}</span>
+        </p>
+        <div class="c-act">
+          <button class="c-go" :disabled="!chosen">Give this folder these rules</button>
+          <span class="c-safe">You will see every move before anything happens.</span>
+        </div>
+      </footer>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .c-bench {
   --ground: #3b3e37;
-  --raised: #474b43;
-  --lift: #515649;
   --text: #eef0e9;
-  --quiet: #a7ac9c;
-  --rule: #555a4d;
+  --quiet: #a2a797;
+  --faint: #7c8274;
+  --rule: #4a4e43;
   --accent: #7fd4ff;
-  --accent-ink: #0a2230;
+  --ink: #0a2230;
   --sans: "Avenir Next", ui-sans-serif, system-ui, -apple-system, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
 
+  /* Four sizes, and nothing between them. */
+  --display: 23px;
+  --body: 14.5px;
+  --small: 12.5px;
+  --fine: 11.5px;
+
+  /* One grid for the header and every row, so a figure sits under its own
+     word rather than near it. `minmax(0, 1fr)` and not `1fr`: a bare `1fr`
+     has an `auto` minimum, so the longest description widens column one in
+     its own row only, and every row lands its figures somewhere different. */
+  --cols: minmax(0, 1fr) 84px 92px 104px 88px;
+
   position: absolute;
   inset: 0;
-  display: grid;
-  grid-template-columns: 310px 1fr;
   background: var(--ground);
   color: var(--text);
   font-family: var(--sans);
-  overflow: hidden;
+  font-size: var(--body);
+  overflow-y: auto;
+  scrollbar-gutter: stable;
 }
-
-aside {
+/* A measure. Without it the descriptions end a third of the way across and
+   the figures start two thirds of the way across, with nothing between. */
+.c-hold {
+  max-width: 860px;
+  min-height: 100%;
+  margin: 0 auto;
+  padding: 22px 32px 0;
   display: flex;
   flex-direction: column;
-  padding: 24px 26px 26px;
-  border-right: 1px solid var(--rule);
-  overflow: auto;
 }
-.c-brand { color: var(--quiet); margin-bottom: 26px; }
-.c-mark { width: 24px; height: 24px; }
-.c-wo { font-family: var(--sans); font-size: 12px; font-weight: 600; fill: currentColor; }
 
-h1 { font-size: 24px; font-weight: 600; margin: 0; letter-spacing: -0.01em; }
-.c-path { font-family: var(--mono); font-size: 11.5px; color: var(--quiet); margin: 3px 0 0; }
-
-.c-asis { margin-top: 26px; }
-.c-big { font-size: 16px; line-height: 1.5; margin: 0; }
-.c-big b { font-size: 24px; font-weight: 600; }
-.c-sub { font-size: 13px; color: var(--quiet); line-height: 1.55; margin: 8px 0 0; }
-
-.c-sug { list-style: none; margin: 20px 0 0; padding: 0; }
-.c-sug li {
-  font-size: 13px;
-  color: var(--quiet);
-  line-height: 1.5;
-  padding: 7px 0;
-  border-top: 1px solid var(--rule);
-}
-.c-spacer { flex: 1; min-height: 20px; }
-
-.c-chose { margin-bottom: 16px; }
-.c-lbl {
-  font-size: 10.5px;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--quiet);
-}
-.c-from,
-.c-to {
-  font-family: var(--mono);
-  font-size: 11.5px;
-  margin: 5px 0 0;
-  word-break: break-all;
-}
-.c-from { color: var(--quiet); }
-.c-bench .c-to { color: var(--accent); }
-
-.c-go {
+h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+.c-where { display: flex; align-items: baseline; gap: 14px; margin: 4px 0 0; min-width: 0; }
+.c-path { font-family: var(--mono); font-size: var(--fine); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.c-other {
   font: inherit;
-  font-size: 14px;
-  background: var(--accent);
-  color: var(--accent-ink);
+  font-size: var(--small);
+  background: none;
   border: none;
-  border-radius: 8px;
-  padding: 12px 16px;
+  padding: 0;
   cursor: pointer;
-  width: 100%;
+  flex: none;
 }
-.c-go:disabled { background: var(--raised); color: var(--quiet); cursor: default; }
-.c-safe { font-size: 11.5px; color: var(--quiet); text-align: center; margin: 10px 0 0; }
+.c-other:hover { color: var(--text); }
 
-main { padding: 26px 28px; overflow: auto; }
-h2 {
-  font-size: 11.5px;
-  letter-spacing: 0.13em;
-  text-transform: uppercase;
-  color: var(--quiet);
-  font-weight: 500;
-  margin: 0 0 16px;
+.c-state { line-height: 1.55; margin: 14px 0 0; max-width: 74ch; }
+
+.c-head {
+  font-size: var(--small);
+  font-weight: 600;
+  margin: 18px 0 0;
+  letter-spacing: 0.02em;
 }
-.c-grid {
+.c-table { margin-top: 10px; }
+.c-note { font-size: var(--fine); margin: 3px 0 0; }
+
+.c-key {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(212px, 1fr));
-  gap: 12px;
+  grid-template-columns: var(--cols);
+  column-gap: 18px;
+  padding: 0 12px 7px;
+  margin: 0 -12px;
+  border-bottom: 1px solid var(--rule);
+  font-size: var(--fine);
+  white-space: nowrap;
 }
+.c-kway { text-align: left; }
+.c-knum { text-align: right; }
 
-.c-tile {
+.c-row {
+  display: grid;
+  grid-template-columns: var(--cols);
+  column-gap: 18px;
+  align-items: center;
   font: inherit;
   text-align: left;
-  background: var(--raised);
-  border: 1px solid transparent;
-  border-radius: 10px;
-  padding: 15px 16px 14px;
+  background: none;
+  border: none;
   color: inherit;
+  /* The fill bleeds past the text on both sides, so a selected row reads as a
+     band while its name still starts on the same left edge as the heading
+     above it. Two left edges on one page is the fault this fixes. */
+  padding: 7px 12px;
+  margin: 0 -12px;
+  width: calc(100% + 24px);
+  border-radius: 6px;
   cursor: pointer;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
 }
-.c-tile:hover:not(:disabled) { background: var(--lift); }
-.c-tile.c-on { border-color: var(--accent); background: var(--lift); }
-.c-tile.c-off { cursor: default; opacity: 0.72; }
+.c-row:hover:not(:disabled):not(.c-on) { background: #41453d; }
+/* One signal for one state: the row you picked is the filled one. */
+.c-row.c-on { background: #4a4e44; }
+.c-row:disabled { cursor: default; }
 
-.c-nm { font-size: 15px; font-weight: 600; }
-.c-sm { font-size: 12px; color: var(--quiet); line-height: 1.4; min-height: 34px; }
-
-.c-bar {
-  display: block;
-  height: 6px;
-  border-radius: 3px;
-  background: #2f322c;
-  overflow: hidden;
-  margin: 6px 0 9px;
-}
-.c-bar i { display: block; height: 100%; background: var(--accent); }
-
-.c-num { font-size: 13px; }
-.c-num b { font-size: 17px; font-weight: 600; }
-.c-dirs {
-  display: flex;
-  gap: 11px;
-  font-size: 11px;
-  color: var(--quiet);
-  margin-top: 5px;
+.c-name { grid-column: 1; grid-row: 1; font-weight: 600; }
+.c-said { grid-column: 1; grid-row: 2; font-size: var(--small); margin-top: 1px; }
+.c-num {
+  grid-row: 1;
+  align-self: baseline;
+  text-align: right;
   font-variant-numeric: tabular-nums;
 }
 
-.c-refuse { font-size: 13px; color: #e2b05f; margin-top: 12px; }
-.c-why { font-size: 11.5px; color: var(--quiet); line-height: 1.45; margin-top: 3px; }
+
+.c-foot {
+  margin-top: auto;
+  padding: 15px 12px 20px;
+  margin: 0 -12px;
+  border-top: 1px solid var(--rule);
+  position: sticky;
+  bottom: 0;
+  background: var(--ground);
+}
+.c-eg {
+  font-family: var(--mono);
+  font-size: var(--fine);
+  margin: 0 0 13px;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0 9px;
+}
+.c-egl { font-family: var(--sans); }
+.c-from { word-break: break-all; }
+.c-arrow { font-family: var(--sans); font-size: var(--small); }
+
+.c-act { display: flex; align-items: center; gap: 16px; }
+.c-go {
+  font: inherit;
+  font-size: var(--body);
+  font-weight: 500;
+  background: #e6e8e0;
+  border: none;
+  border-radius: 7px;
+  padding: 9px 18px;
+  cursor: pointer;
+}
+.c-go:disabled { background: #454941; cursor: default; }
+.c-safe { font-size: var(--small); }
 
 /* The stylesheet this is replacing is still loaded, and it colours elements
    this screen also uses. Rather than chase each collision, every text element
    here is given its colour outright. */
-.c-bench h1, .c-bench h2, .c-bench p, .c-bench li, .c-bench span,
-.c-bench b, .c-bench i, .c-bench button {
+.c-bench h1, .c-bench h2, .c-bench p, .c-bench span, .c-bench button {
   color: inherit;
 }
 .c-bench h1 { color: var(--text); }
-/* Restated after the blanket rule above, which outranks a single class. */
-.c-bench .c-go { color: var(--accent-ink); }
-.c-bench .c-go:disabled { color: var(--quiet); }
-.c-bench .c-to { color: var(--accent); }
-.c-bench .c-refuse { color: #e2b05f; }
+.c-bench .c-path { color: var(--faint); }
+.c-bench .c-other { color: var(--quiet); }
+.c-bench .c-state { color: var(--quiet); }
+.c-bench .c-key { color: var(--quiet); }
+.c-bench .c-head { color: var(--text); }
+.c-bench .c-note { color: var(--quiet); }
+.c-bench .c-said { color: var(--quiet); }
+.c-bench .c-num { color: var(--quiet); }
+.c-bench .c-moves { color: var(--text); }
+.c-bench .c-row.c-on .c-num { color: var(--text); }
+.c-bench .c-eg { color: var(--quiet); }
+.c-bench .c-egl { color: var(--faint); }
+.c-bench .c-arrow { color: var(--faint); }
+.c-bench .c-to { color: var(--text); }
+.c-bench .c-go { color: #24271f; }
+.c-bench .c-go:disabled { color: var(--faint); }
+.c-bench .c-safe { color: var(--quiet); }
 </style>

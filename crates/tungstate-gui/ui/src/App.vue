@@ -17,7 +17,7 @@ import Mark from "./components/Mark.vue";
 // The Tauri window has no address bar, so a query string is not available.
 // This block and `src/looks/` both go when a direction is chosen.
 import LookC from "./looks/LookC.vue";
-const look = ref(false);
+const look = ref(true); // the new screen is the default while it is being refined; 0 shows the old app
 function pickLook(e: KeyboardEvent) {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
   if (e.key === "0") look.value = false;
