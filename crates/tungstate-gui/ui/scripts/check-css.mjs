@@ -44,8 +44,6 @@ const LEGACY = new Set(
     "components/SyncModal.vue",
     "components/TransfersView.vue",
     "components/Welcome.vue",
-    "looks/LookC.vue",
-    "looks/captured.ts",
   ].map((p) => join(SRC, p)),
 );
 
@@ -109,6 +107,17 @@ function classesUsed(tpl, file) {
   return out;
 }
 
+/** Quoted string tokens anywhere in a file.
+ *
+ *  A lookup object is the pattern this script pushes people towards, since a
+ *  backtick binding cannot be checked at all. So `const LOOK = { primary:
+ *  "btn-primary" }` has to count as using `.btn-primary`, or the rule against
+ *  dead selectors would punish the very fix it recommends. Only consulted for
+ *  that rule: markup still has to name a class outright to satisfy the rule
+ *  about classes nobody styled. */
+const quotedIn = (text) =>
+  new Set([...text.matchAll(/['"]([a-zA-Z][\w-]*)['"]/g)].map((m) => m[1]));
+
 /** Class names a stylesheet defines. */
 const classesDefined = (css) =>
   new Set([...css.matchAll(/\.(-?[a-zA-Z][\w-]*)/g)].map((m) => m[1]));
@@ -133,6 +142,22 @@ try {
   baseText = readFileSync(join(SRC, "styles/base.css"), "utf8");
 } catch {}
 const baseClasses = classesDefined(baseText);
+
+/** Every class any global stylesheet defines.
+ *
+ *  Scoped styles do not protect against these. Vue rewrites `.head` to
+ *  `.head[data-v-x]`, which wins on specificity for the properties it sets --
+ *  and leaks every property it does not. The old sheet's `.head` is
+ *  `display: grid` with five fixed columns; a component that styled its own
+ *  `.head` without declaring `display` got the grid, and its heading rendered
+ *  one word per line inside a 26px column. Nothing failed.
+ *
+ *  So a component may *use* a global class, and may not *redefine* one. */
+let legacyClasses = new Set();
+try {
+  legacyClasses = classesDefined(readFileSync(join(SRC, "styles.css"), "utf8"));
+} catch {}
+for (const c of baseClasses) legacyClasses.delete(c);
 
 // --- every file ----------------------------------------------------------
 
@@ -169,15 +194,24 @@ for (const file of walk(SRC)) {
 
   const used = classesUsed(tpl, file);
   const defined = classesDefined(css);
+  const quoted = quotedIn(text);
 
   // 3. a rule written against markup that is not there.
   for (const name of defined) {
-    if (!used.has(name) && !baseClasses.has(name)) {
+    if (!used.has(name) && !quoted.has(name) && !baseClasses.has(name)) {
       fail(file, 0, "orphan-selector", `.${name} is styled here but used nowhere in this file`);
     }
   }
 
-  // 4. markup asking for a rule nobody wrote. This is the one that shipped
+  // 4. an element wearing a class the old global sheet also claims. Naming it
+  //    is what invites the leak, whether or not this file also styles it.
+  for (const name of used) {
+    if (legacyClasses.has(name)) {
+      fail(file, 0, "shadows-global", `.${name} is claimed by the old global stylesheet; whatever it sets and this file does not will leak in`);
+    }
+  }
+
+  // 5. markup asking for a rule nobody wrote. This is the one that shipped
   //    four of slice 7b's eleven.
   for (const name of used) {
     if (!defined.has(name) && !baseClasses.has(name) && !ALLOW.has(name)) {
@@ -185,7 +219,7 @@ for (const file of walk(SRC)) {
     }
   }
 
-  // 5. a state bound and never drawn. "The folder you opened" and "the view
+  // 6. a state bound and never drawn. "The folder you opened" and "the view
   //    you are in" were both marked this way and neither was visible.
   for (const m of tpl.matchAll(/:?(aria-(?:current|busy|invalid|selected|expanded))=/g)) {
     const attr = m[1];

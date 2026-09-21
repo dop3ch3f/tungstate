@@ -58,9 +58,19 @@ export const seenBy = (outcome: Outcome): FileCount => seal(outcome.of);
  * one.
  */
 export type DirCount = number & { readonly kind?: "dirs" };
-export const made = (o: Outcome | PreviewView): DirCount =>
-  ("created" in o ? o.created : 0) as DirCount;
+export const made = (o: Outcome): DirCount => o.created as DirCount;
 export const emptied = (o: Outcome): DirCount => o.removed as DirCount;
+
+/**
+ * Directories counted by the window from the two trees.
+ *
+ * `PreviewView` carries no `created` or `removed`, though `Outcome` does. The
+ * before and after trees both mark their directories, so the window works the
+ * two numbers out by comparing them rather than asking for a field the seam
+ * does not have. Property 5 says these matter as much as files moved, and a
+ * preview that omitted them would be the one screen that dropped them.
+ */
+export const dirsCounted = (n: number): DirCount => n as DirCount;
 
 /** `n file`/`n files`, without the parenthesised plural the CLI used to print. */
 export const files = (n: FileCount): string => `${n} ${n === 1 ? "file" : "files"}`;

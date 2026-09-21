@@ -527,15 +527,143 @@ other direction. Every such map is now total, with an explicit fallback.
 
 ---
 
+## 6. The folder half, working
+
+Point at a folder, read it, pick a way of filing, see what that would do, do
+it, put it back. All of it live against the engine, none of it touching Rust.
+
+The flow is four states in `state/useFolders.ts`, which is a module of `ref`s
+exported through a function. Importing it twice gives the same refs, so it is
+a store in a dozen lines with no dependency. Two things follow and are written
+down beside it: it never resets, which is right for a single-window desktop
+application and would be wrong the moment there were two; and anything that
+wants to react to it imports the module rather than receiving a prop.
+
+The three-call sequence when somebody picks a layout is deliberate:
+
+```ts
+await folders.govern(path);        // reversible, writes nothing into the folder
+await folders.giveRules(path, layout);  // writes a file, moves no files
+await refresh();                   // and only now is there a button that would
+```
+
+Registering is not filing, and filing is not moving. Property 1 lives in that
+separation: **the tidy button exists only on the preview screen**, beside the
+thing it would do, and nowhere else in the application.
+
+### What the screens do with the five properties
+
+**1, nothing moves unseen.** `Tidy up` is rendered only inside
+`FolderPreview.vue`, and its confirmation restates the counts before it acts.
+
+**2, the way back is where it is needed.** `Put it back` sits next to
+`Tidy up`, same row, same size. When there is nothing to undo it stays
+rendered and explains itself rather than vanishing, because a button that
+appears and disappears teaches people not to trust it.
+
+**3, files are not operations.** Verified by eye rather than assumed. Tidying
+`messy-downloads` reported **"Moved 28 files."** The plan for that folder made
+six directories and emptied one, so the operation count was 35. Slice 7b
+shipped the 35.
+
+**4, "left alone" is not one thing.** Two files, two different sentences:
+`Images/already-filed.jpg — already in the right place` and
+`shortcut.pdf — ignored (symlinks = "ignore")`. Nothing is grouped and nothing
+is guessed, which is what was agreed when the seam turned out to flatten eight
+reasons into prose before they cross.
+
+**5, directories removed.** This one needed work. `PreviewView` carries no
+`created` or `removed`, though `Outcome` does, so the preview would have been
+the one screen that dropped the number. Both trees mark their directories, so
+the window compares them:
+
+```ts
+for (const path of now) if (!was.has(path)) made += 1;
+for (const path of was) if (!now.has(path)) emptied += 1;
+```
+
+Computing from data the seam already provides, rather than asking for a field
+it does not have. And it is the number that carries the whole point on the
+folder in the user's own five-level shape: every layout except `media` would
+move all 192 files and **empty 88 to 92 directories**. `media` moves nothing,
+because the folder is already in that shape. A count of moved files alone
+would have said "192" for all seven and told you nothing.
+
+### The defect that broke the first screen outright
+
+Scoped styles do not protect a component from a global stylesheet. Vue rewrites
+`.ways` to `.ways[data-v-x]`, which wins on specificity for the properties it
+sets — **and leaks every property it does not**.
+
+The old sheet has this:
+
+```css
+.head, .row { display: grid; grid-template-columns: 26px 1fr 92px 82px 96px; }
+.head { position: sticky; background: var(--ore); }
+```
+
+The new comparison screen had an `<h2 class="head">`. Its own scoped rule set a
+font size, a weight and a margin, and said nothing about `display`. So the
+heading became a five-column grid, its text went into the 26px column and
+rendered one word per line down the left edge, with the old sheet's background
+drawn behind it as a dark bar across the table. Nothing failed.
+
+A check found **thirty-two** more of the same waiting: `.hold`, `.row`,
+`.name`, `.state`, `.btn`, `.notice`, `.veil`, `.card`, `.empty`. Every one
+was an element wearing a name the old sheet also claims.
+
+So `check-css.mjs` gained a seventh rule, and it is the one that would have
+saved the most time across this whole slice: **a component may use a global
+class and may not wear one it does not own.** Naming the element is what
+invites the leak, whether or not the component also styles it.
+
+Note what the rule is *not*. `class="path"` is fine, and so is `.locus .path`
+as a contextual override. `base.css` is the intentional global vocabulary —
+"this is a path", "this is literal text", "these are figures to compare down a
+column" — and using it is the point. The rule is about the sheet being
+replaced, and it empties itself when that sheet is deleted.
+
+### And the fixture quietly half-vanished
+
+`$TMPDIR` was the wrong place. macOS sweeps `/var/folders` on a timer, and
+eight hours after it was built every sparse file was gone while the five
+thousand tiny ones in `huge/` had survived. The comparison screen still
+rendered: it said "all 2 files sit at the top" and offered seven layouts that
+would move nothing, which is a plausible-looking screen and a completely false
+one.
+
+That is the fixture failing the same way the software keeps failing — quietly,
+still drawing. It lives at `$HOME/.tungstate-demo` now.
+
+### Four things the walk found that reading would not have
+
+- The preview's heading was `PreviewView.folder`, which is the name the
+  *policy file* declares. A folder called `messy-downloads` governed by the
+  `downloads` layout rendered as "downloads".
+- The comparison screen stated two totals: `learn`'s in the sentence and
+  `compare`'s in the heading. It now states one, and the sentence gives no
+  total of its own.
+- A long before-and-after list ran under the sticky footer.
+- After an undo, the screen said "nothing here has been reorganised yet",
+  which was no longer true. It says "there is nothing to put back."
+
+---
+
 ## What is still not verified
 
 - The script has only been run on macOS. `touch -t`, `dd ... count=0 seek=`
   and sparse files all behave differently enough elsewhere that Linux is a
   guess until someone runs it.
-- Only one screen exists. There is no preview, no tidy, no put it back, and
-  no drain half yet, and the comparison screen is drawn from captured data
-  rather than from a live call.
+- **The drain half is untouched.** Links, Connections, Find, Storage and the
+  two-pane browser are still the old screens on the old stylesheet, reachable
+  on `0`.
+- Of roughly 95 states, about a dozen have been looked at. Not looked at yet:
+  the never-settles refusal, broken rules, an empty folder, a folder that
+  already has rules, the cooldown wait, a tidy that skips or fails, and every
+  state in the drain half.
+- The blocking tidy has not been timed on `huge/` (5,000 files), so whether the
+  window merely goes quiet or actually freezes is still unknown.
 - 1080x720 only. The 860x560 minimum has not been looked at once.
 - macOS only. Nothing has been seen on Linux or Windows.
-- The critic scored a six, not an eight. The stopping rule was the
-  plateau clause, not the quality clause.
+- The critic scored a six, not an eight. The stopping rule was the plateau
+  clause, not the quality clause.

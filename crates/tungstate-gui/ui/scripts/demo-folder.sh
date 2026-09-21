@@ -4,8 +4,13 @@
 # Every screen in the folder half needs a folder in a particular condition to
 # be reachable at all: rules that will not parse, rules that never settle, a
 # folder already tidy, a folder whose shape has to be read back out of it. This
-# makes one root per condition under $TMPDIR, so nothing lands in the repo and
-# there is nothing to gitignore.
+# makes one root per condition under $HOME/.tungstate-demo, so nothing lands in
+# the repo and there is nothing to gitignore.
+#
+# Not $TMPDIR, which is where this first put it: macOS sweeps /var/folders on a
+# timer, and eight hours later every sparse file was gone while the 5,000 tiny
+# ones in huge/ had survived. A fixture that quietly half-disappears is worse
+# than no fixture, because the screen it feeds still renders.
 #
 # Deterministic: every name, size and timestamp comes from a counter, never
 # from $RANDOM, so two runs produce identical trees and two screenshots taken a
@@ -14,7 +19,7 @@
 # Usage:  sh scripts/demo-folder.sh [--clean]
 set -eu
 
-DEMO="${TUNGSTATE_DEMO:-${TMPDIR:-/tmp}/tungstate-demo}"
+DEMO="${TUNGSTATE_DEMO:-$HOME/.tungstate-demo}"
 DEMO="${DEMO%/}"
 REPO=$(cd "$(dirname "$0")/../../../.." && pwd)
 

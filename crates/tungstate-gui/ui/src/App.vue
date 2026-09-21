@@ -11,12 +11,13 @@ import ActivityView from "./components/ActivityView.vue";
 import ConnectionsView from "./components/ConnectionsView.vue";
 import Welcome from "./components/Welcome.vue";
 import Mark from "./components/Mark.vue";
-// --- slice 8, temporary --------------------------------------------------
-// The chosen direction, on 1; 0 returns to the app as it is today, so the two
-// can be compared while the new screen is being refined.
-// The Tauri window has no address bar, so a query string is not available.
-// This block and `src/looks/` both go when a direction is chosen.
-import LookC from "./looks/LookC.vue";
+// --- slice 8, in progress ------------------------------------------------
+// The new folder half, on 1; 0 returns to the app as it is today, so the two
+// can be compared while the rest of the window is rebuilt around it. The Tauri
+// window has no address bar, so a query string is not available. This block
+// goes when the new frame replaces this file.
+import FolderHalf from "./screens/folder/FolderHalf.vue";
+import DialogHost from "./ui/DialogHost.vue";
 const look = ref(true); // the new screen is the default while it is being refined; 0 shows the old app
 function pickLook(e: KeyboardEvent) {
   if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
@@ -353,7 +354,7 @@ function browseAt(location: string) {
 </script>
 
 <template>
-  <LookC v-if="look" />
+  <template v-if="look"><FolderHalf /><DialogHost /></template>
   <div v-else class="frame">
     <header class="topbar chrome">
       <div class="wordmark"><Mark :size="20" /><span class="name">tung<span>state</span></span></div>
