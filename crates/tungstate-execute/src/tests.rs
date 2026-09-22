@@ -661,3 +661,143 @@ proptest! {
         prop_assert_eq!(fixture.shape(), before);
     }
 }
+
+/// A policy that routes nothing, so a duplicate plan is the only thing acting.
+fn inert() -> &'static str {
+    "[folder]\nname = \"f\"\n[defaults]\ncooldown = \"0s\"\n"
+}
+
+#[test]
+fn setting_duplicates_aside_can_be_undone() {
+    // The regression this slice found: a file under the set-aside area is not
+    // in any snapshot, because the walk is told never to enter it. Undo moves
+    // files *out* of there, so the paper check has to take the journal's word
+    // for them. Before this, no tidy that parked anything could be undone.
+    let fixture = Fixture::new(
+        inert(),
+        &[("keep.bin", "same bytes"), ("copy/keep.bin", "same bytes")],
+    );
+    let snapshot = fixture.survey();
+    let backend = fixture.backend();
+    let mut digest = crate::digest::Cached::new(&backend, &fixture.journal, &fixture.root());
+    let found = tungstate_core::dupes::find(
+        &snapshot,
+        &mut digest,
+        &tungstate_core::dupes::Wants::default(),
+    )
+    .expect("the pass runs");
+    assert_eq!(found.extra_files(), 1);
+
+    let plan = tungstate_core::dupes::plan(
+        &snapshot,
+        &found,
+        tungstate_core::dupes::Extras::SetAside,
+        "f",
+        tungstate_core::policy::Mode::Observe,
+    );
+    let applied = apply(
+        &plan,
+        &snapshot,
+        &fixture.backend(),
+        &fixture.journal,
+        &fixture.root(),
+    )
+    .expect("it applies");
+
+    let after = fixture.shape();
+    let holds = |shape: &[String], path: &str| {
+        shape
+            .iter()
+            .any(|entry| entry.starts_with(&format!("f {path} ")))
+    };
+    assert!(
+        !holds(&after, "copy/keep.bin"),
+        "the extra copy was set aside"
+    );
+    assert!(holds(&after, "keep.bin"), "one copy stays: {after:?}");
+    assert!(
+        holds(&after, ".tungstate-quarantine/copy/keep.bin"),
+        "and it is in the set-aside area, not gone"
+    );
+
+    let fresh = fixture.survey();
+    let undone = crate::undo::undo(
+        applied.plan,
+        &fresh,
+        &fixture.backend(),
+        &fixture.journal,
+        &fixture.root(),
+    )
+    .expect("it can be taken back");
+    assert!(undone.done > 0);
+    assert!(
+        holds(&fixture.shape(), "copy/keep.bin"),
+        "and the copy is back where it was"
+    );
+}
+
+#[test]
+fn a_plan_that_used_the_trash_refuses_to_be_undone() {
+    let fixture = Fixture::new(inert(), &[("one.bin", "same"), ("two.bin", "same")]);
+    let snapshot = fixture.survey();
+    let backend = fixture.backend();
+    let mut digest = crate::digest::Cached::new(&backend, &fixture.journal, &fixture.root());
+    let found = tungstate_core::dupes::find(
+        &snapshot,
+        &mut digest,
+        &tungstate_core::dupes::Wants::default(),
+    )
+    .expect("the pass runs");
+    let plan = tungstate_core::dupes::plan(
+        &snapshot,
+        &found,
+        tungstate_core::dupes::Extras::Trash,
+        "f",
+        tungstate_core::policy::Mode::Observe,
+    );
+
+    // Recorded as irreversible before anything is carried out, so a crash
+    // half-way cannot leave a record that claims otherwise.
+    let id = fixture
+        .journal
+        .begin_plan_that(&fixture.root(), &plan.snapshot, None, false)
+        .expect("recorded");
+    let recorded = fixture.journal.plan_by_id(id).expect("readable");
+    assert!(!recorded.reversible);
+
+    let fresh = fixture.survey();
+    let refused = crate::undo::undo(
+        id,
+        &fresh,
+        &fixture.backend(),
+        &fixture.journal,
+        &fixture.root(),
+    )
+    .expect_err("it refuses");
+    assert!(
+        refused.to_string().contains("trash"),
+        "the refusal says why: {refused}"
+    );
+}
+
+#[test]
+fn a_digest_is_read_once_and_remembered() {
+    let fixture = Fixture::new(inert(), &[("one.bin", "same"), ("two.bin", "same")]);
+    let snapshot = fixture.survey();
+    let wants = tungstate_core::dupes::Wants::default();
+    let backend = fixture.backend();
+
+    let mut first = crate::digest::Cached::new(&backend, &fixture.journal, &fixture.root());
+    tungstate_core::dupes::find(&snapshot, &mut first, &wants).expect("the pass runs");
+    assert!(first.reads() > 0);
+    assert_eq!(first.hits(), 0, "nothing was remembered yet");
+
+    let mut again = crate::digest::Cached::new(&backend, &fixture.journal, &fixture.root());
+    tungstate_core::dupes::find(&snapshot, &mut again, &wants).expect("the pass runs");
+    assert_eq!(
+        again.reads(),
+        0,
+        "a folder nobody touched is not read twice"
+    );
+    assert!(again.hits() > 0);
+}

@@ -78,6 +78,11 @@ pub fn undo(
     root: &str,
 ) -> Result<Undone> {
     let recorded = journal.plan_by_id(plan)?;
+    if !recorded.reversible {
+        return Err(ExecuteError::Journal(
+            tungstate_journal::JournalError::PlanIrreversible(plan.0),
+        ));
+    }
     if recorded.is_undone() {
         return Err(ExecuteError::Journal(
             tungstate_journal::JournalError::PlanAlreadyUndone(plan.0),

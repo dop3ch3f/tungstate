@@ -110,6 +110,14 @@ pub enum JournalError {
     #[error("plan {0} has already been undone")]
     PlanAlreadyUndone(i64),
 
+    /// A plan that cannot be taken back at all: it used the desktop's trash,
+    /// and only the desktop can put those files back.
+    #[error(
+        "plan {0} sent files to the trash, so it cannot be undone from here: \
+         open the Trash and use Put Back"
+    )]
+    PlanIrreversible(i64),
+
     /// A connection name is already taken.
     #[error("a connection named `{0}` already exists")]
     DuplicateConnection(String),
@@ -888,3 +896,137 @@ fn row_to_op(row: &rusqlite::Row<'_>) -> rusqlite::Result<Op> {
 
 #[cfg(test)]
 mod tests;
+
+/// A digest remembered from a previous pass, and what it described.
+///
+/// Kept so a second duplicate pass over an untouched folder reads nothing.
+/// The key is the path; the *check* is size and mtime, because a file edited
+/// in place keeps its name and a stale digest is a wrong answer about
+/// somebody's files rather than a slow one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Remembered {
+    /// Digest of the ends of the file, if one was taken.
+    pub partial: Option<String>,
+    /// Digest of every byte, if one was taken.
+    pub whole: Option<String>,
+}
+
+impl Journal {
+    /// What was remembered about a file, if it has not changed since.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the row cannot be read.
+    pub fn remembered(
+        &self,
+        root: &str,
+        path: &str,
+        size: u64,
+        mtime: Option<i64>,
+    ) -> Result<Option<Remembered>> {
+        let conn = self.lock();
+        let found = conn
+            .query_row(
+                "SELECT partial, whole FROM hashes
+                 WHERE root = ?1 AND path = ?2 AND size = ?3
+                   AND ((mtime IS NULL AND ?4 IS NULL) OR mtime = ?4)",
+                rusqlite::params![root, path, i64::try_from(size).unwrap_or(i64::MAX), mtime],
+                |row| {
+                    Ok(Remembered {
+                        partial: row.get("partial")?,
+                        whole: row.get("whole")?,
+                    })
+                },
+            )
+            .map(Some)
+            .or_else(|error| match error {
+                rusqlite::Error::QueryReturnedNoRows => Ok(None),
+                other => Err(query("reading a remembered digest")(other)),
+            })?;
+        Ok(found)
+    }
+
+    /// Remember a digest, replacing whatever was there for that path.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the row cannot be written.
+    pub fn remember(
+        &self,
+        root: &str,
+        path: &str,
+        size: u64,
+        mtime: Option<i64>,
+        digest: &Remembered,
+    ) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO hashes (root, path, size, mtime, partial, whole, seen_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+             ON CONFLICT (root, path) DO UPDATE SET
+                 size = excluded.size,
+                 mtime = excluded.mtime,
+                 partial = COALESCE(excluded.partial, hashes.partial),
+                 whole = COALESCE(excluded.whole, hashes.whole),
+                 seen_at = excluded.seen_at",
+            rusqlite::params![
+                root,
+                path,
+                i64::try_from(size).unwrap_or(i64::MAX),
+                mtime,
+                digest.partial,
+                digest.whole,
+                now_millis()
+            ],
+        )
+        .map_err(query("remembering a digest"))?;
+        Ok(())
+    }
+
+    /// Forget every digest for a root. Used when a folder is no longer
+    /// governed, and by the tests that prove invalidation works.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be removed.
+    pub fn forget_digests(&self, root: &str) -> Result<usize> {
+        let conn = self.lock();
+        conn.execute(
+            "DELETE FROM hashes WHERE root = ?1",
+            rusqlite::params![root],
+        )
+        .map_err(query("forgetting digests"))
+    }
+}
+
+impl Journal {
+    /// An answer remembered from a previous run, if there is one.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the row cannot be read.
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.lock();
+        conn.query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            rusqlite::params![key],
+            |row| row.get::<_, String>("value"),
+        )
+        .map(Some)
+        .or_else(|error| match error {
+            rusqlite::Error::QueryReturnedNoRows => Ok(None),
+            other => Err(query("reading a setting")(other)),
+        })
+    }
+
+    /// Remember an answer, replacing any previous one.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the row cannot be written.
+    pub fn remember_setting(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.lock();
+        conn.execute(
+            "INSERT INTO settings (key, value, set_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value, set_at = excluded.set_at",
+            rusqlite::params![key, value, now_millis()],
+        )
+        .map_err(query("remembering a setting"))?;
+        Ok(())
+    }
+}

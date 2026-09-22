@@ -151,6 +151,35 @@ const MIGRATIONS: &[&str] = &[
          name     TEXT    NOT NULL,
          added_at INTEGER NOT NULL
      );",
+    // v9: hashes are expensive and files mostly sit still, so a digest is
+    // remembered and thrown away the moment the file it describes changes.
+    // Keyed by (root, path) with size and mtime beside it: a hit is only a hit
+    // when both still match, because a file edited in place keeps its name.
+    //
+    // `reversible` on plans is the other half of slice 8b: a duplicate pass
+    // told to use the desktop trash cannot be undone from here, and a flag
+    // written when the plan begins is the only place that fact can live where
+    // `undo` will see it.
+    "CREATE TABLE hashes (
+         root      TEXT    NOT NULL,
+         path      TEXT    NOT NULL,
+         size      INTEGER NOT NULL,
+         mtime     INTEGER,
+         partial   TEXT,
+         whole     TEXT,
+         seen_at   INTEGER NOT NULL,
+         PRIMARY KEY (root, path)
+     );
+
+     ALTER TABLE plans ADD COLUMN reversible INTEGER NOT NULL DEFAULT 1;
+
+     -- Answers to questions worth asking once. The first is what should
+     -- happen to duplicate copies; the window's theme will be the second.
+     CREATE TABLE settings (
+         key     TEXT PRIMARY KEY,
+         value   TEXT NOT NULL,
+         set_at  INTEGER NOT NULL
+     );",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

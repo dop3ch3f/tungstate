@@ -243,9 +243,14 @@ fn describe_move(op: &Op) -> Option<MoveView> {
                 tungstate_core::plan::Parked::Replaced { by } => {
                     format!("set aside, not deleted, so “{by}” can have the name")
                 }
+                tungstate_core::plan::Parked::Duplicate { of } => {
+                    format!("set aside — the same file as “{of}”, which stays")
+                }
             },
         }),
-        Op::MkDir { .. } | Op::RmDir { .. } => None,
+        // A trash comes only from the duplicate pass, which has its own
+        // screen; a directory op is not a move.
+        Op::MkDir { .. } | Op::RmDir { .. } | Op::Trash { .. } => None,
     }
 }
 

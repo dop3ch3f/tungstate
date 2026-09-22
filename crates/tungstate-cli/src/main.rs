@@ -2,6 +2,7 @@
 
 mod apply;
 mod connection;
+mod dedupe;
 mod explain;
 mod folder;
 mod folders;
@@ -113,6 +114,33 @@ enum Command {
         #[arg(long = "plan", value_name = "FILE")]
         saved: Option<PathBuf>,
         /// Go ahead past the blast-radius and settling refusals.
+        #[arg(long)]
+        yes: bool,
+    },
+
+    /// Find files that are the same file, and deal with the extra copies.
+    ///
+    /// Reports and changes nothing unless you add --apply. Names are never
+    /// compared: two copies of one video are found however they are called.
+    Dedupe {
+        /// The folder, or anything inside it. Defaults to here.
+        target: Option<String>,
+        /// Deal with the extra copies, rather than only reporting them.
+        #[arg(long)]
+        apply: bool,
+        /// What happens to the copies that are not kept. Asked once if omitted.
+        #[arg(long, value_name = "WHAT")]
+        extras: Option<String>,
+        /// Keep this copy, whichever way the tie-break would have gone.
+        #[arg(long, value_name = "PATH")]
+        keep: Vec<String>,
+        /// Do not group whole folders, only files.
+        #[arg(long = "files-only")]
+        files_only: bool,
+        /// Emit what was found as JSON.
+        #[arg(long)]
+        json: bool,
+        /// Do not stop to ask; sets extra copies aside, which loses nothing.
         #[arg(long)]
         yes: bool,
     },
@@ -360,6 +388,36 @@ fn main() -> std::process::ExitCode {
         } => plan::plan(target.as_deref(), policy.as_deref(), json),
         Command::Apply { target, saved, yes } => {
             apply::apply(target.as_deref(), saved.as_deref(), yes)
+        }
+        Command::Dedupe {
+            target,
+            apply,
+            extras,
+            keep,
+            files_only,
+            json,
+            yes,
+        } => {
+            let chosen = match extras.as_deref() {
+                None => None,
+                Some("set-aside") => Some(tungstate_core::dupes::Extras::SetAside),
+                Some("trash") => Some(tungstate_core::dupes::Extras::Trash),
+                Some(other) => {
+                    eprintln!("error: `{other}` is not a choice: use set-aside or trash");
+                    return std::process::ExitCode::FAILURE;
+                }
+            };
+            dedupe::dedupe(
+                target.as_deref(),
+                &dedupe::Asked {
+                    apply,
+                    extras: chosen,
+                    keep,
+                    files_only,
+                    json,
+                    yes,
+                },
+            )
         }
         Command::Undo { target, last, plan } => apply::undo(target.as_deref(), last, plan),
         Command::Policy { action } => match action {

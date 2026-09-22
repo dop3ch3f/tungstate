@@ -241,7 +241,22 @@ pub fn undo(target: Option<&str>, last: Option<usize>, plan: Option<i64>) -> Exi
         }
     };
     if wanted.is_empty() {
-        println!("nothing to undo for `{root}`");
+        // "Nothing to undo" and "the last thing cannot be undone" are very
+        // different sentences, and saying the first when the second is true
+        // is how somebody concludes their files are gone.
+        let newest = journal
+            .recent_plans(16)
+            .ok()
+            .and_then(|plans| plans.into_iter().find(|p| p.folder == root));
+        match newest {
+            Some(plan) if !plan.reversible => {
+                println!(
+                    "the last thing done to `{root}` sent files to the Trash, so it cannot be undone from here."
+                );
+                println!("Open the Trash and use Put Back.");
+            }
+            _ => println!("nothing to undo for `{root}`"),
+        }
         return ExitCode::SUCCESS;
     }
 

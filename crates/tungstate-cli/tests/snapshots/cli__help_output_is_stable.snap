@@ -16,6 +16,7 @@ Commands:
   explain     Show where a policy would put a file, and why
   plan        Work out what would have to happen for a folder to match its policy
   apply       Carry out a plan: make the folder match its policy
+  dedupe      Find files that are the same file, and deal with the extra copies
   undo        Put back what `tungstate apply` did
   storage     Keep, clear and bring back what tungstate remembers
   policy      Check and inspect policies

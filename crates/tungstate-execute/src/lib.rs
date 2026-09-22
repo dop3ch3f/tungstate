@@ -13,13 +13,14 @@
 //! ever resumed**. Replanning is cheap and convergent, so continuing a
 //! half-applied plan buys nothing and risks acting on a stale view.
 
+pub mod digest;
 mod recover;
 mod undo;
 
 #[cfg(test)]
 mod tests;
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use tungstate_backend::{Backend, BackendError, RootToken};
 use tungstate_core::plan::{Op, Plan};
@@ -166,7 +167,11 @@ pub fn apply(
             source,
         })?;
 
-    let id = journal.begin_plan(root, &plan.snapshot, None)?;
+    // A plan that hands anything to the desktop's trash can never be taken
+    // back, and the flag has to be written before the first op: a crash
+    // half-way through must not leave a record that claims to be reversible.
+    let reversible = !plan.ops.iter().any(|op| matches!(op, Op::Trash { .. }));
+    let id = journal.begin_plan_that(root, &plan.snapshot, None, reversible)?;
     let mut applied = Applied {
         plan: id,
         done: 0,
@@ -305,6 +310,25 @@ fn perform(op: &Op, backend: &dyn Backend) -> std::result::Result<(), BackendErr
             }
             backend.rename(Path::new(from), Path::new(to))
         }
+        Op::Trash { path, .. } => {
+            // The desktop trash is this machine's. A backend that cannot say
+            // where a file really is has no trash to put it in, and refusing
+            // is the only honest answer: a remote trash is DESIGN §4's
+            // `.tungstate-trash/`, and is not built.
+            let Some(full) = backend.on_this_machine(Path::new(path))? else {
+                return Err(BackendError::Io {
+                    path: PathBuf::from(path),
+                    source: std::io::Error::new(
+                        std::io::ErrorKind::Unsupported,
+                        "the trash is this machine's; set aside instead",
+                    ),
+                });
+            };
+            trash::delete(&full).map_err(|source| BackendError::Io {
+                path: full,
+                source: std::io::Error::other(source.to_string()),
+            })
+        }
     }
 }
 
@@ -387,6 +411,10 @@ fn kind_of(op: &Op) -> OpKind {
         // A quarantine is a rename, and calling it one keeps `undo` from
         // needing a fifth case for a move that is spelled differently.
         Op::Move { .. } | Op::Quarantine { .. } => OpKind::Rename,
+        // The journal's word for "it is not there any more", which is as
+        // much as this side can say: where the trash put it belongs to the
+        // desktop, and `undo` refuses a plan that used it.
+        Op::Trash { .. } => OpKind::Remove,
     }
 }
 

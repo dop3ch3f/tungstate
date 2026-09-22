@@ -5,11 +5,15 @@
 //! [`Outcome`] that `tungstate explain` prints, so what the command line showed
 //! you is what the plan does.
 //!
-//! **No operation here removes content.** There is no `Trash` and no `Delete`:
-//! `on_conflict = "replace"` parks the existing file under
-//! [`snapshot::QUARANTINE`], which is what the drain already does and what its
-//! comment argues for. That is why "nothing is lost" is trivially true of a
-//! plan rather than carefully true.
+//! **Nothing this module plans removes content.** `on_conflict = "replace"`
+//! parks the existing file under [`snapshot::QUARANTINE`], which is what the
+//! drain already does and what its comment argues for.
+//!
+//! [`Op::Trash`] is the one exception in the type, and it is never built here:
+//! only the duplicate pass emits one, only when the person asked for the
+//! trash rather than a set-aside, and a plan holding one refuses `undo`
+//! (slice 8b, DESIGN §5). So the guarantee is unchanged for everything this
+//! module plans.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -58,6 +62,19 @@ pub enum Op {
         /// The directory.
         path: String,
     },
+    /// Hand a file to the operating system's trash.
+    ///
+    /// Only the duplicate pass builds one, and only when asked. It cannot be
+    /// undone from here: what is in the trash is the OS's to restore, which
+    /// is why a plan carrying one is marked irreversible rather than
+    /// half-reversible.
+    Trash {
+        /// The file.
+        path: String,
+        /// The copy that is being kept, so the record says what it was a
+        /// duplicate of.
+        of: String,
+    },
 }
 
 /// Why a file moves.
@@ -93,6 +110,11 @@ pub enum Parked {
     Replaced {
         /// The file taking its place.
         by: String,
+    },
+    /// The same content as another file, and not the copy being kept.
+    Duplicate {
+        /// The copy that stays where it is.
+        of: String,
     },
 }
 
@@ -238,6 +260,7 @@ impl Op {
     pub fn source(&self) -> Option<&str> {
         match self {
             Op::Move { from, .. } | Op::Quarantine { from, .. } => Some(from),
+            Op::Trash { path, .. } => Some(path),
             Op::MkDir { .. } | Op::RmDir { .. } => None,
         }
     }
@@ -247,7 +270,7 @@ impl Op {
     pub fn target(&self) -> Option<&str> {
         match self {
             Op::Move { to, .. } | Op::Quarantine { to, .. } => Some(to),
-            Op::MkDir { .. } | Op::RmDir { .. } => None,
+            Op::MkDir { .. } | Op::RmDir { .. } | Op::Trash { .. } => None,
         }
     }
 
@@ -256,7 +279,7 @@ impl Op {
     pub fn directory(&self) -> Option<&str> {
         match self {
             Op::MkDir { path } | Op::RmDir { path } => Some(path),
-            Op::Move { .. } | Op::Quarantine { .. } => None,
+            Op::Move { .. } | Op::Quarantine { .. } | Op::Trash { .. } => None,
         }
     }
 
@@ -270,7 +293,8 @@ impl Op {
             Op::MkDir { path } => (0, path.as_str(), ""),
             Op::Move { from, to, .. } => (1, from.as_str(), to.as_str()),
             Op::Quarantine { from, to, .. } => (2, from.as_str(), to.as_str()),
-            Op::RmDir { path } => (3, path.as_str(), ""),
+            Op::Trash { path, .. } => (3, path.as_str(), ""),
+            Op::RmDir { path } => (4, path.as_str(), ""),
         }
     }
 }
@@ -697,7 +721,7 @@ fn numbered(path: &str, n: u32) -> String {
 }
 
 /// Phase 4: the directories the moves need, and the ones they empty.
-fn directory_ops(snap: &Snapshot, ops: &[Op]) -> Vec<Op> {
+pub(crate) fn directory_ops(snap: &Snapshot, ops: &[Op]) -> Vec<Op> {
     let leaving: BTreeSet<&str> = ops.iter().filter_map(Op::source).collect();
     let arriving: Vec<&str> = ops.iter().filter_map(Op::target).collect();
 
@@ -761,7 +785,7 @@ fn directory_ops(snap: &Snapshot, ops: &[Op]) -> Vec<Op> {
 ///
 /// `existing` is what the folder holds right now, which is what tells a name
 /// that must be *vacated* from one that will be *produced*.
-fn order(mut ops: Vec<Op>, existing: &BTreeSet<String>) -> Vec<Op> {
+pub(crate) fn order(mut ops: Vec<Op>, existing: &BTreeSet<String>) -> Vec<Op> {
     // Canonical order first, so the graph's indices *are* content order and
     // breaking a tie by index breaks it by content.
     ops.sort_by(|a, b| a.ordering().cmp(&b.ordering()));
@@ -939,7 +963,7 @@ pub fn fingerprint(snap: &Snapshot) -> String {
 }
 
 /// How much of the folder this would move.
-fn measure(snap: &Snapshot, ops: &[Op]) -> Blast {
+pub(crate) fn measure(snap: &Snapshot, ops: &[Op]) -> Blast {
     let sizes: BTreeMap<String, u64> = snap
         .entries
         .iter()
@@ -1051,14 +1075,25 @@ pub fn replay(ops: &[Op], before: &Snapshot) -> Result<Snapshot, PlanError> {
                         return Err(out_of_order(op, "a file still holds that name"));
                     }
                     for ancestor in snapshot::ancestors(path) {
-                        if !directories.contains(&ancestor) {
+                        if !directories.contains(&ancestor) && !snapshot::is_reserved(&ancestor) {
                             return Err(out_of_order(op, "its parent does not exist yet"));
                         }
                     }
                     directories.insert(path.clone());
                 }
                 Op::Move { from, to, .. } | Op::Quarantine { from, to, .. } => {
-                    let Some(mut moving) = files.remove(from) else {
+                    // A file inside the set-aside area is not in any snapshot:
+                    // the walk is told never to enter it, so that a parked
+                    // file is not classified again and routed straight back
+                    // out. Undoing a set-aside moves a file *from* there, so
+                    // replay has to take the journal's word for it rather
+                    // than call it missing. Without this, no tidy that parked
+                    // anything could ever be undone.
+                    let parked = snapshot::is_reserved(from) && !files.contains_key(from);
+                    let Some(mut moving) = files
+                        .remove(from)
+                        .or_else(|| parked.then(|| Attributes::new(from, 0, before.taken)))
+                    else {
                         return Err(out_of_order(op, "there is nothing there to move"));
                     };
                     if files.contains_key(to) || directories.contains(to) {
@@ -1078,6 +1113,13 @@ pub fn replay(ops: &[Op], before: &Snapshot) -> Result<Snapshot, PlanError> {
                     moving.relocate(to);
                     files.insert(to.clone(), moving);
                 }
+                Op::Trash { path, .. } => {
+                    // The only op whose result is a file that is no longer
+                    // there at all. On paper it simply leaves the folder.
+                    if files.remove(path).is_none() {
+                        return Err(out_of_order(op, "there is nothing there to trash"));
+                    }
+                }
                 Op::RmDir { path } => {
                     let prefix = format!("{path}/");
                     if files.keys().any(|p| p.starts_with(&prefix))
@@ -1085,7 +1127,12 @@ pub fn replay(ops: &[Op], before: &Snapshot) -> Result<Snapshot, PlanError> {
                     {
                         return Err(out_of_order(op, "it is not empty"));
                     }
-                    if !directories.remove(path) {
+                    // Directories inside the set-aside area are invisible for
+                    // the same reason the files in it are: the walk is told
+                    // not to enter. Undoing a set-aside removes the
+                    // directories it made in there, so their absence from the
+                    // snapshot is expected rather than a change underfoot.
+                    if !directories.remove(path) && !snapshot::is_reserved(path) {
                         return Err(out_of_order(op, "there is no such directory"));
                     }
                 }

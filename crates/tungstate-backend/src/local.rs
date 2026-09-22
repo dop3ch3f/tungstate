@@ -177,6 +177,10 @@ fn probe_case_sensitive(root: &Path) -> bool {
 }
 
 impl Backend for LocalBackend {
+    fn on_this_machine(&self, path: &Path) -> Result<Option<PathBuf>> {
+        resolve(&self.root, path).map(Some)
+    }
+
     fn capabilities(&self) -> Capabilities {
         *self.capabilities.get_or_init(|| probe(&self.root))
     }

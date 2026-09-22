@@ -1782,3 +1782,112 @@ fn a_verbatim_windows_prefix_is_taken_back_off_but_a_unc_one_is_not() {
         "/media/a.jpg"
     );
 }
+
+#[test]
+fn a_digest_is_remembered_and_forgotten_when_the_file_changes() {
+    let journal = Journal::open_in_memory().unwrap();
+    let kept = Remembered {
+        partial: Some("ends".to_string()),
+        whole: Some("all".to_string()),
+    };
+    journal
+        .remember("/folder", "clip.mp4", 900, Some(1_700), &kept)
+        .unwrap();
+
+    assert_eq!(
+        journal
+            .remembered("/folder", "clip.mp4", 900, Some(1_700))
+            .unwrap(),
+        Some(kept)
+    );
+    // A file edited in place keeps its name, so size and mtime are what make
+    // a remembered digest safe rather than merely fast.
+    assert_eq!(
+        journal
+            .remembered("/folder", "clip.mp4", 900, Some(1_800))
+            .unwrap(),
+        None,
+        "a new mtime is a new file as far as this is concerned"
+    );
+    assert_eq!(
+        journal
+            .remembered("/folder", "clip.mp4", 901, Some(1_700))
+            .unwrap(),
+        None,
+        "and so is a new size"
+    );
+}
+
+#[test]
+fn remembering_a_whole_digest_keeps_the_partial_one() {
+    let journal = Journal::open_in_memory().unwrap();
+    journal
+        .remember(
+            "/folder",
+            "clip.mp4",
+            900,
+            Some(1_700),
+            &Remembered {
+                partial: Some("ends".to_string()),
+                whole: None,
+            },
+        )
+        .unwrap();
+    journal
+        .remember(
+            "/folder",
+            "clip.mp4",
+            900,
+            Some(1_700),
+            &Remembered {
+                partial: None,
+                whole: Some("all".to_string()),
+            },
+        )
+        .unwrap();
+
+    let found = journal
+        .remembered("/folder", "clip.mp4", 900, Some(1_700))
+        .unwrap()
+        .expect("remembered");
+    assert_eq!(found.partial.as_deref(), Some("ends"));
+    assert_eq!(found.whole.as_deref(), Some("all"));
+}
+
+#[test]
+fn an_answer_is_remembered_so_the_question_is_asked_once() {
+    let journal = Journal::open_in_memory().unwrap();
+    assert_eq!(journal.setting("dedupe.extras").unwrap(), None);
+
+    journal
+        .remember_setting("dedupe.extras", "set-aside")
+        .unwrap();
+    assert_eq!(
+        journal.setting("dedupe.extras").unwrap().as_deref(),
+        Some("set-aside")
+    );
+
+    journal.remember_setting("dedupe.extras", "trash").unwrap();
+    assert_eq!(
+        journal.setting("dedupe.extras").unwrap().as_deref(),
+        Some("trash"),
+        "the newer answer wins"
+    );
+}
+
+#[test]
+fn a_plan_that_cannot_be_reversed_says_so() {
+    let journal = Journal::open_in_memory().unwrap();
+    let ordinary = journal.begin_plan("/folder", "abc", None).unwrap();
+    let one_way = journal
+        .begin_plan_that("/folder", "abc", None, false)
+        .unwrap();
+
+    assert!(journal.plan_by_id(ordinary).unwrap().is_undoable());
+    let recorded = journal.plan_by_id(one_way).unwrap();
+    assert!(!recorded.reversible);
+    assert!(
+        !recorded.is_undoable(),
+        "`undo --last` must not offer a plan it cannot carry out"
+    );
+}

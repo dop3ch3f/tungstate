@@ -12,6 +12,8 @@ rust-version.workspace = true
 # backend, and a plan somebody already approved. They share a discipline and
 # almost no code.
 [dependencies]
+blake3 = { workspace = true }
+trash = { workspace = true }
 tungstate-core = { path = "../tungstate-core" }
 tungstate-backend = { path = "../tungstate-backend" }
 tungstate-journal = { path = "../tungstate-journal" }

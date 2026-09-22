@@ -250,4 +250,19 @@ pub trait Backend: Send + Sync {
     /// # Errors
     /// As [`Backend::stat`], plus [`BackendError::Io`] if creation fails.
     fn create_dir_all(&self, path: &Path) -> Result<()>;
+
+    /// Where `path` really is on this machine, if it is on this machine.
+    ///
+    /// `None` for everything remote, which is the default, so a backend only
+    /// answers this if it can. The desktop trash is the one caller: it drives
+    /// the local Finder or file manager and knows nothing about an FTP
+    /// server, so an op that needs it has to be refused rather than guessed
+    /// at.
+    ///
+    /// # Errors
+    /// As [`Backend::stat`] when `path` is not a safe relative path.
+    fn on_this_machine(&self, path: &Path) -> Result<Option<PathBuf>> {
+        let _ = path;
+        Ok(None)
+    }
 }

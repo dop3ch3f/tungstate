@@ -24,6 +24,12 @@ pub struct AppliedPlan {
     pub applied_at: i64,
     /// When it was taken back, if it has been.
     pub undone_at: Option<i64>,
+    /// Whether this can be taken back at all.
+    ///
+    /// False for a duplicate pass told to use the desktop's trash: those files
+    /// are the operating system's to restore, and a half-working undo would be
+    /// worse than a refusal.
+    pub reversible: bool,
     /// The reorganisation this one reverses, if it is an undo.
     ///
     /// An undo is itself a plan, because its operations have to show up in
@@ -48,7 +54,7 @@ impl AppliedPlan {
     /// Whether `undo --last` should offer this one.
     #[must_use]
     pub fn is_undoable(&self) -> bool {
-        !self.is_undone() && !self.is_an_undo()
+        self.reversible && !self.is_undone() && !self.is_an_undo()
     }
 }
 
@@ -67,10 +73,31 @@ impl Journal {
         snapshot: &str,
         undoes: Option<PlanId>,
     ) -> Result<PlanId> {
+        self.begin_plan_that(folder, snapshot, undoes, true)
+    }
+
+    /// Record a reorganisation, saying whether it can ever be taken back.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the row cannot be written.
+    pub fn begin_plan_that(
+        &self,
+        folder: &str,
+        snapshot: &str,
+        undoes: Option<PlanId>,
+        reversible: bool,
+    ) -> Result<PlanId> {
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO plans (folder, snapshot, applied_at, undoes) VALUES (?1, ?2, ?3, ?4)",
-            rusqlite::params![folder, snapshot, now_millis(), undoes.map(|p| p.0)],
+            "INSERT INTO plans (folder, snapshot, applied_at, undoes, reversible)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+            rusqlite::params![
+                folder,
+                snapshot,
+                now_millis(),
+                undoes.map(|p| p.0),
+                i64::from(reversible)
+            ],
         )
         .map_err(query("recording a plan"))?;
         Ok(PlanId(conn.last_insert_rowid()))
@@ -107,7 +134,7 @@ impl Journal {
     pub fn plan_by_id(&self, id: PlanId) -> Result<AppliedPlan> {
         let conn = self.lock();
         conn.query_row(
-            "SELECT id, folder, snapshot, applied_at, undone_at, undoes
+            "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible
              FROM plans WHERE id = ?1",
             rusqlite::params![id.0],
             row_to_plan,
@@ -133,7 +160,7 @@ impl Journal {
         let conn = self.lock();
         let mut statement = conn
             .prepare(
-                "SELECT id, folder, snapshot, applied_at, undone_at, undoes
+                "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible
                  FROM plans ORDER BY id DESC LIMIT ?1",
             )
             .map_err(query("listing recent plans"))?;
@@ -192,5 +219,6 @@ fn row_to_plan(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppliedPlan> {
         applied_at: row.get("applied_at")?,
         undone_at: row.get("undone_at")?,
         undoes: row.get::<_, Option<i64>>("undoes")?.map(PlanId),
+        reversible: row.get::<_, i64>("reversible")? != 0,
     })
 }

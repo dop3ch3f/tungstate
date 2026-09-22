@@ -187,6 +187,9 @@ fn render_op(op: &Op) -> String {
         Op::Quarantine { from, to, because } => {
             format!("  quarantine  {from} -> {to}{}\n", describe_parked(because))
         }
+        Op::Trash { path, of } => {
+            format!("  trash       {path}  (the same file as {of})\n")
+        }
     }
 }
 
@@ -207,6 +210,7 @@ fn describe_parked(parked: &Parked) -> String {
     match parked {
         Parked::Conflict { holder } => format!("  (a different file, {holder}, holds that name)"),
         Parked::Replaced { by } => format!("  (set aside, not deleted, so {by} can have the name)"),
+        Parked::Duplicate { of } => format!("  (set aside; the same file as {of}, which stays)"),
     }
 }
 

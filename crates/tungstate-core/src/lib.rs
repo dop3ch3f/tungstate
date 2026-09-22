@@ -13,6 +13,7 @@
 pub mod attrs;
 pub mod classify;
 pub mod compare;
+pub mod dupes;
 pub mod error;
 pub mod grammar;
 pub mod graph;
@@ -33,6 +34,8 @@ pub use policy::{Loaded, Mode, Policy, Rule, Symlinks};
 pub use snapshot::Snapshot;
 pub use templates::{TEMPLATES, Template};
 
+#[cfg(test)]
+mod dupes_tests;
 #[cfg(test)]
 mod plan_tests;
 #[cfg(test)]
