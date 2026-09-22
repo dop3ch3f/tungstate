@@ -63,6 +63,7 @@ pub fn gather(backend: &dyn Backend, path: &Path, tier: Tier) -> Result<Attribut
     attrs.mtime = meta
         .modified
         .and_then(|time| Timestamp::try_from(time).ok());
+    attrs.identity = meta.identity;
 
     // A directory or a link has no content worth sniffing, whatever the tier.
     if meta.is_dir || meta.is_symlink {

@@ -241,6 +241,22 @@ fn report(found: &Found, root: &str, reads: usize, hits: usize) -> String {
         }
     }
 
+    if !found.linked.is_empty() {
+        let _ = writeln!(out, "\ntwo names for one file");
+        for linked in &found.linked {
+            let _ = writeln!(
+                out,
+                "  {} ({})",
+                linked.names.join("  =  "),
+                bytes(linked.size)
+            );
+        }
+        let _ = writeln!(
+            out,
+            "  These are hard links, not copies: dealing with one frees nothing."
+        );
+    }
+
     let _ = writeln!(
         out,
         "\n{} would come back, from {} extra file(s).",

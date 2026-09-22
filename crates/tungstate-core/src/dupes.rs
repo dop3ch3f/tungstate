@@ -135,6 +135,22 @@ impl FolderGroup {
     }
 }
 
+/// Two or more names for one file on the disk.
+///
+/// A hard link, in other words. Not a duplicate: there is one copy of the
+/// content and dealing with one name would reclaim nothing. Reported because
+/// somebody looking at a list of identical files deserves to know which of
+/// them are the same file (DESIGN §9).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Linked {
+    /// What the storage calls the file, opaque and only ever compared.
+    pub id: String,
+    /// Every name it has, path order.
+    pub names: Vec<String>,
+    /// Size of the one file.
+    pub size: u64,
+}
+
 /// What a pass found.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Found {
@@ -147,6 +163,8 @@ pub struct Found {
     pub digested: usize,
     /// Files read in full.
     pub read_whole: usize,
+    /// Names that turned out to be the same file as another name.
+    pub linked: Vec<Linked>,
 }
 
 impl Found {
@@ -174,6 +192,12 @@ impl Found {
                     .map(|group| group.files * group.extras.len()),
             )
             .sum()
+    }
+
+    /// Names that are the same file as another name, counted.
+    #[must_use]
+    pub fn linked_names(&self) -> usize {
+        self.linked.iter().map(|one| one.names.len() - 1).sum()
     }
 
     /// True when there is nothing to do.
@@ -212,11 +236,43 @@ pub enum Trouble {
 /// [`Trouble::Unreadable`] if the digest fails, [`Trouble::TwoPins`] if two
 /// pinned paths are the same content.
 pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Result<Found, Trouble> {
-    let files: Vec<&Attributes> = snapshot
+    let all: Vec<&Attributes> = snapshot
         .entries
         .iter()
         .filter(|entry| !entry.is_dir && !entry.is_symlink && entry.size > 0)
         .filter(|entry| !snapshot::is_reserved(&entry.relative_path()))
+        .collect();
+
+    // Two names for one file are not two files. Only the first name goes
+    // forward, so a hard-linked pair is never offered as a duplicate whose
+    // extra copy would reclaim nothing when it is dealt with.
+    let mut by_identity: BTreeMap<&str, Vec<&Attributes>> = BTreeMap::new();
+    for file in &all {
+        if let Some(id) = file.identity.as_deref() {
+            by_identity.entry(id).or_default().push(file);
+        }
+    }
+    let mut linked = Vec::new();
+    let mut aliases: BTreeSet<String> = BTreeSet::new();
+    for (id, names) in by_identity.iter().filter(|(_, names)| names.len() > 1) {
+        let mut paths: Vec<String> = names.iter().map(|file| file.relative_path()).collect();
+        // The plainest path first, the same order the tie-break uses, so the
+        // name that goes forward is the one a person would call the file's
+        // own rather than whichever sorted first.
+        paths.sort_by_key(|path| (path.matches('/').count(), path.len(), path.clone()));
+        for alias in paths.iter().skip(1) {
+            aliases.insert(alias.clone());
+        }
+        linked.push(Linked {
+            id: (*id).to_string(),
+            names: paths,
+            size: names[0].size,
+        });
+    }
+
+    let files: Vec<&Attributes> = all
+        .into_iter()
+        .filter(|file| !aliases.contains(&file.relative_path()))
         .collect();
 
     // 1. Size. Anything alone at its size cannot be a duplicate, and is never
@@ -226,7 +282,10 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
         by_size.entry(file.size).or_default().push(file);
     }
 
-    let mut found = Found::default();
+    let mut found = Found {
+        linked,
+        ..Found::default()
+    };
     let mut by_hash: BTreeMap<String, Vec<&Attributes>> = BTreeMap::new();
     for (_, candidates) in by_size.iter().filter(|(_, same)| same.len() > 1) {
         // 2. The ends of the file, which splits most same-size sets apart.
@@ -528,9 +587,24 @@ impl Extras {
 #[must_use]
 pub fn plan(snapshot: &Snapshot, found: &Found, extras: Extras, folder: &str, mode: Mode) -> Plan {
     let mut ops = Vec::new();
+    // Names already spoken for in the set-aside area, under this volume's own
+    // rules: on a case-insensitive disk `Photo.JPG` and `photo.jpg` are one
+    // name, and two files sent to one name is a file lost at the moment of
+    // the move.
+    let mut taken: BTreeSet<String> = snapshot
+        .occupied()
+        .iter()
+        .map(|path| snapshot.key(path))
+        .collect();
     for group in &found.groups {
         for copy in &group.extras {
-            ops.push(deal_with(&copy.path, &group.keep, extras));
+            ops.push(deal_with(
+                &copy.path,
+                &group.keep,
+                extras,
+                snapshot,
+                &mut taken,
+            ));
         }
     }
     for group in &found.folders {
@@ -539,7 +613,13 @@ pub fn plan(snapshot: &Snapshot, found: &Found, extras: Extras, folder: &str, mo
             for file in snapshot.entries.iter().filter(|entry| !entry.is_dir) {
                 let path = file.relative_path();
                 if let Some(rest) = path.strip_prefix(&prefix) {
-                    ops.push(deal_with(&path, &format!("{}/{rest}", group.keep), extras));
+                    ops.push(deal_with(
+                        &path,
+                        &format!("{}/{rest}", group.keep),
+                        extras,
+                        snapshot,
+                        &mut taken,
+                    ));
                 }
             }
         }
@@ -567,18 +647,53 @@ pub fn plan(snapshot: &Snapshot, found: &Found, extras: Extras, folder: &str, mo
 }
 
 /// One extra copy, dealt with the way the person asked.
-fn deal_with(path: &str, keep: &str, extras: Extras) -> Op {
+fn deal_with(
+    path: &str,
+    keep: &str,
+    extras: Extras,
+    snapshot: &Snapshot,
+    taken: &mut BTreeSet<String>,
+) -> Op {
     match extras {
-        Extras::SetAside => Op::Quarantine {
-            from: path.to_string(),
-            to: format!("{}/{path}", snapshot::QUARANTINE),
-            because: Parked::Duplicate {
-                of: keep.to_string(),
-            },
-        },
+        Extras::SetAside => {
+            let to = free_name(&format!("{}/{path}", snapshot::QUARANTINE), snapshot, taken);
+            taken.insert(snapshot.key(&to));
+            Op::Quarantine {
+                from: path.to_string(),
+                to,
+                because: Parked::Duplicate {
+                    of: keep.to_string(),
+                },
+            }
+        }
         Extras::Trash => Op::Trash {
             path: path.to_string(),
             of: keep.to_string(),
         },
     }
+}
+
+/// A short, stable stand-in for a name, for the case that never happens.
+fn uuid_ish(seed: &str) -> String {
+    blake3::hash(seed.as_bytes()).to_hex()[..8].to_string()
+}
+
+/// `wanted`, or the first numbered variant of it nothing else claims.
+///
+/// Numbered before the extension, the way the planner numbers a name two
+/// files both asked for, so `clip.mp4` becomes `clip-2.mp4`.
+fn free_name(wanted: &str, snapshot: &Snapshot, taken: &BTreeSet<String>) -> String {
+    if !taken.contains(&snapshot.key(wanted)) {
+        return wanted.to_string();
+    }
+    let (stem, extension) = match wanted.rsplit_once('.') {
+        Some((stem, extension)) if !stem.ends_with('/') => (stem, format!(".{extension}")),
+        _ => (wanted, String::new()),
+    };
+    // Bounded: a thousand files under one name in one folder is not a real
+    // folder, and an unbounded search here would be an unbounded loop.
+    (2_u32..1_000)
+        .map(|nth| format!("{stem}-{nth}{extension}"))
+        .find(|candidate| !taken.contains(&snapshot.key(candidate)))
+        .unwrap_or_else(|| format!("{stem}-{}{extension}", uuid_ish(wanted)))
 }

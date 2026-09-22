@@ -211,6 +211,7 @@ impl Backend for LocalBackend {
             is_dir: md.is_dir(),
             is_symlink: md.file_type().is_symlink(),
             modified: md.modified().ok(),
+            identity: identity_of(&md),
         })
     }
 
@@ -303,6 +304,39 @@ impl WriteFinish for LocalWrite {
         // and a power cut after the journal commit would leave a deleted
         // original and an empty destination.
         self.file.sync_all().map_err(io_at(&self.path))
+    }
+}
+
+/// Which file on this disk a stat describes, where the platform says.
+///
+/// Volume plus file number, so two names for one file match and two files on
+/// two disks never do. `None` when the platform will not say, which the
+/// duplicate pass reads as "no idea", never as "different files".
+fn identity_of(md: &std::fs::Metadata) -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt as _;
+        // Only worth carrying when something else points at the same content:
+        // a file with one name cannot be confused with itself.
+        if md.nlink() > 1 {
+            return Some(format!("{}:{}", md.dev(), md.ino()));
+        }
+        None
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        match (md.volume_serial_number(), md.file_index()) {
+            (Some(volume), Some(index)) if md.number_of_links().unwrap_or(1) > 1 => {
+                Some(format!("{volume}:{index}"))
+            }
+            _ => None,
+        }
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = md;
+        None
     }
 }
 

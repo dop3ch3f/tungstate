@@ -110,6 +110,10 @@ pub struct Attributes {
     pub exif: BTreeMap<String, String>,
     /// BLAKE3 hex digest of the whole file. Tier `whole`.
     pub hash: Option<String>,
+    /// Which file on the storage this is, when the backend can say and when
+    /// something else points at the same one. Two paths sharing this are two
+    /// names for one file, which is not the same thing as two copies.
+    pub identity: Option<String>,
     /// Which link brought the file here, from the journal.
     pub source: Option<String>,
     /// The moment the decision is being made, so `age` is reproducible.
@@ -140,6 +144,7 @@ impl Attributes {
             mime: None,
             exif: BTreeMap::new(),
             hash: None,
+            identity: None,
             source: None,
             now,
         }

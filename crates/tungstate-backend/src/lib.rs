@@ -93,6 +93,14 @@ pub struct Meta {
     // Option forces callers to handle its absence at compile time.
     /// Last modification time, where the backend can report one.
     pub modified: Option<SystemTime>,
+    /// Which file on the storage this is, where the backend can say.
+    ///
+    /// Two paths with one identity are two *names* for one file, not two
+    /// files: a hard link. The duplicate pass has to know, or it reports a
+    /// duplicate that would reclaim nothing when it is dealt with
+    /// (DESIGN §9). `None` wherever the question has no answer, which is
+    /// every remote backend.
+    pub identity: Option<String>,
 }
 
 /// One entry from [`Backend::read_dir`], carrying its path and metadata together.

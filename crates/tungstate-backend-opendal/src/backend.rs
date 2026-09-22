@@ -167,6 +167,9 @@ fn to_meta(metadata: &opendal::Metadata) -> Meta {
         is_dir: metadata.is_dir(),
         is_symlink: false,
         modified: metadata.last_modified().map(Into::into),
+        // No service reports a file id, and guessing one would turn two
+        // ordinary copies into "one file under two names".
+        identity: None,
     }
 }
 

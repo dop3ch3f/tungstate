@@ -157,9 +157,35 @@ an undo of that plan, and `on_conflict = "quarantine"` never had one.
 eleven, because the plan also removes the directories it empties. `Found` now
 has `extra_files()`, and the brief's property 3 keeps its teeth.
 
-## 9. What is checked
+## 9. Two names for one file, and one name for two files
 
-Twenty-one new tests. The one that matters most is a property test:
+**Hard links.** Two names for one file are not two copies: setting one aside
+reclaims nothing, and reporting it as a duplicate is reporting a saving that
+does not exist. The identity comes from the stat the survey already does, so
+it costs no extra reads: `Meta.identity` is the volume plus the file number on
+a local disk, `None` everywhere else, and only carried when the file has more
+than one name. Paths sharing one identity collapse to the plainest of them
+before grouping, and the rest are reported separately:
+
+```
+two names for one file
+  clip.mp4  =  backup/clip-link.mp4 (195.3 KB)
+  These are hard links, not copies: dealing with one frees nothing.
+```
+
+`None` means "no idea", never "different files", which is what keeps a remote
+backend from claiming two copies are one.
+
+**A name two files both want.** On a case-insensitive volume, the default on
+macOS and Windows, `Clip.mp4` and `clip.mp4` are one name. Two files sent to
+one set-aside name is a file lost at the moment of the move, so the plan
+numbers the second: `clip-2.mp4`, the way the planner numbers a name two files
+both asked for. The volume's own rule is `Snapshot::key`, which already
+existed and this pass simply had not been consulting.
+
+## 10. What is checked
+
+Twenty-four new tests. The one that matters most is a property test:
 
 ```rust
 proptest! {
@@ -187,7 +213,7 @@ by `undo --last` and is refused by name by `undo --plan`.
 `cargo fmt`, `clippy -D warnings`, 488 tests, CI green on Linux, macOS and
 Windows.
 
-## 10. What is not in this slice
+## 11. What is not in this slice
 
 - **The window.** Slice 8c: its own Duplicates section, groups with every copy
   shown, per-group overrides, and pick-by-rule. `--json` already emits what it
@@ -204,14 +230,11 @@ Windows.
   connection should work, but full hashing over FTP has not been tried and
   would read every byte across the network. The brief's "warn before hashing a
   lot over a network" is **not implemented**: it needs a size threshold nobody
-  has picked yet.
-- **Hard links are not yet recognised as one file.** DESIGN §9 records the
-  trap: two paths sharing an inode are one file, not a duplicate. Nothing here
-  reads the inode, so a hard-linked pair is reported as a duplicate and
-  setting one aside reclaims nothing. Worth a fix before the window ships.
-- **Case-insensitive volumes.** `Snapshot::case_sensitive` exists and this
-  pass does not consult it. Two paths differing only in case are one file on
-  macOS, which would show as a duplicate of itself.
+  has picked yet, and `LocalBackend` cannot currently tell a mounted NAS from
+  the boot disk, which is the other half of the question.
+- **Hard links on Windows are untested.** The identity there is the volume
+  serial and the file index, which needs a real NTFS hard link to prove, and
+  CI has never made one.
 - **Scale.** The largest folder tried was a few hundred files. A drive with
   100,000 files will spend its time in `stat` and in SQLite, neither of which
   is measured.

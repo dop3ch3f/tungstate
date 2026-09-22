@@ -57,6 +57,14 @@ impl Digest for Table {
     }
 }
 
+/// A file, and which file on the disk it is: two paths sharing one identity
+/// are one file under two names.
+fn linked(path: &str, size: u64, mtime: Option<i64>, identity: &str) -> Attributes {
+    let mut file = at(path, size, mtime);
+    file.identity = Some(identity.to_string());
+    file
+}
+
 fn at(path: &str, size: u64, mtime: Option<i64>) -> Attributes {
     let now = Timestamp::from_second(1_700_000_000).expect("a valid moment");
     let mut file = Attributes::new(path, size, now);
@@ -309,6 +317,87 @@ fn the_trash_is_only_ever_planned_when_asked_for() {
     );
     assert!(!Extras::Trash.reversible());
     assert!(Extras::SetAside.reversible());
+}
+
+#[test]
+fn two_names_for_one_file_are_not_two_copies() {
+    // A hard link. Setting one name aside reclaims nothing, so offering it as
+    // a duplicate would be offering a saving that does not exist.
+    let snapshot = folder(&[
+        linked("clip.mp4", 100, Some(1), "1:42"),
+        linked("backup/clip.mp4", 100, Some(1), "1:42"),
+        // A different name, so this is a third file rather than a second
+        // folder holding the same one.
+        at("elsewhere/a-real-copy.mp4", 100, Some(2)),
+    ]);
+    let mut digest = Table::new(&[
+        ("clip.mp4", "same"),
+        ("backup/clip.mp4", "same"),
+        ("elsewhere/a-real-copy.mp4", "same"),
+    ]);
+
+    let found = dupes::find(&snapshot, &mut digest, &Wants::default()).expect("the pass runs");
+
+    assert_eq!(found.linked.len(), 1);
+    assert_eq!(
+        found.linked[0].names,
+        vec!["clip.mp4".to_string(), "backup/clip.mp4".to_string()],
+        "the plainest path is the name that goes forward"
+    );
+    assert_eq!(found.linked_names(), 1);
+    // The real copy is still a duplicate of the file those two names share,
+    // and only one of the two names appears in the group.
+    assert_eq!(found.groups.len(), 1);
+    assert_eq!(found.extra_files(), 1);
+    assert_eq!(
+        found.reclaimable(),
+        100,
+        "one copy's worth, not two: the linked name frees nothing"
+    );
+}
+
+#[test]
+fn a_set_aside_name_is_numbered_rather_than_taken_twice() {
+    // On a case-insensitive volume — the default on macOS and Windows —
+    // `Clip.mp4` and `clip.mp4` are one name. Sending two files to one name
+    // is a file lost at the moment of the move.
+    let files = [
+        at("keep.mp4", 100, Some(1)),
+        at("one/Clip.mp4", 100, Some(2)),
+        at("one/clip.mp4", 100, Some(3)),
+    ];
+    let directories = ["one".to_string()].into_iter().collect();
+    let snapshot = Snapshot::new(
+        Timestamp::from_second(1_700_000_000).expect("a valid moment"),
+        files.to_vec(),
+        directories,
+        false,
+    );
+    let mut digest = Table::new(&[
+        ("keep.mp4", "same"),
+        ("one/Clip.mp4", "same"),
+        ("one/clip.mp4", "same"),
+    ]);
+    let found = dupes::find(&snapshot, &mut digest, &Wants::default()).expect("the pass runs");
+    assert_eq!(found.extra_files(), 2);
+
+    let plan = dupes::plan(&snapshot, &found, Extras::SetAside, "f", Mode::Observe);
+
+    let mut targets: Vec<String> = plan
+        .ops
+        .iter()
+        .filter_map(|op| match op {
+            Op::Quarantine { to, .. } => Some(to.to_lowercase()),
+            _ => None,
+        })
+        .collect();
+    targets.sort();
+    let unique: BTreeSet<&String> = targets.iter().collect();
+    assert_eq!(
+        targets.len(),
+        unique.len(),
+        "two files were sent to one name: {targets:?}"
+    );
 }
 
 proptest! {
