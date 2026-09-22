@@ -29,6 +29,7 @@ const LOOK = {
   border: 1px solid var(--edge);
   border-radius: var(--radius);
   min-height: 30px;
+  white-space: nowrap;
   padding: 0 var(--s4);
   cursor: pointer;
   box-shadow: var(--lift);
@@ -48,7 +49,7 @@ const LOOK = {
   padding: 0 var(--s4);
 }
 .control-primary:hover:not(:disabled) { color: var(--control-ink); background: var(--control); filter: brightness(1.06); }
-.control-primary:disabled { opacity: 0.35; }
+.control-primary:disabled { background: var(--surface-raised); color: var(--disabled); opacity: 1; }
 
 .control-danger { color: var(--bad); border-color: var(--bad); }
 .control-danger:hover:not(:disabled) { color: var(--bad); background: var(--surface-raised); }

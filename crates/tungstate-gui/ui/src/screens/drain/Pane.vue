@@ -252,10 +252,15 @@ const KIND: Record<string, string> = {
 .k-doc { background: var(--kind-doc); }
 .k-folder { background: var(--kind-folder); border-radius: 2px 5px 3px 3px; }
 .what, .line .num { color: var(--text-faint); font-size: var(--fine); white-space: nowrap; }
-/* Below 460pt a pane drops its Type column rather than starving the name. */
+/* A narrow pane drops columns rather than starving the name: Type first,
+   then Modified. At 860pt, the window's smallest size, a pane is about 310. */
 @container (max-width: 460px) {
   .cols, .line { grid-template-columns: 22px minmax(0, 1fr) 66px 92px; }
   .cols > :nth-child(3), .line > .what { display: none; }
+}
+@container (max-width: 330px) {
+  .cols, .line { grid-template-columns: 22px minmax(0, 1fr) 66px; }
+  .cols > :nth-child(5), .line > :last-child { display: none; }
 }
 .nothing { font-size: var(--small); color: var(--text-faint); padding: var(--s4) var(--s2); margin: 0; }
 </style>

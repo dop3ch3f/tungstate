@@ -42,7 +42,7 @@ onMounted(() => f.listRegistered());
         </button>
       </section>
 
-      <Empty v-else line="No folders here yet. Downloads is usually the messiest one." />
+      <Empty v-else art="no-folders" line="No folders here yet. Downloads is usually the messiest one." />
     </div>
   </div>
 </template>

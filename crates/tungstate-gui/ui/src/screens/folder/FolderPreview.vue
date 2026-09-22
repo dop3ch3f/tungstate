@@ -120,7 +120,8 @@ async function confirmPutBack() {
         <template v-else>
           Moved {{ files(moved(f.tidied.value)) }}.
           <template v-if="f.tidied.value.skipped">
-            {{ files(skipped(f.tidied.value)) }} left alone: they changed while we looked.
+            {{ files(skipped(f.tidied.value)) }} left alone:
+            {{ f.tidied.value.skipped === 1 ? "it changed" : "they changed" }} while we looked.
           </template>
           <template v-if="f.tidied.value.failed">
             {{ files(failed(f.tidied.value)) }} could not be moved.

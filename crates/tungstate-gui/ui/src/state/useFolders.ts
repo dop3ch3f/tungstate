@@ -25,9 +25,18 @@ const putBackCount = ref<number | null>(null);
 const busy = ref<string | null>(null);
 const problem = ref<string | null>(null);
 
-/** Two frames: one for Vue to flush the DOM, one for the browser to paint it. */
+/** Wait for the screen to be drawn, but never for long.
+ *
+ *  Two animation frames is "Vue has flushed and the browser has painted". A
+ *  hidden or minimised window stops sending frames altogether, so the wait is
+ *  raced with a timer: without it, a tidy started and then minimised would sit
+ *  on a promise that never settles and the call would never be made. */
 const painted = () =>
-  new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+  new Promise<void>((resolve) => {
+    const done = () => resolve();
+    requestAnimationFrame(() => requestAnimationFrame(done));
+    setTimeout(done, 80);
+  });
 
 /** Run an engine call, keeping the one error slot and the one busy slot
  *  honest. Errors cross as bare sentences, so there is nothing to unwrap. */

@@ -110,7 +110,7 @@ async function remove(link: Link) {
     </div>
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
     <Notice v-if="said">{{ said }}</Notice>
-    <Empty v-if="!all.length" line="No saved pairs yet. Tick some files in the browser and name the pair when you send them." />
+    <Empty v-if="!all.length" art="no-pairs" line="No saved pairs yet. Tick some files in the browser and name the pair when you send them." />
     <div class="lk-row" v-for="link in all" :key="link.name">
       <div class="lk-who">
         <span class="lk-name">{{ link.name }}</span>
@@ -162,7 +162,7 @@ async function remove(link: Link) {
 </template>
 
 <style scoped>
-.lk-wrap { display: flex; flex-direction: column; gap: var(--s3); }
+.lk-wrap { display: flex; flex-direction: column; gap: var(--s3); container-type: inline-size; }
 .lk-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
@@ -173,7 +173,13 @@ async function remove(link: Link) {
 }
 .lk-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .lk-name { font-weight: 600; font-size: var(--small); }
-.lk-ends { color: var(--text-faint); }
+.lk-ends { color: var(--text-faint); word-break: normal; overflow-wrap: anywhere; }
+/* Narrow: a pair stacks rather than squeezing its two paths into a column
+   too thin to hold one. */
+@container (max-width: 680px) {
+  .lk-row { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+  .lk-do { justify-content: flex-start; }
+}
 .lk-how { list-style: none; margin: 0; padding: 0; font-size: var(--fine); color: var(--text-quiet); }
 .lk-how li { padding: 1px 0; }
 .lk-do { display: flex; gap: var(--s2); flex-wrap: wrap; justify-content: flex-end; }

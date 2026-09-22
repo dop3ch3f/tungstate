@@ -50,11 +50,16 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <div class="scrim" @click.self="emit('dismiss')">
-    <div ref="card" class="panel" :class="{ 'panel-wide': props.wide }" role="dialog" aria-modal="true">
-      <slot />
+  <!-- Teleported: a dialog raised from inside a pane was being positioned
+       against that pane rather than the window, because a `container-type`
+       ancestor is a containing block even for `position: fixed`. -->
+  <Teleport to=".frame">
+    <div class="scrim" @click.self="emit('dismiss')">
+      <div ref="card" class="panel" :class="{ 'panel-wide': props.wide }" role="dialog" aria-modal="true">
+        <slot />
+      </div>
     </div>
-  </div>
+  </Teleport>
 </template>
 
 <style scoped>

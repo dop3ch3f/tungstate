@@ -192,7 +192,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .way:hover:not(:disabled):not(.on) { background: var(--surface-hover); }
 /* One signal for one state: the row you picked is the filled one. */
 .way.on { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--accent); }
-.way:disabled { cursor: default; }
+.way:disabled { cursor: default; opacity: 0.5; }
 
 .wayname { grid-column: 1; grid-row: 1; font-weight: 600; }
 .said { grid-column: 1; grid-row: 2; font-size: var(--small); color: var(--text-quiet); margin-top: 1px; }

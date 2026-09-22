@@ -122,7 +122,7 @@ const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
       <section class="st-sec">
         <h2>Archives</h2>
         <p class="st-why">Starting fresh or restoring writes out what was here first. Nothing is thrown away unless you delete it here.</p>
-        <Empty v-if="!archives.length" line="Nothing archived yet." />
+        <Empty v-if="!archives.length" art="no-archives" line="Nothing archived yet." />
         <div class="st-row" v-for="a in archives" :key="a.name">
           <div class="st-who">
             <span class="st-when">{{ stamp(a.archived_at) }}</span>

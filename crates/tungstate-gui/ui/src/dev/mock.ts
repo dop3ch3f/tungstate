@@ -80,8 +80,15 @@ const listings = fx.listings as Record<string, T.Listing>;
 const previews = fx.preview as Record<string, T.PreviewView>;
 const byRoot = (root: string) => previews[root.split("/").pop()!] ?? previews["messy-downloads"];
 
+/** `?bare=1` answers every list with nothing, which is how the empty states
+ *  are photographed without emptying the demo folders. */
+const bare = new URLSearchParams(location.search).has("bare");
+
 mockIPC((cmd, args) => {
   const a = (args ?? {}) as Record<string, any>;
+  if (bare && ["governed", "list_links", "list_connections", "recent", "history", "whereis", "archives", "interrupted"].includes(cmd)) {
+    return [];
+  }
   switch (cmd) {
     case "governed": return governed;
     case "learn_folder":
@@ -130,6 +137,31 @@ const f = useFolders();
 const t = useTransfer();
 const DL = `${DEMO}/messy-downloads`;
 
+/** Open a governed folder straight at its preview. */
+async function open(root: string) {
+  const step = (n: string) => (document.documentElement.dataset.step = n);
+  step("go");
+  nav.go("folder");
+  step("list");
+  await f.listRegistered();
+  step("open");
+  await f.open(root);
+  step("tick");
+  await tick();
+  step("done");
+}
+/** Click one of the preview's four views by its label. */
+function view(label: string) {
+  const tabs = Array.from(document.querySelectorAll<HTMLButtonElement>(".views button"));
+  tabs.find((b) => b.textContent?.trim().startsWith(label))?.click();
+}
+function type(sel: string, text: string) {
+  const el = document.querySelector<HTMLInputElement>(sel);
+  if (!el) return;
+  el.value = text;
+  el.dispatchEvent(new Event("input"));
+}
+
 const tick = () => new Promise((r) => setTimeout(r, 60));
 const click = (sel: string) => document.querySelector<HTMLButtonElement>(sel)?.click();
 /** Open one of the Transfer window's tabs by position, since its state is local. */
@@ -166,8 +198,9 @@ const scenes: Record<string, () => unknown> = {
     });
   },
   drain: () => nav.go("drain"),
-  "drain-run": () => {
+  "drain-run": async () => {
     nav.go("drain");
+    await tab(1);
     const files = listings[`${DEMO}/nas/incoming`].entries.slice(0, 4);
     t.shape.value = { removes_originals: true, at_once: 2 };
     t.atOnce.value = 2;
@@ -182,10 +215,85 @@ const scenes: Record<string, () => unknown> = {
   history: () => nav.go("history"),
   settings: () => nav.go("settings"),
   "drain-connections": async () => { nav.go("drain"); await tab(3); },
+  "drain-runs": async () => { nav.go("drain"); await tab(1); },
   "drain-add-connection": async () => { nav.go("drain"); await tab(3); click(".cx-top button"); },
   "drain-pairs": async () => { nav.go("drain"); await tab(2); },
   "drain-add-pair": async () => { nav.go("drain"); await tab(2); click(".lk-top button"); },
+// --- the states that only appear after something has happened ------------
+  "folder-moves": async () => { await open(DL); view("Every move"); },
+  "folder-alone": async () => { await open(DL); view("Left alone"); },
+  "folder-rules": async () => { await open(DL); view("Rules"); },
+  "folder-putback": async () => {
+    await open(DL);
+    f.putBackCount.value = 28;
+    f.preview.value = { ...f.preview.value!, undoable: null };
+  },
+  "folder-working": async () => { await open(DL); f.busy.value = "Tidying. This does not report progress"; },
+  "folder-error": async () => { await open(DL); f.problem.value = "the rules in this folder will not load: line 3, column 9: expected `=`"; },
+  "folder-cooldown": async () => {
+    await open(DL);
+    f.preview.value = { ...f.preview.value!, tidy: true, files: 0 as never, waiting: 4, longest_wait: 96 };
+  },
+  "folder-already-tidy": async () => {
+    await open(DL);
+    f.preview.value = { ...f.preview.value!, tidy: true, files: 0 as never, waiting: 0 };
+  },
+  "folder-unsettled": async () => {
+    await open(DL);
+    f.preview.value = { ...f.preview.value!, settles: false };
+  },
+  "folder-broken": async () => {
+    nav.go("folder");
+    await f.look(DL);
+    f.outcomes.value = [
+      { name: "(the rules you have)", summary: "", loads: false, settles: true, files: 0, of: 30, bytes: 0, created: 0, removed: 0, example: null },
+      ...f.outcomes.value.slice(1),
+    ];
+  },
+  "folder-never-settles": async () => {
+    nav.go("folder");
+    await f.look(DL);
+    f.outcomes.value = f.outcomes.value.map((o, i) => (i === 1 ? { ...o, settles: false } : o));
+  },
+  "drain-conflict": async () => {
+    nav.go("drain");
+    t.conflict.value = { path: "holiday.jpg", incoming_size: 2_411_724, existing_size: 1_204_000 };
+  },
+  "drain-identical": async () => {
+    nav.go("drain");
+    t.identical.value = { path: "clip-2.mov", size: 209_715_200 };
+  },
+  "drain-stranded": async () => {
+    nav.go("drain");
+    await tick();
+    t.stranded.value = [{ link: "videos-to-nas", source: `${DEMO}/to-drain`, destination: `${DEMO}/nas/incoming`, files: 2, bytes: 419_430_400, names: ["clip-2.mov", "clip-3.mov"] }];
+  },
+  "drain-stopping": async () => {
+    await scenes["drain-run"]!();
+    t.stopping.value = true;
+  },
+  "drain-done": async () => {
+    nav.go("drain");
+    await tab(1);
+    t.summary.value = {
+      transferred: 3, already_present: 1, skipped: 0, quarantined: 1, failed: 1,
+      bytes: 629_145_600, recovered: 2, pruned: 0, cancelled: false, destination_lost: false,
+      failures: [{ path: "talk.mp4", reason: "the far side refused the write: permission denied" }],
+    };
+  },
+  "drain-deaf": async () => {
+    nav.go("drain");
+    await tab(1);
+    t.deaf.value = "This window cannot hear the engine, so a running transfer will report nothing here. Transfers themselves are unaffected.";
+  },
+  "history-nothing-found": async () => { nav.go("history"); await tick(); type("input", "nothing like this"); click(".h-find button"); },
   "drain-preview-pair": async () => { nav.go("drain"); await tab(2); await tick(); click(".lk-do button"); },
 };
-await scenes[scene]?.();
+try {
+  await scenes[scene]?.();
+} catch (e) {
+  // A scene that throws must say so: a silent one photographs the wrong screen.
+  document.title = `scene failed: ${String(e)}`;
+  document.documentElement.dataset.sceneError = String(e);
+}
 document.documentElement.dataset.ready = "1";

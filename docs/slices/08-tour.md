@@ -1003,6 +1003,43 @@ Each section also now opens as a program window on the retro desktop, with a
 title bar whose minimise and close return to Home and whose maximise fills the
 stage.
 
+## 13. Pixel art, and the walk through every state
+
+**The art.** The retro theme draws its marks as pixels, because an OS-style
+window asks for pixels rather than glossy renders: `lib/pixels.ts` holds each
+one as a grid of characters and `ui/Pixels.vue` turns a grid into two paths.
+Five section marks at 8 squares across, six empty-state scenes at 16, each in
+the colour of the section it stands in. Nothing here was generated; Codex's
+image tool is still refusing (§10), and for this look it would have been the
+wrong tool anyway.
+
+**The walk.** Every state that only appears after something has happened is
+now a scene in `src/dev/mock.ts`, so it can be photographed without the real
+window: the four preview views, a tidy running, an error, a folder in cooldown,
+one already tidy, rules that never settle, rules that will not load, the two
+transfer questions, an interrupted run, a run being stopped, a finished run
+with a failure in it, a window that cannot hear the engine, every empty state,
+and all of it again at 860 by 560, the smallest size the window allows.
+
+Six defects, three of them real:
+
+1. **A hidden window would have hung.** `run()` waits for two animation frames
+   so "working" is on screen before a blocking call. A minimised or hidden
+   window is sent no frames at all, so that promise never settled and the call
+   was never made. The wait is now raced with an 80ms timer. Found because
+   headless Chrome paints no frames either, which is the same condition.
+2. **A dialog raised from inside a pane was positioned against the pane.**
+   `container-type: inline-size`, added so a narrow pane can drop a column,
+   makes that element a containing block even for `position: fixed`. Every
+   `Sheet` now teleports to the window frame.
+3. **"1 file left alone: they changed while we looked."** Now "it changed".
+4. A disabled primary button was the section colour at 35% opacity, which
+   reads as a broken button rather than an unavailable one. It is now grey.
+5. A layout that can never settle is offered as a row you cannot pick, and
+   looked identical to the ones you can.
+6. At 860 the file panes starved the Name column and a saved pair broke its
+   paths mid-word. Panes drop Type, then Modified; rows stack.
+
 ## What is still not verified
 
 - **The colour pass has been seen in headless Chrome, not in the real
@@ -1012,7 +1049,10 @@ stage.
 - **A tidy no longer blocks the window.** Fixed in §9 by making the folder
   commands async, and watched on 5,000 files. The release build and a large
   real folder are still untimed.
-- **About twenty of roughly ninety-five states have been looked at.** Seen: the
+- **Most states have now been looked at (§13), in the browser harness rather
+  than the real window.** What has not: the folder picker, a real conflict
+  during a real transfer, and anything that needs a second machine.
+- **Superseded, kept for the record: about twenty of roughly ninety-five states had been looked at.** Seen: the
   start screen, the comparison on six fixture folders (including never-settles
   and already-has-rules), preview, left alone, the tidy and put-back dialogs
   and results, Home, the drain panes, the transfer dialog, a finished 600MB

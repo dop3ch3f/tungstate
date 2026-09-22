@@ -74,7 +74,7 @@ const planned = computed(() => t.rows.value.length);
       <Button v-else-if="t.running.value && !t.halting.value" look="danger" @click="t.stopNow()">Stop now</Button>
     </div>
 
-    <Empty v-if="!planned && !t.summary.value" line="Nothing running. Tick some files in the browser and press Copy or Move." />
+    <Empty v-if="!planned && !t.summary.value" art="no-runs" line="Nothing running. Tick some files in the browser and press Copy or Move." />
 
     <div class="run-ledger" v-if="planned">
       <div class="run-line" v-for="row in t.rows.value" :key="row.path">

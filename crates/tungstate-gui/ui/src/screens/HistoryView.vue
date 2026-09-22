@@ -80,8 +80,8 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
 
       <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
 
-      <Empty v-if="!ops.length && searched" line="Nothing here matches that." />
-      <Empty v-else-if="!ops.length" line="Nothing has happened yet." />
+      <Empty v-if="!ops.length && searched" art="nothing-found" line="Nothing here matches that." />
+      <Empty v-else-if="!ops.length" art="no-history" line="Nothing has happened yet." />
 
       <div class="h-row" v-for="op in ops" :key="op.id" :class="{ 'h-row-bad': dot(op.status) === 'h-bad' }">
         <span class="h-dot" :class="dot(op.status)"></span>

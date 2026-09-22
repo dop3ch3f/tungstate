@@ -98,7 +98,7 @@ async function remove(name: string) {
       <Button look="primary" @click="form = { editing: null }">Add a connection</Button>
     </div>
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
-    <Empty v-if="!all.length" line="No connections yet. You need one to reach a NAS over FTP. A volume you have mounted in Finder needs none." />
+    <Empty v-if="!all.length" art="no-connections" line="No connections yet. You need one to reach a NAS over FTP. A volume you have mounted in Finder needs none." />
     <div class="cx-row" v-for="c in all" :key="c.name">
       <div class="cx-who">
         <span class="cx-name">{{ c.name }}</span>
@@ -136,7 +136,7 @@ async function remove(name: string) {
 </template>
 
 <style scoped>
-.cx-wrap { display: flex; flex-direction: column; gap: var(--s3); }
+.cx-wrap { display: flex; flex-direction: column; gap: var(--s3); container-type: inline-size; }
 .cx-row {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto;
@@ -144,6 +144,10 @@ async function remove(name: string) {
   align-items: start;
   padding: var(--s3) 0;
   border-bottom: 1px solid var(--edge);
+}
+@container (max-width: 680px) {
+  .cx-row { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
+  .cx-do { justify-content: flex-start; }
 }
 .cx-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .cx-name { font-weight: 600; font-size: var(--small); }
