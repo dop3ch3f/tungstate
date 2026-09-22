@@ -187,6 +187,7 @@ const KIND: Record<string, string> = {
   border: 1px solid var(--edge);
   border-radius: var(--radius-lg);
   background: var(--panel);
+  box-shadow: var(--lift-panel);
   overflow: hidden;
   container-type: inline-size;
 }

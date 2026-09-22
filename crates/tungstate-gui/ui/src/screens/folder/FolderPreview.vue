@@ -353,6 +353,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   border: 1px solid var(--edge);
   border-radius: var(--radius-lg);
   background: var(--panel);
+  box-shadow: var(--lift-panel);
 }
 .act { display: flex; align-items: center; gap: var(--s3); }
 .safe { font-size: var(--small); color: var(--text-faint); }

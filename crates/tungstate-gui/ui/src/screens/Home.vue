@@ -57,7 +57,7 @@ const DOT = { plain: "o-plain", live: "o-live", ok: "o-ok", hold: "o-hold", bad:
 <template>
   <div class="home">
     <div class="column">
-      <h1>Overview</h1>
+      <h1>Home</h1>
 
       <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
       <Notice tone="hold" v-if="stranded.length">
@@ -151,7 +151,32 @@ h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin:
   border-radius: var(--radius-lg);
   padding: var(--s4);
   min-width: 0;
+  box-shadow: var(--lift-panel);
 }
+/* Retro: each panel is a little window, its header a title bar. The whole
+   selector sits inside :global(), because Vue drops anything after it. */
+:global([data-theme="retro"] .ph) {
+  margin: calc(var(--s4) * -1) calc(var(--s4) * -1) 0;
+  padding: var(--s2) var(--s4);
+  background: var(--surface-raised);
+  border-bottom: 1px solid var(--edge);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  align-items: center;
+}
+:global([data-theme="retro"] .ph p) { display: none; }
+/* Three window controls in the retro primaries, drawn as one dot and two
+   shadows of it, ahead of the tile. */
+:global([data-theme="retro"] .ph::before) {
+  content: "";
+  flex: none;
+  width: 9px;
+  height: 9px;
+  margin-right: 30px;
+  border-radius: 50%;
+  background: var(--tint-folder);
+  box-shadow: 14px 0 0 var(--tint-home), 28px 0 0 var(--tint-drain);
+}
+:global([data-theme="retro"] .rows) { border-top: none; }
 .ph { display: flex; gap: var(--s3); align-items: flex-start; }
 .ph-words { min-width: 0; flex: 1; }
 .ph h2 { font-size: var(--body); font-weight: 600; margin: 3px 0 0; }

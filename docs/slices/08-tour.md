@@ -947,6 +947,38 @@ dialog asked "Tidy downloads?" for a folder called `messy-downloads`, reading
 the policy's name instead of the folder's. It now uses the same name as the
 page heading.
 
+## 11. Plain, then graphite, then retro
+
+After the colour pass the brief changed twice, both times for the better.
+
+**Plain first.** Grain, gradients and glass all read as material, and the ask
+was an ordinary desktop app. They went. Then flat full-window colour read as
+elementary: a whole window painted one loud colour, with flat boxes on it, is
+what a children's app looks like. Professional Mac tools sit on a neutral
+surface and spend colour in a few places.
+
+**Graphite.** A neutral dark window, with colour only in each section's icon
+tile (the System Settings pattern), its main button and the file-kind badges.
+Home stopped being two boxes with a digit in each and became an overview:
+the folders you have, your saved pairs and the last six operations, each a
+click from acting on it.
+
+**Then two more directions, and retro won.** Built as themes over the same
+screens: *paper*, warm white with ink and hairlines, and *retro*, after
+PostHog's site, where the window is a cream desktop, each panel a little
+window with a title bar and three coloured controls, bold outlines and hard
+offset shadows. Retro ships as the default. Graphite and paper are kept in
+`tokens.css` rather than deleted, because a theme switch in settings is on
+the backlog and both are finished.
+
+The sidebar labels are now Home, Organize, Transfer and History.
+
+One trap worth recording: inside a scoped Vue style, `:global(X) .y` compiles
+to `X` alone. Vue drops everything after the `:global()`. The first retro
+rule meant to hide a panel's subtitle compiled to `[data-theme="retro"] {
+display: none }` and blanked the whole page. The whole selector has to sit
+inside: `:global([data-theme="retro"] .y)`.
+
 ## What is still not verified
 
 - **The colour pass has been seen in headless Chrome, not in the real

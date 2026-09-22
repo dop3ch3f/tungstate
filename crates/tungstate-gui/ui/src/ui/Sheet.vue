@@ -73,7 +73,7 @@ onBeforeUnmount(() => {
   border: 1px solid var(--edge);
   border-radius: var(--radius-xl);
   padding: var(--s5) var(--s5) var(--s4);
-  box-shadow: var(--drop);
+  box-shadow: var(--lift-panel), var(--drop);
 }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @media (prefers-reduced-motion: reduce) { .scrim { animation: none } }

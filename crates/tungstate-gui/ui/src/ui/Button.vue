@@ -31,6 +31,7 @@ const LOOK = {
   min-height: 30px;
   padding: 0 var(--s4);
   cursor: pointer;
+  box-shadow: var(--lift);
   transition: background var(--quick) var(--ease), border-color var(--quick) var(--ease);
 }
 .control:hover:not(:disabled) { color: var(--text); background: var(--surface-raised); }

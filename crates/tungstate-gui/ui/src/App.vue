@@ -28,10 +28,10 @@ onMounted(() => {
 onUnmounted(detachTransferStream);
 
 const WHERE = {
-  home: "Overview",
-  folder: "Tidy a folder",
-  drain: "Move to another machine",
-  history: "What has happened",
+  home: "Home",
+  folder: "Organize",
+  drain: "Transfer",
+  history: "History",
 } as const;
 </script>
 
@@ -70,7 +70,7 @@ const WHERE = {
 .frame { display: flex; height: 100%; background: var(--field); }
 
 .rail {
-  width: 220px;
+  width: 172px;
   flex: none;
   display: flex;
   flex-direction: column;
@@ -108,6 +108,8 @@ const WHERE = {
 }
 .dest:hover { color: var(--text); background: var(--surface-hover); }
 .dest.here { color: var(--text); background: var(--surface-hover); }
+/* Retro: the section you are in is a raised, outlined button. */
+:global([data-theme="retro"] .dest.here) { background: var(--panel); box-shadow: inset 0 0 0 1px var(--edge), var(--lift); }
 .gap { flex: 1; }
 .live { color: var(--accent); font-size: 9px; padding: var(--s2); }
 

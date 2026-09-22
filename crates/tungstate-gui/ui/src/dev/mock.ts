@@ -108,6 +108,7 @@ mockIPC((cmd, args) => {
 
 const params = new URLSearchParams(location.search);
 const scene = params.get("scene") ?? "home";
+document.documentElement.dataset.theme = params.get("theme") ?? "retro";
 
 const { createApp } = await import("vue");
 const { default: App } = await import("../App.vue");
