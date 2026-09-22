@@ -246,10 +246,9 @@ async function confirmPutBack() {
 .head { display: flex; align-items: center; gap: var(--s3); }
 .prev { position: absolute; inset: 0; overflow: hidden; }
 .column {
-  max-width: 980px;
   height: 100%;
-  margin: 0 auto;
-  padding: var(--s5) var(--s6) 0;
+  padding: var(--win-pad);
+  padding-bottom: 0;
   display: flex;
   flex-direction: column;
 }

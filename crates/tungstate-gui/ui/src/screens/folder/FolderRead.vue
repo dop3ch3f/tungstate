@@ -125,10 +125,9 @@ const shape = computed(() => {
 .head { display: flex; align-items: center; gap: var(--s3); }
 .read { position: absolute; inset: 0; overflow: hidden; }
 .column {
-  max-width: 860px;
   height: 100%;
-  margin: 0 auto;
-  padding: var(--s5) var(--s6) 0;
+  padding: var(--win-pad);
+  padding-bottom: 0;
   display: flex;
   flex-direction: column;
 }

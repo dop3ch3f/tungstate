@@ -101,7 +101,7 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
 <style scoped>
 .head { display: flex; align-items: center; gap: var(--s3); }
 .h-wrap { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
-.h-column { max-width: 960px; margin: 0 auto; padding: var(--s5) var(--s6); }
+.h-column { padding: var(--win-pad); }
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .head { margin-bottom: var(--s4); }
 

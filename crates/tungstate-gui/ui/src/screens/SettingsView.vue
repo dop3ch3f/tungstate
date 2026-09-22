@@ -145,7 +145,7 @@ const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
 
 <style scoped>
 .st-wrap { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
-.st-column { max-width: 860px; margin: 0 auto; padding: var(--s5) var(--s6) var(--s6); }
+.st-column { padding: var(--win-pad); }
 .head { display: flex; align-items: center; gap: var(--s3); }
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .st-sec { margin-top: var(--s6); display: flex; flex-direction: column; gap: var(--s3); }

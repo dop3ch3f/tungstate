@@ -50,7 +50,7 @@ onMounted(() => f.listRegistered());
 <style scoped>
 .head { display: flex; align-items: center; gap: var(--s3); }
 .start { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
-.column { max-width: 720px; margin: 0 auto; padding: var(--s5) var(--s6) var(--s6); }
+.column { padding: var(--win-pad); }
 
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .intro {

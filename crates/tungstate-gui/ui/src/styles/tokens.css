@@ -117,6 +117,10 @@
   --s5: 22px;
   --s6: 32px;
 
+  /* The inside edge of every section window, so each heading starts at the
+     same place whichever section is open. */
+  --win-pad: var(--s5) var(--s6);
+
   --radius: 8px;
   --radius-lg: 14px;
   --radius-xl: 20px;

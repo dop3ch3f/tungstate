@@ -206,7 +206,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
 
 <style scoped>
 .head { display: flex; align-items: center; gap: var(--s3); }
-.dh { position: absolute; inset: 0; display: flex; flex-direction: column; padding: var(--s5) var(--s5) var(--s3); gap: var(--s3); }
+.dh { position: absolute; inset: 0; display: flex; flex-direction: column; padding: var(--win-pad); padding-bottom: var(--s3); gap: var(--s3); }
 .dh-title { font-size: var(--display); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
 
 .dh-tabs { display: flex; gap: 2px; padding: 3px; background: var(--rail); border-radius: var(--radius); align-self: flex-start; }
