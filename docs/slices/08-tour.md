@@ -902,14 +902,15 @@ word is read. They differed only in palette:
 |---|---|---|---|
 | A, CleanMyMac as shipped | indigo | violet to magenta | teal to green |
 | B, scheelite at night | near-black blue | blue-violet | deep teal |
-| C, from a seed | green | plum | royal blue |
+| C, from a seed | green, later midnight violet | plum | royal blue |
 
 C's hues came from `scripts/seed.sh` through a fixed mapping: the SHA-256 of
 the seed gives byte 0 as the tidying hue, byte 1 as the drain hue, byte 2 as
 home, then saturation, lightness and angle. That produced 271, 217, 140,
-78%, 15% and 286 degrees. **You picked C.** A and B were deleted, and Home's
-green was later taken darker so the two coloured tiles on it are what the eye
-lands on.
+78%, 15% and 286 degrees. **You picked C.** A and B were deleted. Home's green
+then went: seen in the real window it fought both tiles, as the critic had
+said in every round, so Home is now a midnight violet between the plum and
+the blue. It is a stage for the two colours rather than a third one.
 
 ### Three rounds with the critic, against the reference this time
 

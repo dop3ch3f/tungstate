@@ -15,10 +15,10 @@
   --grain: url("../assets/grain.png");
 
   /* From a seed: hues 140 / 271 / 217, saturation 78, light 15, angle 286.
-     The mapping is in docs/slices/08-tour.md. Green for home, plum for
-     tidying, royal blue for moving files. Home is the seed's green taken
-     darker, so the two coloured tiles on it are what the eye lands on. */
-  --raw-home: linear-gradient(286deg, hsl(140 55% 9%) 0%, hsl(160 50% 17%) 100%);
+     The mapping is in docs/slices/08-tour.md. Plum for tidying, royal blue
+     for moving files. Home was the seed's green and fought both tiles, so it
+     is a midnight violet between the two hues: a stage, not a third colour. */
+  --raw-home: linear-gradient(286deg, hsl(248 38% 8%) 0%, hsl(256 32% 15%) 100%);
   --raw-folder: linear-gradient(286deg, hsl(271 78% 14%) 0%, hsl(300 62% 27%) 100%);
   --raw-drain: linear-gradient(286deg, hsl(217 78% 14%) 0%, hsl(245 62% 29%) 100%);
   --raw-ink: hsl(271 60% 16%);
