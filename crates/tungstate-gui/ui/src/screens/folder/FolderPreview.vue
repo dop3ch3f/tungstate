@@ -7,6 +7,7 @@ import { folders } from "../../engine/commands";
 import { bytes, duration } from "../../lib/format";
 import { wouldMove, outOf, moved, skipped, failed, putBack, files, dirsCounted } from "../../lib/counts";
 import { ask } from "../../ui/useDialog";
+import type { TreeEntry } from "../../engine/types";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
 import Working from "../../ui/Working.vue";
@@ -17,6 +18,10 @@ const view = ref<View>("trees");
 const rules = ref<string | null>(null);
 
 const p = computed(() => f.preview.value);
+/** The folder's own name, not `p.folder`, which is the name the policy file
+ *  declares. A folder called `messy-downloads` under the `downloads` layout
+ *  was rendering as "downloads", on the page and in the question. */
+const name = computed(() => f.current.value?.name ?? f.root.value?.split("/").pop() ?? "");
 
 /** `PreviewView` has no `created`/`removed`, but both trees mark their
  *  directories, so the two numbers are a comparison rather than a missing
@@ -42,6 +47,24 @@ watch(
 );
 watch(() => f.root.value, () => (rules.value = null));
 
+/** Files at the top of the folder first, then each directory with what is in
+ *  it. The engine sends plain path order, where `Images` sorts before
+ *  `archive.zip`; drawn with directories as headings, that put top-level
+ *  files visually inside `Images`. */
+const topFirst = (entries: TreeEntry[]) =>
+  [...entries].sort((a, b) => {
+    const at = !a.is_dir && !a.path.includes("/");
+    const bt = !b.is_dir && !b.path.includes("/");
+    return at === bt ? (a.path < b.path ? -1 : a.path > b.path ? 1 : 0) : at ? -1 : 1;
+  });
+const before = computed(() => topFirst(p.value?.before ?? []));
+const after = computed(() => topFirst(p.value?.after ?? []));
+
+/** A path split for display: the directories, then the name. */
+const cut = (path: string) => path.lastIndexOf("/") + 1;
+const lead = (path: string) => path.slice(0, cut(path));
+const leaf = (path: string) => path.slice(cut(path));
+
 async function confirmTidy() {
   const view = p.value;
   if (!view) return;
@@ -51,7 +74,7 @@ async function confirmTidy() {
     `${dirs.value.made} directories made, ${dirs.value.emptied} emptied.`,
   ];
   const answer = await ask({
-    title: `Tidy ${view.folder}?`,
+    title: `Tidy ${name.value}?`,
     why: view.large
       ? "This is a large change. Everything it does can be put back, and the button to do that stays on this screen."
       : "Everything this does can be put back, and the button to do that stays on this screen.",
@@ -82,10 +105,7 @@ async function confirmPutBack() {
 <template>
   <div class="prev" v-if="p">
     <div class="column">
-      <!-- The folder's own name, not `p.folder`, which is the name the policy
-           file declares. A folder called `messy-downloads` governed by the
-           `downloads` layout was rendering as "downloads". -->
-      <h1>{{ f.current.value?.name ?? f.root.value?.split("/").pop() }}</h1>
+      <h1>{{ name }}</h1>
       <p class="locus">
         <span class="path">{{ f.root.value }}</span>
         <span class="ruleset" v-if="p.folder">filed by the {{ p.folder }} rules</span>
@@ -124,11 +144,14 @@ async function confirmPutBack() {
       <p class="sum" v-else-if="p.tidy">
         Nothing to move. This folder already matches its rules.
       </p>
-      <p class="sum" v-else>
-        <b>{{ files(wouldMove(p)) }}</b> of {{ outOf(p) }} would move, {{ bytes(p.bytes) }}.
-        It would make {{ dirs.made }} director{{ dirs.made === 1 ? "y" : "ies" }}
-        and empty {{ dirs.emptied }}.
-      </p>
+      <div class="sum hero" v-else>
+        <p class="big num">{{ files(wouldMove(p)) }}</p>
+        <p class="sub">
+          of {{ outOf(p) }} would move, {{ bytes(p.bytes) }}.
+          It would make {{ dirs.made }} director{{ dirs.made === 1 ? "y" : "ies" }}
+          and empty {{ dirs.emptied }}.
+        </p>
+      </div>
 
       <Notice tone="hold" v-if="p.large && p.settles && !p.tidy">
         That is a large change for one folder. Read it before you run it.
@@ -150,8 +173,8 @@ async function confirmPutBack() {
           <div class="side">
             <h2>Now</h2>
             <ul>
-              <li v-for="e in p.before" :key="'b' + e.path" :class="{ shifts: e.moves }">
-                <span class="path">{{ e.path }}</span>
+              <li v-for="e in before" :key="'b' + e.path" :class="{ shifts: e.moves, dir: e.is_dir }">
+                <span class="entry"><span class="path lead">{{ lead(e.path) }}</span>{{ leaf(e.path) }}</span>
                 <span class="weight" v-if="!e.is_dir">{{ bytes(e.size) }}</span>
               </li>
             </ul>
@@ -159,8 +182,8 @@ async function confirmPutBack() {
           <div class="side">
             <h2>After tidying</h2>
             <ul>
-              <li v-for="e in p.after" :key="'a' + e.path" :class="{ shifts: e.moves }">
-                <span class="path">{{ e.path }}</span>
+              <li v-for="e in after" :key="'a' + e.path" :class="{ shifts: e.moves, dir: e.is_dir }">
+                <span class="entry"><span class="path lead">{{ lead(e.path) }}</span>{{ leaf(e.path) }}</span>
                 <span class="weight" v-if="!e.is_dir">{{ bytes(e.size) }}</span>
               </li>
             </ul>
@@ -219,23 +242,25 @@ async function confirmPutBack() {
 </template>
 
 <style scoped>
-.prev { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.prev { position: absolute; inset: 0; overflow: hidden; }
 .column {
   max-width: 980px;
-  min-height: 100%;
+  height: 100%;
   margin: 0 auto;
   padding: var(--s5) var(--s6) 0;
   display: flex;
   flex-direction: column;
 }
-h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .locus { display: flex; gap: var(--s3); align-items: baseline; margin: var(--s1) 0 0; }
 .ruleset { font-size: var(--fine); color: var(--text-faint); flex: none; }
 .locus .path { color: var(--text-faint); }
 .did { margin-top: var(--s3); }
 
 .sum { font-size: var(--body); line-height: 1.55; margin: var(--s4) 0 0; color: var(--text-quiet); }
-.sum b { color: var(--text); font-weight: 600; }
+.hero { display: flex; align-items: baseline; gap: var(--s3); flex-wrap: wrap; }
+.big { font-size: var(--hero); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; color: var(--text); margin: 0; }
+.sub { margin: 0; max-width: 52ch; }
 
 .views { display: flex; gap: var(--s1); margin: var(--s4) calc(var(--s2) * -1) 0; }
 .views button {
@@ -250,9 +275,21 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
 }
 .views button:hover { color: var(--text-quiet); }
 .views .von { color: var(--text); background: var(--surface-raised); }
+.views { padding: 3px; background: var(--rail); border-radius: var(--pill); align-self: flex-start; margin-left: 0; }
+.views button { border-radius: var(--pill); padding: var(--s1) var(--s3); }
 .howmany { font-variant-numeric: tabular-nums; opacity: 0.7; margin-left: 2px; }
 
-.view-body { margin-top: var(--s3); flex: 1; padding-bottom: var(--s4); }
+/* The list scrolls on its own, so it stops above the action bar instead of
+   running underneath it. */
+.view-body {
+  margin-top: var(--s3);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: var(--s5);
+  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
+}
 
 .trees { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5); }
 .side h2 { font-size: var(--fine); font-weight: 600; color: var(--text-faint); margin: 0 0 var(--s2); }
@@ -265,8 +302,25 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
   padding: 2px 0;
   color: var(--text-quiet);
 }
-/* Exactly one accent on this screen, spent on the files that would change. */
-.side li.shifts { color: var(--accent); }
+/* The files that would change are the bright ones, each with an accent mark,
+   so the eye can follow them across. Everything else steps back. */
+.side li { color: var(--text-faint); padding-left: 12px; position: relative; }
+.side li.shifts { color: var(--text); }
+.side li.shifts::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 5px;
+  height: 5px;
+  margin-top: -2px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.side li.dir { padding-left: 0; margin-top: var(--s2); color: var(--text-quiet); }
+.side li.dir .entry { font-size: var(--small); font-weight: 600; }
+.entry { font-size: var(--small); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lead { color: var(--text-faint); word-break: normal; }
 .weight { font-variant-numeric: tabular-nums; flex: none; color: var(--text-faint); }
 
 .moves li, .alone li {
@@ -293,11 +347,15 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
 
 .foot {
   margin-top: auto;
-  padding: var(--s4) 0 20px;
-  border-top: 1px solid var(--edge);
-  position: sticky;
-  bottom: 0;
-  background: var(--surface);
+  padding: var(--s3) var(--s4);
+  margin-bottom: var(--s3);
+  flex: none;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-lip);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
 }
 .act { display: flex; align-items: center; gap: var(--s3); }
 .safe { font-size: var(--small); color: var(--text-faint); }

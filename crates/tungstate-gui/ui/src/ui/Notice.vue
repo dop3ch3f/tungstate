@@ -19,10 +19,33 @@ const TONE = { plain: "said-plain", hold: "said-hold", bad: "said-bad" } as cons
   line-height: 1.55;
   margin: 0;
   padding: var(--s2) var(--s3);
-  border-left: 2px solid var(--edge);
+  background: var(--glass);
+  border-left: 3px solid var(--edge);
+  border-radius: var(--radius);
   color: var(--text-quiet);
 }
 .said-plain { /* the default, already drawn above */ }
-.said-hold { border-left-color: var(--hold); }
+.said-hold {
+  background: none;
+  border-left: none;
+  padding: 0 0 0 18px;
+  position: relative;
+  color: var(--hold);
+}
+.said-hold::before {
+  content: "!";
+  position: absolute;
+  left: 0;
+  top: 2px;
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--hold);
+  color: var(--control-ink);
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 13px;
+  text-align: center;
+}
 .said-bad { border-left-color: var(--bad); color: var(--text); }
 </style>

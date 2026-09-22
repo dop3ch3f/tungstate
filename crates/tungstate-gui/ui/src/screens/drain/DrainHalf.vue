@@ -82,11 +82,12 @@ async function send(request: TransferRequest) {
   right.value?.reload();
 }
 
-const WHERE = { files: "files", runs: "runs", links: "links", connections: "connections" } as const;
+const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections: "Connections" } as const;
 </script>
 
 <template>
   <div class="dh">
+    <h1 class="dh-title">Move to another machine</h1>
     <nav class="dh-tabs">
       <button
         v-for="(label, key) in WHERE"
@@ -178,17 +179,18 @@ const WHERE = { files: "files", runs: "runs", links: "links", connections: "conn
 </template>
 
 <style scoped>
-.dh { position: absolute; inset: 0; display: flex; flex-direction: column; padding: var(--s4) var(--s5) var(--s4); gap: var(--s3); }
+.dh { position: absolute; inset: 0; display: flex; flex-direction: column; padding: var(--s5) var(--s5) var(--s3); gap: var(--s3); }
+.dh-title { font-size: var(--display); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
 
-.dh-tabs { display: flex; gap: var(--s1); margin-left: calc(var(--s2) * -1); }
+.dh-tabs { display: flex; gap: 2px; padding: 3px; background: var(--rail); border-radius: var(--pill); align-self: flex-start; }
 .dh-tabs button {
   font: inherit;
   font-size: var(--small);
   background: none;
   border: none;
   color: var(--text-faint);
-  padding: var(--s1) var(--s2);
-  border-radius: var(--radius);
+  padding: var(--s1) var(--s3);
+  border-radius: var(--pill);
   cursor: pointer;
 }
 .dh-tabs button:hover { color: var(--text-quiet); }
@@ -198,7 +200,7 @@ const WHERE = { files: "files", runs: "runs", links: "links", connections: "conn
 
 .dh-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s3); }
 .dh-pad { overflow-y: auto; }
-.dh-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.dh-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); }
 
 .dh-act { display: flex; align-items: center; gap: var(--s3); }
 .dh-tally { font-size: var(--small); color: var(--text-quiet); }

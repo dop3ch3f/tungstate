@@ -48,9 +48,9 @@ onMounted(() => f.listRegistered());
 
 <style scoped>
 .start { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
-.column { max-width: 720px; margin: 0 auto; padding: 56px var(--s6) var(--s6); }
+.column { max-width: 720px; margin: 0 auto; padding: 72px var(--s6) var(--s6); }
 
-h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: var(--hero); font-weight: 700; margin: 0; letter-spacing: -0.02em; }
 .intro {
   font-size: var(--body);
   line-height: 1.6;
@@ -79,6 +79,6 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
 .known-row:hover { background: var(--surface-hover); }
 .known-name { font-weight: 600; flex: none; }
 .known-path { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.known-state { margin-left: auto; flex: none; font-size: var(--fine); color: var(--bad); }
+.known-state { flex: none; font-size: var(--fine); color: var(--bad); }
 .known-state.dim { color: var(--text-faint); }
 </style>

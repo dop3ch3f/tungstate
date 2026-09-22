@@ -57,7 +57,7 @@ const shape = computed(() => {
 
       <p class="caveat" v-if="mine && !mine.loads">
         This folder already has rules and they will not load, so they are not
-        among the ways below. The file is <span class="path">.tungstate/policy.toml</span>.
+        among the ways below. The file is <span class="path inline">.tungstate/policy.toml</span>.
       </p>
       <p class="caveat" v-else-if="mine && !mine.settles">
         The rules already in this folder are not among them: they would move the
@@ -66,7 +66,7 @@ const shape = computed(() => {
       <p class="caveat" v-else-if="mine">
         This folder already has rules, so these are shown for comparison only.
         Changing them means editing
-        <span class="path">.tungstate/policy.toml</span> yourself.
+        <span class="path inline">.tungstate/policy.toml</span> yourself.
       </p>
 
       <div class="table">
@@ -112,7 +112,7 @@ const shape = computed(() => {
             look="primary"
             :disabled="!chosen || !!mine"
             @click="chosen && f.choose(chosen)"
-          >Give this folder these rules</Button>
+          >{{ chosen && !mine ? `Give this folder the ${chosen} rules` : "Give this folder these rules" }}</Button>
           <span class="safe">You will see every move before anything happens.</span>
         </div>
       </footer>
@@ -121,17 +121,17 @@ const shape = computed(() => {
 </template>
 
 <style scoped>
-.read { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
+.read { position: absolute; inset: 0; overflow: hidden; }
 .column {
   max-width: 860px;
-  min-height: 100%;
+  height: 100%;
   margin: 0 auto;
   padding: var(--s5) var(--s6) 0;
   display: flex;
   flex-direction: column;
 }
 
-h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.01em; }
+h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .locus { display: flex; align-items: baseline; gap: var(--s4); margin: var(--s1) 0 0; min-width: 0; }
 .locus .path { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
@@ -144,7 +144,7 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
    rather than near it. `minmax(0, 1fr)` and not `1fr`: a bare `1fr` has an
    `auto` minimum, so the longest description widens column one in its own row
    alone and every row lands its figures somewhere different. */
-.table { --cols: minmax(0, 1fr) 84px 92px 88px 88px; margin-top: var(--s3); padding-bottom: var(--s4); }
+.table { --cols: minmax(0, 1fr) 84px 92px 88px 88px; margin-top: var(--s3); padding: 0 var(--s3) var(--s4); margin-left: calc(var(--s3) * -1); margin-right: calc(var(--s3) * -1); flex: 1; min-height: 0; overflow-y: auto; }
 
 .key {
   display: grid;
@@ -156,6 +156,13 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
   font-size: var(--fine);
   color: var(--text-faint);
   white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  padding-top: 2px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 .kway { text-align: left; }
 .knum { text-align: right; }
@@ -182,7 +189,7 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
 }
 .way:hover:not(:disabled):not(.on) { background: var(--surface-hover); }
 /* One signal for one state: the row you picked is the filled one. */
-.way.on { background: var(--surface-raised); }
+.way.on { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--accent); }
 .way:disabled { cursor: default; }
 
 .wayname { grid-column: 1; grid-row: 1; font-weight: 600; }
@@ -193,13 +200,17 @@ h1 { font-size: var(--display); font-weight: 600; margin: 0; letter-spacing: -0.
 
 .foot {
   margin-top: auto;
-  padding: var(--s4) var(--s3) 20px;
+  padding: var(--s3) var(--s4);
   margin-left: calc(var(--s3) * -1);
   margin-right: calc(var(--s3) * -1);
-  border-top: 1px solid var(--edge);
-  position: sticky;
-  bottom: 0;
-  background: var(--surface);
+  margin-bottom: var(--s3);
+  flex: none;
+  border: 1px solid var(--edge);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--glass-lip);
+  background: var(--glass);
+  -webkit-backdrop-filter: var(--blur);
+  backdrop-filter: var(--blur);
 }
 .eg {
   font-size: var(--fine);

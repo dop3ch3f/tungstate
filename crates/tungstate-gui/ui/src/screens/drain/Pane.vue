@@ -4,7 +4,7 @@
 <script setup lang="ts">
 import { ref, computed, watch, onMounted } from "vue";
 import { transfers } from "../../engine/commands";
-import { bytes, kind, mark, shortPath, when } from "../../lib/format";
+import { bytes, kind, shortPath, when } from "../../lib/format";
 import type { Entry, Place } from "../../engine/types";
 import Notice from "../../ui/Notice.vue";
 
@@ -107,6 +107,17 @@ watch(() => props.start, (to) => { if (to !== here.value) load(to); });
 onMounted(() => load(props.start));
 
 defineExpose({ reload: () => load(here.value), here });
+
+// Kind label to badge colour. A lookup, because the CSS checker cannot follow
+// a computed class name; anything unlisted is drawn as a document.
+const KIND: Record<string, string> = {
+  Folder: "k-folder",
+  Video: "k-video",
+  Image: "k-image",
+  "Raw image": "k-image",
+  Audio: "k-audio",
+  Archive: "k-archive",
+};
 </script>
 
 <template>
@@ -153,12 +164,12 @@ defineExpose({ reload: () => load(here.value), here });
           v-for="(entry, index) in shown"
           :key="entry.path"
           class="line"
-          :class="{ on: ticked.has(entry.name), folder: entry.is_dir }"
+          :class="{ on: ticked.has(entry.name) }"
           @click="tick(entry, index, $event)"
           @dblclick="entry.is_dir && load(entry.path)"
         >
           <input type="checkbox" :checked="ticked.has(entry.name)" tabindex="-1" @click.stop="tick(entry, index, $event)" />
-          <span class="entryname"><span class="glyph">{{ mark(entry) }}</span><span class="nm">{{ entry.name }}</span></span>
+          <span class="entryname"><span class="glyph" :class="KIND[kind(entry)] ?? 'k-doc'"></span><span class="nm">{{ entry.name }}</span></span>
           <span class="what">{{ kind(entry) }}</span>
           <span class="r num">{{ entry.is_dir ? "" : bytes(entry.size) }}</span>
           <span class="r num">{{ entry.modified ? when(entry.modified) : "" }}</span>
@@ -174,20 +185,25 @@ defineExpose({ reload: () => load(here.value), here });
   flex-direction: column;
   min-width: 0;
   border: 1px solid var(--edge);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
+  background: var(--glass);
+  box-shadow: var(--glass-lip);
   overflow: hidden;
+  container-type: inline-size;
 }
-.side.lit { border-color: var(--text-faint); }
+.side.lit { border-color: var(--disabled); }
 
 .locline { display: flex; gap: var(--s2); padding: var(--s2); align-items: center; }
-.jump, .up, .where-input {
+.up {
   font: inherit;
   font-size: var(--small);
-  background: none;
   color: var(--text-quiet);
+  background: var(--glass);
   border: 1px solid var(--edge);
   border-radius: var(--radius);
-  padding: 4px 7px;
+  box-shadow: var(--glass-lip);
+  width: 28px;
+  height: 28px;
 }
 .jump, .up { cursor: pointer; flex: none; }
 .up:disabled { opacity: 0.4; cursor: default; }
@@ -197,7 +213,7 @@ defineExpose({ reload: () => load(here.value), here });
 
 .cols, .line {
   display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 86px 78px 104px;
+  grid-template-columns: 22px minmax(0, 1fr) 64px 66px 92px;
   gap: var(--s2);
   align-items: center;
   padding: 0 var(--s2);
@@ -221,15 +237,26 @@ defineExpose({ reload: () => load(here.value), here });
 .cols .r, .line .r { text-align: right; }
 
 .rolls { flex: 1; overflow-y: auto; }
-.line { height: 26px; cursor: default; font-size: var(--small); }
+.line { height: 28px; cursor: default; font-size: var(--small); }
 .line:hover { background: var(--surface-hover); }
 .line.on { background: var(--surface-raised); }
 .entryname { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
 /* The ellipsis has to be on the text, not on the flex row around it: a flex
    container clips its children and never shows the dots. */
 .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.glyph { color: var(--text-faint); flex: none; }
-.line.folder .glyph { color: var(--text-quiet); }
+/* A 12pt tile in the colour of the file's kind. */
+.glyph { width: 12px; height: 12px; border-radius: 3px; flex: none; opacity: 0.9; box-shadow: var(--glass-lip); }
+.k-video { background: var(--kind-video); }
+.k-image { background: var(--kind-image); }
+.k-audio { background: var(--kind-audio); }
+.k-archive { background: var(--kind-archive); }
+.k-doc { background: var(--kind-doc); }
+.k-folder { background: var(--kind-folder); border-radius: 2px 5px 3px 3px; }
 .what, .line .num { color: var(--text-faint); font-size: var(--fine); white-space: nowrap; }
+/* Below 460pt a pane drops its Type column rather than starving the name. */
+@container (max-width: 460px) {
+  .cols, .line { grid-template-columns: 22px minmax(0, 1fr) 66px 92px; }
+  .cols > :nth-child(3), .line > .what { display: none; }
+}
 .nothing { font-size: var(--small); color: var(--text-faint); padding: var(--s4) var(--s2); margin: 0; }
 </style>

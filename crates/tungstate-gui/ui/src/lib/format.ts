@@ -69,13 +69,3 @@ export function kind(entry: { is_dir: boolean; name: string }): string {
   return ext.toUpperCase();
 }
 
-/** A quiet type mark rather than an icon set: no assets, no licensing, no weight. */
-export function mark(entry: { is_dir: boolean; name: string }): string {
-  if (entry.is_dir) return "▸";
-  const ext = entry.name.split(".").pop()?.toLowerCase() ?? "";
-  if (["mp4", "mov", "mkv", "avi", "m4v", "webm"].includes(ext)) return "▮";
-  if (["jpg", "jpeg", "png", "heic", "gif", "tiff", "raw", "webp"].includes(ext)) return "◼";
-  if (["mp3", "wav", "flac", "aac", "m4a"].includes(ext)) return "♪";
-  if (["zip", "tar", "gz", "7z", "dmg", "iso"].includes(ext)) return "▦";
-  return "·";
-}

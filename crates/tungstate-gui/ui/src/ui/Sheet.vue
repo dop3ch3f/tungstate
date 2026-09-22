@@ -62,17 +62,19 @@ onBeforeUnmount(() => {
   inset: 0;
   display: grid;
   place-items: center;
-  background: rgba(16, 18, 14, 0.62);
+  background: var(--veil);
+  -webkit-backdrop-filter: blur(4px);
+  backdrop-filter: blur(4px);
   animation: fade var(--slow) var(--ease);
   z-index: 10;
 }
 .panel {
   width: min(460px, calc(100vw - var(--s6) * 2));
-  background: var(--surface-raised);
+  background: linear-gradient(var(--sheet), var(--sheet)), var(--field);
   border: 1px solid var(--edge);
-  border-radius: var(--radius-lg);
-  padding: var(--s5);
-  box-shadow: 0 18px 44px rgba(0, 0, 0, 0.45);
+  border-radius: var(--radius-xl);
+  padding: var(--s5) var(--s5) var(--s4);
+  box-shadow: var(--glass-lip), var(--drop);
 }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @media (prefers-reduced-motion: reduce) { .scrim { animation: none } }

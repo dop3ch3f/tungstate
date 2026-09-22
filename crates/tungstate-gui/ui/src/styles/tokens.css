@@ -1,67 +1,104 @@
 /* Tungstate.
  *
- * Scheelite is calcium tungstate: a dense grey mineral that fluoresces
- * blue-white under ultraviolet. The interface is that mineral seen in daylight
- * rather than under the lamp -- a warm olive-charcoal work surface -- and the
- * fluorescence is spent only on what is live or chosen. Dark is the design and
- * not a default: this is a tool that sits open while a transfer runs for an
- * hour.
+ * Modelled on CleanMyMac: each part of the app has its own colour field, the
+ * sidebar and panels are glass over it, and text is white. Home, the folder
+ * half and the drain half each get a field, so you can tell where you are
+ * from the colour before reading anything. Scheelite blue stays the colour of
+ * whatever is live or about to change.
  *
  * The only file in the project that contains a literal colour, a literal type
  * size, a literal duration or a literal radius. `scripts/check-css.mjs`
- * enforces that, and enforces that nothing outside this file reaches for a
- * `--raw-` token: the raw palette is the implementation and the semantic layer
- * below it is the interface. Re-tinting the whole application is editing the
- * first block; re-deciding what a colour means is editing the second.
+ * enforces that nothing outside this file reaches for a `--raw-` token.
  */
 
 :root {
-  /* The palette. Named for what they are, used by nobody directly. */
-  --raw-bench: #3b3e37;
-  --raw-bench-lift: #41453d;
-  --raw-bench-high: #4a4e44;
-  --raw-bench-edge: #4a4e43;
-  --raw-chalk: #eef0e9;
-  --raw-chalk-dim: #e6e8e0;
-  --raw-ash: #a2a797;
-  --raw-ash-deep: #7c8274;
-  --raw-slate: #24271f;
+  --grain: url("../assets/grain.png");
+
+  /* From a seed: hues 140 / 271 / 217, saturation 78, light 15, angle 286.
+     The mapping is in docs/slices/08-tour.md. Green for home, plum for
+     tidying, royal blue for moving files. Home is the seed's green taken
+     darker, so the two coloured tiles on it are what the eye lands on. */
+  --raw-home: linear-gradient(286deg, hsl(140 55% 9%) 0%, hsl(160 50% 17%) 100%);
+  --raw-folder: linear-gradient(286deg, hsl(271 78% 14%) 0%, hsl(300 62% 27%) 100%);
+  --raw-drain: linear-gradient(286deg, hsl(217 78% 14%) 0%, hsl(245 62% 29%) 100%);
+  --raw-ink: hsl(271 60% 16%);
+  --raw-veil: rgba(10, 4, 20, 0.5);
+
+  --raw-sheet: rgba(12, 6, 22, 0.72);
+  --raw-white: #ffffff;
+  --raw-white-30: rgba(255, 255, 255, 0.3);
+  --raw-highlight: rgba(255, 255, 255, 0.22);
+  --raw-drop: rgba(0, 0, 0, 0.5);
+  --raw-white-74: rgba(255, 255, 255, 0.76);
+  --raw-white-52: rgba(255, 255, 255, 0.54);
+  --raw-white-16: rgba(255, 255, 255, 0.16);
+  --raw-white-12: rgba(255, 255, 255, 0.12);
+  --raw-white-08: rgba(255, 255, 255, 0.08);
+  --raw-shade: rgba(0, 0, 0, 0.18);
+  --raw-night: #120c22;
   --raw-fluoresce: #7fd4ff;
-  --raw-fluoresce-ink: #0a2230;
-  --raw-amber: #e0b45f;
-  --raw-green: #6fcf97;
-  --raw-rust: #e2705f;
+  --raw-fluoresce-ink: #062030;
+  --raw-amber: #ffc862;
+  --raw-kind-video: #ff7a90;
+  --raw-kind-image: #ffb35c;
+  --raw-kind-audio: #b98cff;
+  --raw-kind-archive: #8fa3b8;
+  --raw-kind-doc: #6fb6ff;
+  --raw-kind-folder: #7fd4ff;
+  --raw-green: #7ee2a8;
+  --raw-rust: #ff8a78;
 
   /* What they mean. Everything else in the project uses these. */
-  --surface: var(--raw-bench);
-  --surface-hover: var(--raw-bench-lift);
-  --surface-raised: var(--raw-bench-high);
-  --edge: var(--raw-bench-edge);
+  --field-home: var(--raw-home);
+  --field-folder: var(--raw-folder);
+  --field-drain: var(--raw-drain);
+  --field: var(--field-home);
+  --veil: var(--raw-veil);
 
-  --text: var(--raw-chalk);
-  --text-quiet: var(--raw-ash);
-  --text-faint: var(--raw-ash-deep);
+  --surface: var(--raw-night);
+  --surface-hover: var(--raw-white-08);
+  --surface-raised: var(--raw-white-12);
+  --edge: var(--raw-white-16);
+  --rail: var(--raw-shade);
+  --glass: var(--raw-white-08);
+  /* Glass has a lit top edge, which is what separates it from a flat tint. */
+  --glass-lip: inset 0 1px 0 var(--raw-highlight);
+  --sheet: var(--raw-sheet);
+  --drop: 0 20px 60px var(--raw-drop);
+  --disabled: var(--raw-white-30);
+  --blur: blur(22px) saturate(1.3);
 
-  /* Spent on the thing that is live or chosen, and on nothing else. The brand
-     reserves this colour for the file being verified right now; a screen where
-     nothing is live spends it on the row you have picked. */
+  --text: var(--raw-white);
+  --text-quiet: var(--raw-white-74);
+  --text-faint: var(--raw-white-52);
+
+  /* Spent on the thing that is live or about to change, and on nothing else. */
   --accent: var(--raw-fluoresce);
   --accent-ink: var(--raw-fluoresce-ink);
 
-  /* A filled control on a dark ground, which is not the accent: a button is
-     not a thing that is live. */
-  --control: var(--raw-chalk-dim);
-  --control-ink: var(--raw-slate);
+  /* The one filled button on a screen. */
+  --control: var(--raw-white);
+  --control-ink: var(--raw-ink);
+
+  /* What kind of file a row is, told by colour before the name is read. */
+  --kind-video: var(--raw-kind-video);
+  --kind-image: var(--raw-kind-image);
+  --kind-audio: var(--raw-kind-audio);
+  --kind-archive: var(--raw-kind-archive);
+  --kind-doc: var(--raw-kind-doc);
+  --kind-folder: var(--raw-kind-folder);
 
   --hold: var(--raw-amber);
   --ok: var(--raw-green);
   --bad: var(--raw-rust);
 
-  /* Type. Four sizes, because a table with a heading, a caption and column
-     labels needs four and does not need six. */
-  --font: "Avenir Next", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* Type. SF on a Mac, like the app this is modelled on. */
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --display: 23px;
+  --hero: 44px;
+  --display: 28px;
+  --title: 22px;
+  --nav: 13.5px;
   --body: 14.5px;
   --small: 12.5px;
   --fine: 11.5px;
@@ -74,10 +111,16 @@
   --s5: 22px;
   --s6: 32px;
 
-  --radius: 6px;
-  --radius-lg: 8px;
+  --radius: 8px;
+  --radius-lg: 14px;
+  --radius-xl: 20px;
+  --pill: 999px;
 
   --quick: 90ms;
   --slow: 220ms;
   --ease: cubic-bezier(0.2, 0, 0.2, 1);
 }
+
+/* Where you are decides the field. History shares Home's. */
+[data-half="folder"] { --field: var(--field-folder); }
+[data-half="drain"] { --field: var(--field-drain); }

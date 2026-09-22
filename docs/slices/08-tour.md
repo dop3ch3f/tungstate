@@ -865,11 +865,96 @@ capture that looks right proves nothing about where the last click landed.
 
 ---
 
+## 10. The colour pass
+
+The first finished build was one olive-grey surface with scheelite blue on the
+file paths and almost nowhere else. The layout and the words held up. The
+feel did not: it was monochrome, and the brief had named CleanMyMac. Three
+choices caused that. The polish pass deleted colour along with clutter, the
+critic loop stopped on a plateau at six, and the approved imagery was never
+used.
+
+### Photographing screens without the window
+
+Driving the real window means taking the mouse and the front window away from
+whoever is using the machine, and that went wrong twice in this slice. So the
+colour pass never touched the window. `mock.html` runs the same `App.vue` in a
+browser, `src/dev/mock.ts` answers every command through Tauri's own
+`mockIPC`, and `?scene=` puts the module-level state straight into the screen
+being checked. `scripts/shoot.sh` photographs a scene in headless Chrome at
+1080 by 720, 1:1, with no window and no focus taken.
+
+The answers come from `src/dev/fixture.json`, which
+`scripts/capture-fixture.py` writes from the demo folders using `tungstate
+plan --json` and `folder compare`. One figure is derived rather than
+captured: `folder compare` prints no byte totals, so the harness scales them
+from the preview's real total by file count, and says so in a comment. Vite
+bundles `index.html` only, so none of this reaches `dist`.
+
+### Three palettes, one layout
+
+All three kept CleanMyMac's structure: a colour field for each part of the
+app, a glass sidebar over it, white text, pill buttons. Home, the folder half
+and the drain half each get a field, so where you are is visible before any
+word is read. They differed only in palette:
+
+| | Home | Tidying | Moving files |
+|---|---|---|---|
+| A, CleanMyMac as shipped | indigo | violet to magenta | teal to green |
+| B, scheelite at night | near-black blue | blue-violet | deep teal |
+| C, from a seed | green | plum | royal blue |
+
+C's hues came from `scripts/seed.sh` through a fixed mapping: the SHA-256 of
+the seed gives byte 0 as the tidying hue, byte 1 as the drain hue, byte 2 as
+home, then saturation, lightness and angle. That produced 271, 217, 140,
+78%, 15% and 286 degrees. **You picked C.** A and B were deleted, and Home's
+green was later taken darker so the two coloured tiles on it are what the eye
+lands on.
+
+### Three rounds with the critic, against the reference this time
+
+Same method as section 3: a fresh model each round that sees only the
+screenshots, on a fixed prompt. This time the comparison set is CleanMyMac X,
+CleanMyMac (2024), Raycast and Arc, because CleanMyMac is the stated
+reference.
+
+| Round | Score | What changed going in |
+|---|---|---|
+| 1 | 4.5 | the three palettes, C kept |
+| 2 | 5 | native-looking controls, a title and segmented tabs on the drain half, lists that end above the action bar, doors in their half's colour, sidebar icons, one button height |
+| 3 | 5 | coloured file-kind badges, file names before their folders, a hairline table header, the chosen layout named on the button, grain only on the backdrop |
+
+Rounds 2 to 3 moved by zero and 1 to 2 by half a point, so the stopping rule
+fired. The first gap all three rounds named was the same one: **each part of
+the app needs a hero illustration**, a rendered object like CleanMyMac's.
+That is blocked. Codex's image tool returned `403 Forbidden` for this
+account, and its fallback needs an `OPENAI_API_KEY` that is not set. Until
+art exists, the doors on Home carry live counts instead of pictures.
+
+Two findings were answered deliberately rather than acted on. Round 2 wanted
+one neutral background everywhere, which would undo the colour-per-half
+design that was picked. Two rounds wanted the WO mark replaced, and the brand
+is fixed.
+
+### What looking found that the critic did not
+
+With directories drawn as headings, the before-and-after trees put files that
+sit at the top of the folder visually inside `Images`, because the engine
+sends plain path order and `Images` sorts before `archive.zip`. The trees now
+list top-level files first. The critic also caught a real slip: the confirm
+dialog asked "Tidy downloads?" for a folder called `messy-downloads`, reading
+the policy's name instead of the folder's. It now uses the same name as the
+page heading.
+
 ## What is still not verified
 
-- **A tidy blocks the window's UI thread.** Measured at 4.6s for 5,000 files
-  in a debug build; the release build and a large real folder are untimed. Not
-  fixable without the Rust change in §9.
+- **The colour pass has been seen in headless Chrome, not in the real
+  window.** WebKit is the engine that matters on macOS. `backdrop-filter`
+  and `mask-image` carry their `-webkit-` forms, but the grain, the glass and
+  the fonts have not been looked at in the Tauri window.
+- **A tidy no longer blocks the window.** Fixed in §9 by making the folder
+  commands async, and watched on 5,000 files. The release build and a large
+  real folder are still untimed.
 - **About twenty of roughly ninety-five states have been looked at.** Seen: the
   start screen, the comparison on six fixture folders (including never-settles
   and already-has-rules), preview, left alone, the tidy and put-back dialogs
@@ -882,8 +967,7 @@ capture that looks right proves nothing about where the last click landed.
 - **1080x720 only.** The 860x560 minimum has never been opened.
 - **macOS only by eye.** CI is green on Linux, macOS and Windows, which proves
   it builds and the checks pass there, not that it looks right.
-- **The critic scored a six, not an eight.** The stopping rule was the plateau
-  clause, not the quality clause.
-- **No generated imagery was used.** It was approved, and the direction that
-  won is a flat work surface with nothing it needed an image for. That is a
-  decision, not an omission, but it was not put back to the user.
+- **The critic scored a five against CleanMyMac, not an eight.** The stopping
+  rule was the plateau clause, not the quality clause (§10).
+- **No generated imagery exists yet.** It was approved and is now wanted, but
+  Codex's image tool returned `403 Forbidden` for this account (§10).

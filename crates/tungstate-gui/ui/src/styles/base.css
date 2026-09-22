@@ -24,12 +24,34 @@ body {
 button, .chrome { user-select: none; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
+/* Form controls, drawn once so no screen falls back to the browser's own. */
+input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+select, input[type="text"], input:not([type]) {
+  font: inherit;
+  font-size: var(--small);
+  color: var(--text);
+  background-color: var(--glass);
+  border: 1px solid var(--edge);
+  border-radius: var(--radius);
+  box-shadow: var(--glass-lip);
+  padding: 5px 9px;
+}
+select { appearance: none; -webkit-appearance: none; padding-right: 22px; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--text-quiet) 50%), linear-gradient(135deg, var(--text-quiet) 50%, transparent 50%);
+  background-position: right 11px center, right 7px center;
+  background-size: 4px 4px, 4px 4px;
+  background-repeat: no-repeat; }
+input::placeholder { color: var(--text-faint); }
+
 /* This is a path. It is literal, it is not prose, and it may be long. */
 .path {
   font-family: var(--font-mono);
   font-size: var(--fine);
   word-break: break-all;
 }
+
+/* A path set inside a sentence: kept whole, never broken mid-word. */
+.path.inline { word-break: normal; white-space: nowrap; }
 
 /* This is literal text the machine produced, not something we wrote. */
 .mono { font-family: var(--font-mono); }

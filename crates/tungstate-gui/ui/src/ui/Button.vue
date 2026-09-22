@@ -25,39 +25,45 @@ const LOOK = {
   font: inherit;
   font-size: var(--small);
   color: var(--text-quiet);
-  background: none;
+  background: var(--glass);
   border: 1px solid var(--edge);
-  border-radius: var(--radius);
-  padding: var(--s2) var(--s3);
+  border-radius: var(--pill);
+  min-height: 34px;
+  padding: 0 var(--s4);
+  box-shadow: var(--glass-lip);
   cursor: pointer;
   transition: background var(--quick) var(--ease), border-color var(--quick) var(--ease);
 }
-.control:hover:not(:disabled) { color: var(--text); border-color: var(--text-faint); }
-.control:disabled { opacity: 0.45; cursor: default; }
+.control:hover:not(:disabled) { color: var(--text); background: var(--surface-raised); }
+.control:disabled { opacity: 0.4; cursor: default; }
 
 .control-plain { /* the default, already drawn above */ }
 
 .control-primary {
   font-size: var(--body);
-  font-weight: 500;
+  font-weight: 600;
   color: var(--control-ink);
   background: var(--control);
   border-color: transparent;
-  border-radius: var(--radius-lg);
-  padding: 10px 18px;
+  padding: 0 22px;
+  box-shadow: var(--glass-lip), 0 6px 22px var(--veil);
 }
-.control-primary:hover:not(:disabled) { color: var(--control-ink); background: var(--text); }
-.control-primary:disabled { background: var(--surface-raised); color: var(--text-faint); opacity: 1; }
+.control-primary:hover:not(:disabled) { color: var(--control-ink); background: var(--control); filter: brightness(1.06); }
+.control-primary:disabled { opacity: 0.35; box-shadow: none; }
 
 .control-danger { color: var(--bad); border-color: var(--bad); }
-.control-danger:hover:not(:disabled) { color: var(--bad); background: rgba(226, 112, 95, 0.12); }
+.control-danger:hover:not(:disabled) { color: var(--bad); background: var(--surface-raised); }
 
 /* A control that reads as part of a sentence rather than as a box. */
 .control-link {
+  background: none;
   border-color: transparent;
+  border-radius: 0;
+  min-height: 0;
+  box-shadow: none;
   padding: 0;
   text-decoration: underline;
   text-underline-offset: 3px;
 }
-.control-link:hover:not(:disabled) { border-color: transparent; }
+.control-link:hover:not(:disabled) { background: none; }
 </style>

@@ -51,25 +51,27 @@ onMounted(async () => {
       </Notice>
 
       <div class="doors">
-        <button class="door" @click="nav.go('folder')">
+        <button class="door door-folder" @click="nav.go('folder')">
+          <span class="stat-row">
+            <span class="stat num">{{ governed }}</span>
+            <span class="stat-of">{{ governed === 1 ? "folder" : "folders" }}</span>
+          </span>
           <span class="door-name">Tidy a folder</span>
           <span class="door-what">
             See how a folder is filed now, beside what every other way of filing
             would do to it. Nothing moves until you say so.
           </span>
-          <span class="door-has">
-            {{ governed === 0 ? "none yet" : `${governed} folder${governed === 1 ? "" : "s"}` }}
-          </span>
         </button>
 
-        <button class="door" @click="nav.go('drain')">
+        <button class="door door-drain" @click="nav.go('drain')">
+          <span class="stat-row">
+            <span class="stat num">{{ linked }}</span>
+            <span class="stat-of">{{ linked === 1 ? "saved pair" : "saved pairs" }}</span>
+          </span>
           <span class="door-name">Move files to another machine</span>
           <span class="door-what">
             Copy one, check it arrived intact, then remove the original. Close
             the lid part-way through and nothing is lost.
-          </span>
-          <span class="door-has">
-            {{ linked === 0 ? "none yet" : `${linked} saved pair${linked === 1 ? "" : "s"}` }}
           </span>
         </button>
       </div>
@@ -83,29 +85,36 @@ onMounted(async () => {
 </template>
 
 <style scoped>
-.home { position: absolute; inset: 0; display: flex; justify-content: center; overflow-y: auto; }
-.column { width: min(760px, calc(100vw - var(--s6) * 2)); padding: 96px 0 var(--s6); }
+.home { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; overflow-y: auto; }
+.column { width: min(820px, calc(100vw - var(--s6) * 2)); padding: var(--s6) 0; }
 .unfinished { margin-bottom: var(--s4); }
 
-.doors { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); }
+.doors { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s4); }
+/* Each door is painted in the colour of the half it opens, so the colour you
+   click is the colour you arrive in. */
 .door {
   display: flex;
   flex-direction: column;
   gap: var(--s2);
+  min-height: 240px;
   text-align: left;
   font: inherit;
   color: inherit;
-  background: none;
   border: 1px solid var(--edge);
-  border-radius: var(--radius-lg);
-  padding: var(--s5);
+  border-radius: var(--radius-xl);
+  padding: var(--s5) var(--s5) var(--s5);
+  box-shadow: var(--glass-lip), var(--drop);
   cursor: pointer;
-  transition: border-color var(--quick) var(--ease), background var(--quick) var(--ease);
+  transition: transform var(--slow) var(--ease), filter var(--slow) var(--ease);
 }
-.door:hover { border-color: var(--text-faint); background: var(--surface-hover); }
-.door-name { font-size: var(--body); font-weight: 600; }
-.door-what { font-size: var(--small); color: var(--text-quiet); line-height: 1.55; flex: 1; }
-.door-has { font-size: var(--fine); color: var(--text-faint); }
+.door:hover { transform: translateY(-2px); filter: brightness(1.08); }
+.door-folder { background: var(--field-folder); }
+.door-drain { background: var(--field-drain); }
+.stat-row { display: flex; align-items: baseline; gap: var(--s2); flex: 1; }
+.stat { font-size: var(--hero); font-weight: 700; line-height: 1; letter-spacing: -0.02em; }
+.stat-of { font-size: var(--body); color: var(--text-quiet); }
+.door-name { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; }
+.door-what { font-size: var(--small); color: var(--text-quiet); line-height: 1.55; }
 
 .last {
   font-size: var(--small);
