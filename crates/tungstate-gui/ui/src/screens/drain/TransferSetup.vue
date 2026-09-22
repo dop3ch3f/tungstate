@@ -51,8 +51,7 @@ const LABELS: Record<keyof typeof CHOICES, string> = {
 </script>
 
 <template>
-  <Sheet @dismiss="emit('dismiss')">
-    <h2 class="set-title">{{ props.intent === "move" ? "Move" : "Copy" }} {{ count }} item{{ count === 1 ? "" : "s" }}</h2>
+  <Sheet of="drain" :title="props.intent === 'move' ? 'Move files' : 'Copy files'" @dismiss="emit('dismiss')">
 
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
     <p class="set-looking" v-else-if="looking">Working out what would happen…</p>
@@ -109,9 +108,7 @@ const LABELS: Record<keyof typeof CHOICES, string> = {
   </Sheet>
 </template>
 
-<style scoped>
-.set-title { font-size: var(--body); font-weight: 600; margin: 0 0 var(--s3); }
-.set-looking { font-size: var(--small); color: var(--text-quiet); margin: 0; }
+<style scoped>.set-looking { font-size: var(--small); color: var(--text-quiet); margin: 0; }
 .set-what { display: flex; flex-direction: column; gap: var(--s2); }
 .set-line { font-size: var(--small); color: var(--text-quiet); margin: 0; line-height: 1.5; }
 
@@ -123,7 +120,7 @@ const LABELS: Record<keyof typeof CHOICES, string> = {
   font-size: var(--small);
   background: none;
   color: var(--text);
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius);
   padding: 5px 7px;
   min-width: 0;

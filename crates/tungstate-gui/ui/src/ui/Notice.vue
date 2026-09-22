@@ -32,6 +32,18 @@ const TONE = { plain: "said-plain", hold: "said-hold", bad: "said-bad" } as cons
   position: relative;
   color: var(--hold);
 }
+/* Retro: a warning is a yellow bar with a black outline. */
+:global([data-theme="retro"] .said-hold) {
+  background: var(--warn-bar);
+  color: var(--text);
+  border: var(--bw) solid var(--edge);
+  border-radius: var(--radius);
+  padding: var(--s2) var(--s3) var(--s2) 28px;
+  box-shadow: var(--lift);
+}
+:global([data-theme="retro"] .said-hold::before) { left: var(--s2); top: 9px; border-radius: 2px; background: var(--text); color: var(--warn-bar); }
+:global([data-theme="retro"] .said) { border-left-width: var(--bw); }
+
 .said-hold::before {
   content: "!";
   position: absolute;

@@ -146,7 +146,7 @@ const planned = computed(() => t.rows.value.length);
   align-items: center;
   padding: 5px 0;
   font-size: var(--fine);
-  border-bottom: 1px solid var(--edge);
+  border-bottom: var(--bw) solid var(--edge);
 }
 .run-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
 .t-plain { background: var(--text-faint); }

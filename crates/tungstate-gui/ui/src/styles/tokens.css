@@ -62,6 +62,7 @@
   --veil: var(--raw-scrim);
   --drop: 0 12px 32px var(--raw-drop);
   /* A hard offset shadow under raised things. None in graphite. */
+  --bw: 1px;
   --lift: 0 0 0 transparent;
   --lift-panel: 0 0 0 transparent;
   --disabled: var(--raw-text-faint);
@@ -189,13 +190,10 @@
   --window-bg: #fdfdf8;
   --veil: rgba(21, 21, 21, 0.35);
   --drop: 0 0 0 transparent;
-  --lift: 2px 2px 0 #151515;
-  --lift-panel: 4px 4px 0 #151515;
   --text: #151515;
-  --text-quiet: #4d4f46;
-  --text-faint: #8a8c82;
   --disabled: #a5a79d;
   --tint-home: #f7a501;
+  --warn-bar: #ffd44d;
   --tint-home-ink: #151515;
   --tint-folder: #f54e00;
   --tint-drain: #1d4aff;
@@ -206,11 +204,21 @@
   --control: #f7a501;
   --control-ink: #151515;
   --hold: #c47d00;
+  --tint-history: #4a4d45;
   --ok: #2f8f4e;
   --bad: #d23d1f;
   --radius: 4px;
   --radius-lg: 6px;
-  --radius-xl: 8px;
+  --radius-xl: 6px;
+  --bw: 2px;
+  /* One hard shadow, at one offset, everywhere. */
+  --lift: 2px 2px 0 #151515;
+  --lift-panel: 4px 4px 0 #151515;
+  /* Paths and figures are the data here, so they are not the faintest thing
+     on screen. */
+  --text-quiet: #3f4138;
+  --text-faint: #575a4f;
+  --fine: 12px;
 }
 [data-theme="retro"] [data-half="folder"] { --control: #f54e00; --control-ink: #ffffff; }
 [data-theme="retro"] [data-half="drain"] { --control: #1d4aff; --control-ink: #ffffff; }

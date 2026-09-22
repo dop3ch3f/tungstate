@@ -7,8 +7,7 @@ import { dialog, answer } from "./useDialog";
 </script>
 
 <template>
-  <Sheet v-if="dialog.open.value" @dismiss="answer(null)">
-    <h2 class="title">{{ dialog.open.value.title }}</h2>
+  <Sheet v-if="dialog.open.value" :title="dialog.open.value.title" @dismiss="answer(null)">
     <p class="blurb" v-if="dialog.open.value.why">{{ dialog.open.value.why }}</p>
     <ul class="particulars" v-if="dialog.open.value.detail?.length">
       <li v-for="line in dialog.open.value.detail" :key="line">{{ line }}</li>
@@ -29,7 +28,6 @@ import { dialog, answer } from "./useDialog";
 </template>
 
 <style scoped>
-.title { font-size: var(--body); font-weight: 600; margin: 0 0 var(--s2); }
 .blurb { font-size: var(--small); color: var(--text-quiet); margin: 0; line-height: 1.55; }
 .particulars { margin: var(--s3) 0 0; padding-left: var(--s4); font-size: var(--small); color: var(--text-quiet); }
 .particulars li { margin-bottom: var(--s1); }

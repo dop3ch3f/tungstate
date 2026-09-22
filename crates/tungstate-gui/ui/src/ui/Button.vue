@@ -26,7 +26,7 @@ const LOOK = {
   font-size: var(--small);
   color: var(--text-quiet);
   background: var(--panel);
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius);
   min-height: 30px;
   white-space: nowrap;
@@ -36,7 +36,7 @@ const LOOK = {
   transition: background var(--quick) var(--ease), border-color var(--quick) var(--ease);
 }
 .control:hover:not(:disabled) { color: var(--text); background: var(--surface-raised); }
-.control:disabled { opacity: 0.4; cursor: default; }
+.control:disabled { color: var(--disabled); border-color: var(--edge); opacity: 0.6; box-shadow: none; cursor: default; }
 
 .control-plain { /* the default, already drawn above */ }
 
@@ -49,7 +49,7 @@ const LOOK = {
   padding: 0 var(--s4);
 }
 .control-primary:hover:not(:disabled) { color: var(--control-ink); background: var(--control); filter: brightness(1.06); }
-.control-primary:disabled { background: var(--surface-raised); color: var(--disabled); opacity: 1; }
+.control-primary:disabled { background: var(--surface-raised); color: var(--disabled); border-color: var(--edge); box-shadow: none; opacity: 1; }
 
 .control-danger { color: var(--bad); border-color: var(--bad); }
 .control-danger:hover:not(:disabled) { color: var(--bad); background: var(--surface-raised); }

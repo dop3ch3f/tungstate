@@ -48,8 +48,7 @@ async function save() {
 </script>
 
 <template>
-  <Sheet wide @dismiss="emit('dismiss')">
-    <h2 class="pf-title">A saved pair</h2>
+  <Sheet wide of="drain" title="A saved pair" @dismiss="emit('dismiss')">
     <p class="pf-why">
       Two folders and what should happen between them. Nothing moves until you run it. A
       connection is written <span class="mono">name:folder</span>, as on the command line.
@@ -83,9 +82,7 @@ async function save() {
   </Sheet>
 </template>
 
-<style scoped>
-.pf-title { font-size: var(--body); font-weight: 700; margin: 0; }
-.pf-why { font-size: var(--small); color: var(--text-quiet); margin: var(--s2) 0 var(--s4); line-height: 1.5; }
+<style scoped>.pf-why { font-size: var(--small); color: var(--text-quiet); margin: var(--s2) 0 var(--s4); line-height: 1.5; }
 .pf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-top: var(--s3); }
 .pf-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>

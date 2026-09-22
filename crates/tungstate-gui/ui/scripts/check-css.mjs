@@ -217,7 +217,20 @@ for (const file of walk(SRC)) {
     }
   }
 
-  // 6. a state bound and never drawn. "The folder you opened" and "the view
+  // 6. `:global(X) .y` in a scoped block. Vue keeps only what is inside the
+  //    brackets and throws the rest away, so the rule lands on X itself: a
+  //    `display: none` written for a subtitle blanked the whole page, and a
+  //    filled table header painted the document root. Twice now.
+  for (const m of css.matchAll(/:global\([^)]*\)\s*[^{\s][^{]*\{/g)) {
+    fail(
+      file,
+      lineOf(text, text.indexOf(m[0])),
+      "global-selector-tail",
+      "everything after :global(...) is dropped by Vue; put the whole selector inside the brackets",
+    );
+  }
+
+  // 7. a state bound and never drawn. "The folder you opened" and "the view
   //    you are in" were both marked this way and neither was visible.
   for (const m of tpl.matchAll(/:?(aria-(?:current|busy|invalid|selected|expanded))=/g)) {
     const attr = m[1];

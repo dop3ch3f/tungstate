@@ -279,6 +279,26 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .views .von { color: var(--text); background: var(--surface-raised); }
 .views { padding: 3px; background: var(--rail); border-radius: var(--radius); align-self: flex-start; margin-left: 0; }
 .views button { border-radius: var(--radius); padding: var(--s1) var(--s3); }
+
+/* Retro: a tab is a block with an outline, and the one you are in is filled. */
+:global([data-theme="retro"] .views) {
+  background: none;
+  padding: 0;
+  gap: 4px;
+  border-radius: 0;
+}
+:global([data-theme="retro"] .views button) {
+  border: var(--bw) solid var(--edge);
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface-raised);
+  color: var(--text);
+  padding: 5px var(--s3);
+  box-shadow: 2px 0 0 var(--edge);
+}
+:global([data-theme="retro"] .views .von) {
+  background: var(--text);
+  color: var(--field);
+}
 .howmany { font-variant-numeric: tabular-nums; opacity: 0.7; margin-left: 2px; }
 
 /* The list scrolls on its own, so it stops above the action bar instead of
@@ -331,7 +351,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   padding: var(--s1) 0;
   font-size: var(--fine);
   color: var(--text-quiet);
-  border-bottom: 1px solid var(--edge);
+  border-bottom: var(--bw) solid var(--edge);
 }
 .becomes { font-size: var(--fine); color: var(--text-faint); }
 .to { color: var(--text); }
@@ -350,7 +370,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   padding: var(--s3) var(--s4);
   margin-bottom: var(--s3);
   flex: none;
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius-lg);
   background: var(--panel);
   box-shadow: var(--lift-panel);

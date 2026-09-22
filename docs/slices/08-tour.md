@@ -1040,6 +1040,40 @@ Six defects, three of them real:
 6. At 860 the file panes starved the Name column and a saved pair broke its
    paths mid-word. Panes drop Type, then Modified; rows stack.
 
+## 14. Carrying the retro language inside the window
+
+The critic's verdict on the first retro build was one sentence worth keeping:
+*the retro language stops at the title bar, and everything inside it is
+default component output*. It was right. Inside the windows were 1px grey
+hairlines, 6pt radii and a segmented control that could have come from any
+dashboard.
+
+So the language went inward: borders are 2pt from one `--bw` token, one hard
+shadow at one offset, table headers are filled bands in mono, tabs are
+outlined blocks with the open one filled, the caution is a yellow bar with a
+black rule rather than coloured body text, a dialog is a window with its own
+title bar, and scrollbars have a track and a solid thumb. History gained the
+column header it never had.
+
+| Round | Score | What changed going in |
+|---|---|---|
+| 1 | 5 | the first retro build |
+| 2 | 5.5 | the language carried inside the window |
+| 3 | — | desktop margin, honest window controls, outlined disabled buttons, yellow warning bar, history header |
+
+Two rounds moved it half a point, so the stopping rule fired again. What it
+still wants and did not get: windows shortened to their content, a textured
+cream field, and a display typeface. The first two are taste calls against a
+tool that has to hold long lists; the third is a font the project does not
+have a licence for.
+
+**The same Vue trap, twice.** Eight new rules were written as
+`:global([data-theme="retro"]) .key { … }`. Vue keeps only what is inside the
+brackets, so every one of them landed on the document root: a filled table
+header was painting the whole page. The first time this happened it blanked
+the app (§11); this time it merely looked wrong. `scripts/check-css.mjs` now
+has a sixth rule for it, so there is no third time.
+
 ## What is still not verified
 
 - **The colour pass has been seen in headless Chrome, not in the real

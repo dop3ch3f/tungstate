@@ -184,7 +184,7 @@ const KIND: Record<string, string> = {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius-lg);
   background: var(--panel);
   box-shadow: var(--lift-panel);
@@ -199,7 +199,7 @@ const KIND: Record<string, string> = {
   font-size: var(--small);
   color: var(--text-quiet);
   background: var(--panel);
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius);
   width: 28px;
   height: 28px;
@@ -217,9 +217,16 @@ const KIND: Record<string, string> = {
   align-items: center;
   padding: 0 var(--s2);
 }
+:global([data-theme="retro"] .cols) {
+  background: var(--text);
+  color: var(--field);
+  font-family: var(--font-mono);
+  border-bottom: none;
+}
+:global([data-theme="retro"] .line) { border-bottom: var(--bw) solid var(--edge); }
 .cols {
   height: 26px;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: var(--bw) solid var(--edge);
   font-size: var(--fine);
   color: var(--text-faint);
 }

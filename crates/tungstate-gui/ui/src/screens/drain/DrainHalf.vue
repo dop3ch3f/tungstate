@@ -173,8 +173,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
     <!-- The two questions a run can stop and ask. `applyAll` is reset after
          every answer: a shared tick that persisted would silently apply the
          first decision to every later file. -->
-    <Sheet v-if="t.conflict.value" @dismiss="t.answerConflict('skip', false); applyAll = false">
-      <h2 class="dh-qt">A different file of that name is already there</h2>
+    <Sheet v-if="t.conflict.value" of="drain" title="A name is already taken" @dismiss="t.answerConflict('skip', false); applyAll = false">
       <p class="path">{{ t.conflict.value.path }}</p>
       <p class="dh-qw">
         Coming: {{ bytes(t.conflict.value.incoming_size) }}. Already there:
@@ -188,8 +187,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
       </div>
     </Sheet>
 
-    <Sheet v-if="t.identical.value" @dismiss="t.answerIdentical(false, false); applyAll = false">
-      <h2 class="dh-qt">That file is already there, byte for byte</h2>
+    <Sheet v-if="t.identical.value" of="drain" title="Already there" @dismiss="t.answerIdentical(false, false); applyAll = false">
       <p class="path">{{ t.identical.value.path }}</p>
       <p class="dh-qw">
         Nothing needs sending. You asked to move, so the only question is
@@ -222,6 +220,26 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
 }
 .dh-tabs button:hover { color: var(--text-quiet); }
 .dh-tabs .dh-on { color: var(--text); background: var(--surface-raised); }
+
+/* Retro: a tab is a block with an outline, and the one you are in is filled. */
+:global([data-theme="retro"] .dh-tabs) {
+  background: none;
+  padding: 0;
+  gap: 4px;
+  border-radius: 0;
+}
+:global([data-theme="retro"] .dh-tabs button) {
+  border: var(--bw) solid var(--edge);
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface-raised);
+  color: var(--text);
+  padding: 5px var(--s3);
+  box-shadow: 2px 0 0 var(--edge);
+}
+:global([data-theme="retro"] .dh-tabs .dh-on) {
+  background: var(--text);
+  color: var(--field);
+}
 .dh-badge { color: var(--accent); font-size: 9px; vertical-align: 2px; }
 .dh-unfinished { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: baseline; }
 
@@ -234,8 +252,6 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
 .dh-tally { font-size: var(--small); color: var(--text-quiet); }
 .dh-dim { color: var(--text-faint); }
 .dh-route { color: var(--text-faint); margin-right: auto; word-break: normal; }
-
-.dh-qt { font-size: var(--body); font-weight: 600; margin: 0 0 var(--s2); }
 .dh-qw { font-size: var(--small); color: var(--text-quiet); margin: var(--s2) 0 0; line-height: 1.5; }
 .dh-tick { display: flex; gap: var(--s2); font-size: var(--small); color: var(--text-quiet); margin-top: var(--s3); }
 .dh-qf { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); flex-wrap: wrap; }

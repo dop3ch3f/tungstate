@@ -83,6 +83,14 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
       <Empty v-if="!ops.length && searched" art="nothing-found" line="Nothing here matches that." />
       <Empty v-else-if="!ops.length" art="no-history" line="Nothing has happened yet." />
 
+      <div class="h-head" v-if="ops.length">
+        <span></span>
+        <span>kind</span>
+        <span>file</span>
+        <span class="h-r">outcome</span>
+        <span class="h-r">size</span>
+        <span class="h-r">when</span>
+      </div>
       <div class="h-row" v-for="op in ops" :key="op.id" :class="{ 'h-row-bad': dot(op.status) === 'h-bad' }">
         <span class="h-dot" :class="dot(op.status)"></span>
         <span class="h-kind">{{ op.kind }}</span>
@@ -110,6 +118,24 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .h-find { margin-bottom: var(--s5); }
 .h-mode { font-size: var(--fine); color: var(--text-faint); margin: var(--s2) 0 0; }
 
+.h-head, .h-row { display: grid; }
+.h-head {
+  grid-template-columns: 9px 72px minmax(0, 1fr) 90px 78px 118px;
+  gap: var(--s2);
+  padding: 4px 0;
+  font-size: var(--fine);
+  color: var(--text-faint);
+  border-bottom: var(--bw) solid var(--edge);
+}
+.h-r { text-align: right; }
+:global([data-theme="retro"] .h-head) {
+  background: var(--text);
+  color: var(--field);
+  font-family: var(--font-mono);
+  padding: 5px var(--s2);
+  margin: 0 calc(var(--s2) * -1);
+  border-bottom: none;
+}
 .h-row {
   display: grid;
   grid-template-columns: 9px 72px minmax(0, 1fr) 90px 78px 118px;
@@ -117,7 +143,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   align-items: center;
   padding: 7px 0;
   font-size: var(--fine);
-  border-bottom: 1px solid var(--edge);
+  border-bottom: var(--bw) solid var(--edge);
 }
 .h-dot { width: 7px; height: 7px; border-radius: 50%; }
 .h-plain { background: var(--text-faint); }

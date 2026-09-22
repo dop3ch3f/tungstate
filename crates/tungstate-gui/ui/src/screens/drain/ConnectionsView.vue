@@ -122,8 +122,7 @@ async function remove(name: string) {
 
     <ConnectionForm v-if="form" :editing="form.editing" @dismiss="form = null" @saved="saved" />
 
-    <Sheet v-if="changing" @dismiss="changing = null; newSecret = ''">
-      <h2 class="cx-qt">A new password for {{ changing.name }}</h2>
+    <Sheet v-if="changing" of="drain" :title="`Password for ${changing.name}`" @dismiss="changing = null; newSecret = ''">
       <Field label="Password" note="Replaces the one in your keychain. Check runs straight after, to prove it works.">
         <input type="password" v-model="newSecret" autocomplete="off" />
       </Field>
@@ -143,7 +142,7 @@ async function remove(name: string) {
   gap: var(--s4);
   align-items: start;
   padding: var(--s3) 0;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: var(--bw) solid var(--edge);
 }
 @container (max-width: 680px) {
   .cx-row { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
@@ -157,7 +156,5 @@ async function remove(name: string) {
 .cx-warn { color: var(--hold); }
 .cx-do { display: flex; gap: var(--s2); flex-wrap: wrap; justify-content: flex-end; }
 .cx-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); }
-.cx-lede { font-size: var(--small); color: var(--text-quiet); margin: 0; }
-.cx-qt { font-size: var(--body); font-weight: 700; margin: 0 0 var(--s4); }
-.cx-qf { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
+.cx-lede { font-size: var(--small); color: var(--text-quiet); margin: 0; }.cx-qf { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>

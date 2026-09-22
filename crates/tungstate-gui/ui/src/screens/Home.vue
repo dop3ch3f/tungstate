@@ -139,7 +139,7 @@ h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin:
   display: flex;
   flex-direction: column;
   background: var(--panel);
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius-lg);
   min-width: 0;
   overflow: hidden;
@@ -153,8 +153,8 @@ h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin:
 :global([data-theme="retro"] .pb) { padding-top: var(--s3); }
 :global([data-theme="retro"] .rows) { border-top: none; }
 
-.rows { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: 1px solid var(--edge); flex: 1; }
-.rows li { border-bottom: 1px solid var(--edge); }
+.rows { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: var(--bw) solid var(--edge); flex: 1; }
+.rows li { border-bottom: var(--bw) solid var(--edge); }
 .row {
   display: flex;
   align-items: baseline;

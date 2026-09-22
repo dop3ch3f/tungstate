@@ -153,7 +153,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   column-gap: var(--s4);
   padding: 0 var(--s3) 7px;
   margin: 0 calc(var(--s3) * -1);
-  border-bottom: 1px solid var(--edge);
+  border-bottom: var(--bw) solid var(--edge);
   font-size: var(--fine);
   color: var(--text-faint);
   white-space: nowrap;
@@ -166,6 +166,17 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
+/* Retro: the header is a filled band, and rows are ruled, not hairlined. */
+:global([data-theme="retro"] .key) {
+  background: var(--text);
+  color: var(--field);
+  padding: 5px var(--s3);
+  border-bottom: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-family: var(--font-mono);
+}
+:global([data-theme="retro"] .way) { border-bottom: var(--bw) solid var(--edge); border-radius: 0; }
 .kway { text-align: left; }
 .knum { text-align: right; }
 
@@ -207,7 +218,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   margin-right: calc(var(--s3) * -1);
   margin-bottom: var(--s3);
   flex: none;
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius-lg);
   background: var(--panel);
   box-shadow: var(--lift-panel);

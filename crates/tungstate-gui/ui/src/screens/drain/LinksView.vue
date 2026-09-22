@@ -137,8 +137,7 @@ async function remove(link: Link) {
 
     <PairForm v-if="adding" :places="props.places" @dismiss="adding = false" @saved="saved" />
 
-    <Sheet v-if="looking" wide @dismiss="looking = null">
-      <h2 class="lk-qt">{{ looking.name }}</h2>
+    <Sheet v-if="looking" wide of="drain" :title="`Preview ${looking.name}`" @dismiss="looking = null">
       <p class="lk-lede">What running this would do. Nothing has happened yet.</p>
       <p class="lk-lede" v-if="!looking.preview">Working it out…</p>
       <template v-else>
@@ -169,7 +168,7 @@ async function remove(link: Link) {
   gap: var(--s4);
   align-items: start;
   padding: var(--s3) 0;
-  border-bottom: 1px solid var(--edge);
+  border-bottom: var(--bw) solid var(--edge);
 }
 .lk-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .lk-name { font-weight: 600; font-size: var(--small); }
@@ -185,11 +184,9 @@ async function remove(link: Link) {
 .lk-do { display: flex; gap: var(--s2); flex-wrap: wrap; justify-content: flex-end; }
 .lk-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); }
 .lk-lede { font-size: var(--small); color: var(--text-quiet); margin: 0; }
-.lk-aside { color: var(--hold); display: flex; flex-wrap: wrap; gap: var(--s2); }
-.lk-qt { font-size: var(--body); font-weight: 700; margin: 0 0 var(--s1); }
-.lk-sum { font-size: var(--small); margin: var(--s3) 0; line-height: 1.5; }
-.lk-items { list-style: none; margin: 0 0 var(--s3); padding: 0; max-height: 260px; overflow-y: auto; border-top: 1px solid var(--edge); }
-.lk-items li { display: grid; grid-template-columns: minmax(0, 1fr) auto 70px; gap: var(--s3); padding: 4px 0; border-bottom: 1px solid var(--edge); font-size: var(--fine); }
+.lk-aside { color: var(--hold); display: flex; flex-wrap: wrap; gap: var(--s2); }.lk-sum { font-size: var(--small); margin: var(--s3) 0; line-height: 1.5; }
+.lk-items { list-style: none; margin: 0 0 var(--s3); padding: 0; max-height: 260px; overflow-y: auto; border-top: var(--bw) solid var(--edge); }
+.lk-items li { display: grid; grid-template-columns: minmax(0, 1fr) auto 70px; gap: var(--s3); padding: 4px 0; border-bottom: var(--bw) solid var(--edge); font-size: var(--fine); }
 .lk-p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; }
 .lk-w { color: var(--text-faint); }
 .lk-s { text-align: right; color: var(--text-faint); }

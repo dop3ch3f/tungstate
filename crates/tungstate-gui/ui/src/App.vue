@@ -96,7 +96,7 @@ const WHERE = {
   gap: 2px;
   padding: var(--s4) var(--s2);
   background: var(--rail);
-  border-right: 1px solid var(--edge);
+  border-right: var(--bw) solid var(--edge);
 }
 .badge {
   background: none;
@@ -128,7 +128,7 @@ const WHERE = {
 .dest:hover { color: var(--text); background: var(--surface-hover); }
 .dest.here { color: var(--text); background: var(--surface-hover); }
 /* Retro: the section you are in is a raised, outlined button. */
-:global([data-theme="retro"] .dest.here) { background: var(--panel); box-shadow: inset 0 0 0 1px var(--edge), var(--lift); }
+:global([data-theme="retro"] .dest.here) { background: var(--text); color: var(--field); box-shadow: var(--lift); }
 .gap { flex: 1; }
 .live { color: var(--accent); font-size: 9px; padding: var(--s2); }
 

@@ -31,7 +31,7 @@ select, input[type="text"], input[type="password"], input[type="number"], input:
   font-size: var(--small);
   color: var(--text);
   background-color: var(--panel);
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius);
   padding: 5px 9px;
 }
@@ -66,3 +66,10 @@ input::placeholder { color: var(--text-faint); }
    page heading inside the window drops its own. Here because it spans two
    components: the window and whichever screen is in it. */
 [data-theme="retro"] .win-body .head .tile { display: none; }
+
+/* Retro: a scrollbar with a track and a solid thumb, like the rest of the
+   furniture. Left to the platform in every other theme. */
+[data-theme="retro"] ::-webkit-scrollbar { width: 14px; height: 14px; }
+[data-theme="retro"] ::-webkit-scrollbar-track { background: var(--surface-raised); border-left: var(--bw) solid var(--edge); }
+[data-theme="retro"] ::-webkit-scrollbar-thumb { background: var(--text); border: var(--bw) solid var(--edge); }
+[data-theme="retro"] ::-webkit-scrollbar-corner { background: var(--surface-raised); }

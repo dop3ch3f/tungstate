@@ -3,7 +3,10 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, nextTick } from "vue";
 
-const props = defineProps<{ wide?: boolean }>();
+import TitleBar from "./TitleBar.vue";
+import type { Section } from "../lib/icons";
+
+const props = defineProps<{ wide?: boolean; title?: string; of?: Section }>();
 const emit = defineEmits<{ dismiss: [] }>();
 const card = ref<HTMLElement | null>(null);
 let restoreTo: HTMLElement | null = null;
@@ -40,7 +43,9 @@ function keydown(e: KeyboardEvent) {
 onMounted(async () => {
   restoreTo = document.activeElement as HTMLElement | null;
   await nextTick();
-  focusable()[0]?.focus();
+  // Not `focusable()[0]`: that is the title bar's minimise button, and a
+  // focus ring on window furniture is not what a question should open on.
+  (card.value?.querySelector<HTMLElement>(".inside button, .inside input") ?? focusable()[0])?.focus();
   window.addEventListener("keydown", keydown);
 });
 onBeforeUnmount(() => {
@@ -56,7 +61,17 @@ onBeforeUnmount(() => {
   <Teleport to=".frame">
     <div class="scrim" @click.self="emit('dismiss')">
       <div ref="card" class="panel" :class="{ 'panel-wide': props.wide }" role="dialog" aria-modal="true">
-        <slot />
+        <TitleBar
+          v-if="props.title"
+          class="cap"
+          :of="props.of ?? 'settings'"
+          :title="props.title"
+          controls="live"
+          @minimize="emit('dismiss')"
+          @maximize="emit('dismiss')"
+          @close="emit('dismiss')"
+        />
+        <div class="inside"><slot /></div>
       </div>
     </div>
   </Teleport>
@@ -76,11 +91,15 @@ onBeforeUnmount(() => {
   width: min(460px, calc(100vw - var(--s6) * 2));
   background: var(--sheet);
   color: var(--text);
-  border: 1px solid var(--edge);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius-xl);
-  padding: var(--s5) var(--s5) var(--s4);
+  padding: 0;
+  overflow: hidden;
   box-shadow: var(--lift-panel), var(--drop);
 }
+.inside { padding: var(--s5) var(--s5) var(--s4); }
+.cap { padding: var(--s4) var(--s5) 0; }
+:global([data-theme="retro"] .cap) { padding: 6px 7px 6px var(--s3); }
 .panel-wide { width: min(580px, calc(100vw - var(--s6) * 2)); max-height: calc(100vh - var(--s6) * 2); overflow-y: auto; }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @media (prefers-reduced-motion: reduce) { .scrim { animation: none } }

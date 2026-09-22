@@ -27,8 +27,8 @@ const TINT = { home: "t-home", folder: "t-folder", drain: "t-drain", history: "t
 .line { width: 64%; height: 64%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .px-mark { display: none; }
 /* Retro draws its marks as pixels; every other theme uses the line glyph. */
-:global([data-theme="retro"]) .line { display: none; }
-:global([data-theme="retro"]) .px-mark { display: block; }
+:global([data-theme="retro"] .line) { display: none; }
+:global([data-theme="retro"] .px-mark) { display: block; }
 
 .t-home { background: var(--tint-home); color: var(--tint-home-ink); }
 .t-folder { background: var(--tint-folder); }

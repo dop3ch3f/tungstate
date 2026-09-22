@@ -37,8 +37,8 @@ const emit = defineEmits<{ minimize: []; maximize: []; close: [] }>();
 .win-body { position: relative; flex: 1; min-height: 0; }
 
 :global([data-theme="retro"] .win) {
-  inset: var(--s4) var(--s4) calc(var(--s4) + 4px) var(--s4);
-  border: 1px solid var(--edge);
+  inset: var(--s5) var(--s6) calc(var(--s5) + 4px) var(--s5);
+  border: var(--bw) solid var(--edge);
   border-radius: var(--radius-lg);
   box-shadow: var(--lift-panel);
 }

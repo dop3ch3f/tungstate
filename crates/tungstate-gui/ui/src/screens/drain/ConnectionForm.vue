@@ -65,8 +65,7 @@ async function save() {
 </script>
 
 <template>
-  <Sheet wide @dismiss="emit('dismiss')">
-    <h2 class="cf-title">{{ props.editing ? `Edit ${props.editing.name}` : "Add a connection" }}</h2>
+  <Sheet wide of="drain" :title="props.editing ? `Edit ${props.editing.name}` : 'Add a connection'" @dismiss="emit('dismiss')">
     <p class="cf-why">
       A place files can go that is not this machine. Once it is here you can browse it in a pane
       and move files onto it, whether or not it is mounted in Finder.
@@ -127,9 +126,7 @@ async function save() {
   </Sheet>
 </template>
 
-<style scoped>
-.cf-title { font-size: var(--body); font-weight: 700; margin: 0; }
-.cf-why { font-size: var(--small); color: var(--text-quiet); margin: var(--s2) 0 var(--s4); line-height: 1.5; }
+<style scoped>.cf-why { font-size: var(--small); color: var(--text-quiet); margin: var(--s2) 0 var(--s4); line-height: 1.5; }
 .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-bottom: var(--s3); }
 .cf-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>
