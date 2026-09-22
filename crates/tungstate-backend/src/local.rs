@@ -312,6 +312,12 @@ impl WriteFinish for LocalWrite {
 /// Volume plus file number, so two names for one file match and two files on
 /// two disks never do. `None` when the platform will not say, which the
 /// duplicate pass reads as "no idea", never as "different files".
+///
+/// Unix only, for now. Windows keeps `volume_serial_number` and `file_index`
+/// behind the unstable `windows_by_handle` feature, and the stable way to ask
+/// is to open every file during the walk, which would slow down every plan on
+/// Windows to answer a question only the duplicate pass asks. Recorded in
+/// docs/SYLLABUS.md rather than paid for here.
 fn identity_of(md: &std::fs::Metadata) -> Option<String> {
     #[cfg(unix)]
     {
@@ -323,17 +329,7 @@ fn identity_of(md: &std::fs::Metadata) -> Option<String> {
         }
         None
     }
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::MetadataExt as _;
-        match (md.volume_serial_number(), md.file_index()) {
-            (Some(volume), Some(index)) if md.number_of_links().unwrap_or(1) > 1 => {
-                Some(format!("{volume}:{index}"))
-            }
-            _ => None,
-        }
-    }
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(unix))]
     {
         let _ = md;
         None

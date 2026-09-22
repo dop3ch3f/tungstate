@@ -176,6 +176,14 @@ two names for one file
 `None` means "no idea", never "different files", which is what keeps a remote
 backend from claiming two copies are one.
 
+**Windows says nothing yet, and CI is why we know.** `volume_serial_number`
+and `file_index` are still behind the unstable `windows_by_handle` feature, so
+the first version of this did not compile there. The stable way to ask is to
+open every file during the walk, which would slow every plan on Windows down
+to answer a question only the duplicate pass asks. So Windows returns `None`
+and hard links are not detected there. Fourth slice running that Windows CI
+has caught something real.
+
 **A name two files both want.** On a case-insensitive volume, the default on
 macOS and Windows, `Clip.mp4` and `clip.mp4` are one name. Two files sent to
 one set-aside name is a file lost at the moment of the move, so the plan
@@ -232,9 +240,8 @@ Windows.
   lot over a network" is **not implemented**: it needs a size threshold nobody
   has picked yet, and `LocalBackend` cannot currently tell a mounted NAS from
   the boot disk, which is the other half of the question.
-- **Hard links on Windows are untested.** The identity there is the volume
-  serial and the file index, which needs a real NTFS hard link to prove, and
-  CI has never made one.
+- **Hard links are not detected on Windows** (§9). A hard-linked pair there is
+  still reported as a duplicate, and setting one name aside reclaims nothing.
 - **Scale.** The largest folder tried was a few hundred files. A drive with
   100,000 files will spend its time in `stat` and in SQLite, neither of which
   is measured.
