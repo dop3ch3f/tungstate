@@ -388,7 +388,12 @@ Ordered tie-break, configurable: already at canonical path > older `birthtime` >
 
 ### What to do with the others — **DECIDED: rich action set, `trash` default**
 - `skip`: leave it, just report.
-- `trash`: move the non-canonical copies to trash. **Default.**
+- `trash`: move the non-canonical copies to the operating system's trash.
+  **Amended in slice 8b:** no longer *the default*. The person is asked once,
+  between this and `set aside`, and the answer is remembered. A plan that
+  trashed anything refuses `undo`, because only the OS can put those files
+  back, and set-aside exists so there is an action that this project can
+  reverse itself. The action set is otherwise unchanged.
 - `replace`: the *new* arrival wins; the existing canonical file is **quarantined** and the newcomer takes its place. Useful for "re-exported the video, overwrite the old one." **Amended in slice 6** from *goes to trash*, to match what the drain already shipped and argued (`crates/tungstate-transfer/src/lib.rs:952`: *"Replace is the user's decision about which copy they want, not permission to destroy the other one"*). `--on-conflict replace` on a link and `on_conflict = "replace"` in a policy are the same word offered to the same person about the same situation, so one of the two readings had to go, and the shipped one is the safer. A consequence worth keeping: a slice-6 plan has no `Trash` and no `Delete` op at all, so **nothing it can express removes content**, and §1's *no content is ever lost* is trivially true for it rather than carefully true. `Trash` enters with `on_duplicate` in slice 8b, where the default below still stands.
 - `newer-wins` / `larger-wins`: `replace` or `trash` chosen by comparing mtime or size.
 - `hardlink`: replace extras with hard links (same device only). Space reclaimed; editing one edits both. Power users.
