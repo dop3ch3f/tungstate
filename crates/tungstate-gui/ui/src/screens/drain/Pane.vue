@@ -186,8 +186,7 @@ const KIND: Record<string, string> = {
   min-width: 0;
   border: 1px solid var(--edge);
   border-radius: var(--radius-lg);
-  background: var(--glass);
-  box-shadow: var(--glass-lip);
+  background: var(--panel);
   overflow: hidden;
   container-type: inline-size;
 }
@@ -198,10 +197,9 @@ const KIND: Record<string, string> = {
   font: inherit;
   font-size: var(--small);
   color: var(--text-quiet);
-  background: var(--glass);
+  background: var(--panel);
   border: 1px solid var(--edge);
   border-radius: var(--radius);
-  box-shadow: var(--glass-lip);
   width: 28px;
   height: 28px;
 }
@@ -245,7 +243,7 @@ const KIND: Record<string, string> = {
    container clips its children and never shows the dots. */
 .nm { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 /* A 12pt tile in the colour of the file's kind. */
-.glyph { width: 12px; height: 12px; border-radius: 3px; flex: none; opacity: 0.9; box-shadow: var(--glass-lip); }
+.glyph { width: 12px; height: 12px; border-radius: 3px; flex: none; opacity: 0.9; }
 .k-video { background: var(--kind-video); }
 .k-image { background: var(--kind-image); }
 .k-audio { background: var(--kind-audio); }

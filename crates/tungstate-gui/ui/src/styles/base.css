@@ -30,10 +30,9 @@ select, input[type="text"], input:not([type]) {
   font: inherit;
   font-size: var(--small);
   color: var(--text);
-  background-color: var(--glass);
+  background-color: var(--panel);
   border: 1px solid var(--edge);
   border-radius: var(--radius);
-  box-shadow: var(--glass-lip);
   padding: 5px 9px;
 }
 select { appearance: none; -webkit-appearance: none; padding-right: 22px; cursor: pointer;

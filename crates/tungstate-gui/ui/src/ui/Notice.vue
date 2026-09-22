@@ -19,7 +19,7 @@ const TONE = { plain: "said-plain", hold: "said-hold", bad: "said-bad" } as cons
   line-height: 1.55;
   margin: 0;
   padding: var(--s2) var(--s3);
-  background: var(--glass);
+  background: var(--panel);
   border-left: 3px solid var(--edge);
   border-radius: var(--radius);
   color: var(--text-quiet);

@@ -8,6 +8,7 @@ import { bytes } from "../../lib/format";
 import { movedBy, made, emptied } from "../../lib/counts";
 import type { Outcome } from "../../engine/types";
 import Button from "../../ui/Button.vue";
+import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 
 const f = useFolders();
@@ -43,7 +44,7 @@ const shape = computed(() => {
 <template>
   <div class="read">
     <div class="column">
-      <h1>{{ f.current.value?.name ?? f.root.value?.split("/").pop() }}</h1>
+      <div class="head"><Tile of="folder" :size="26" /><h1>{{ f.current.value?.name ?? f.root.value?.split("/").pop() }}</h1></div>
       <p class="locus">
         <span class="path">{{ f.root.value }}</span>
         <Button look="link" @click="f.pick()">Point at another folder</Button>
@@ -121,6 +122,7 @@ const shape = computed(() => {
 </template>
 
 <style scoped>
+.head { display: flex; align-items: center; gap: var(--s3); }
 .read { position: absolute; inset: 0; overflow: hidden; }
 .column {
   max-width: 860px;
@@ -159,6 +161,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   position: sticky;
   top: 0;
   z-index: 1;
+  background: var(--field);
   padding-top: 2px;
   font-weight: 600;
   letter-spacing: 0.04em;
@@ -207,10 +210,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   flex: none;
   border: 1px solid var(--edge);
   border-radius: var(--radius-lg);
-  box-shadow: var(--glass-lip);
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--blur);
-  backdrop-filter: var(--blur);
+  background: var(--panel);
 }
 .eg {
   font-size: var(--fine);

@@ -1,9 +1,9 @@
 /* Tungstate.
  *
- * Modelled on CleanMyMac: each part of the app has its own colour field, the
- * sidebar and panels are glass over it, and text is white. Home, the folder
- * half and the drain half each get a field, so you can tell where you are
- * from the colour before reading anything. Scheelite blue stays the colour of
+ * A neutral graphite window, the way professional Mac tools are built, with
+ * colour spent in a few deliberate places: each section's icon tile and its
+ * main button. Plum for tidying, blue for moving files, scheelite blue for
+ * home. Scheelite also marks whatever is live or about to change. Scheelite blue stays the colour of
  * whatever is live or about to change.
  *
  * The only file in the project that contains a literal colour, a literal type
@@ -12,73 +12,75 @@
  */
 
 :root {
-  --grain: url("../assets/grain.png");
+  /* Graphite, darkest to lightest. */
+  --raw-rail: #121317;
+  --raw-window: #17181c;
+  --raw-panel: #1e1f24;
+  --raw-hover: #24262c;
+  --raw-raised: #2b2d34;
+  --raw-edge: #2c2e35;
+  --raw-edge-strong: #3a3d46;
 
-  /* From a seed: hues 140 / 271 / 217, saturation 78, light 15, angle 286.
-     The mapping is in docs/slices/08-tour.md. Plum for tidying, royal blue
-     for moving files. Home was the seed's green and fought both tiles, so it
-     is a midnight violet between the two hues: a stage, not a third colour. */
-  --raw-home: linear-gradient(286deg, hsl(248 38% 8%) 0%, hsl(256 32% 15%) 100%);
-  --raw-folder: linear-gradient(286deg, hsl(271 78% 14%) 0%, hsl(300 62% 27%) 100%);
-  --raw-drain: linear-gradient(286deg, hsl(217 78% 14%) 0%, hsl(245 62% 29%) 100%);
-  --raw-ink: hsl(271 60% 16%);
-  --raw-veil: rgba(10, 4, 20, 0.5);
-
-  --raw-sheet: rgba(12, 6, 22, 0.72);
-  --raw-white: #ffffff;
-  --raw-white-30: rgba(255, 255, 255, 0.3);
-  --raw-highlight: rgba(255, 255, 255, 0.22);
-  --raw-drop: rgba(0, 0, 0, 0.5);
-  --raw-white-74: rgba(255, 255, 255, 0.76);
-  --raw-white-52: rgba(255, 255, 255, 0.54);
-  --raw-white-16: rgba(255, 255, 255, 0.16);
-  --raw-white-12: rgba(255, 255, 255, 0.12);
-  --raw-white-08: rgba(255, 255, 255, 0.08);
-  --raw-shade: rgba(0, 0, 0, 0.18);
-  --raw-night: #120c22;
+  /* Section colours, from the seed: hue 271 for tidying, 217 for moving. */
+  --raw-plum: #8e52e0;
+  --raw-plum-soft: rgba(142, 82, 224, 0.16);
+  --raw-blue: #3f74e6;
+  --raw-blue-soft: rgba(63, 116, 230, 0.16);
+  --raw-slate: #5d6573;
   --raw-fluoresce: #7fd4ff;
+  --raw-fluoresce-soft: rgba(127, 212, 255, 0.14);
   --raw-fluoresce-ink: #062030;
-  --raw-amber: #ffc862;
+
+  --raw-white: #ffffff;
+  --raw-text: #eceef2;
+  --raw-text-quiet: #a4a8b3;
+  --raw-text-faint: #6e7380;
+  --raw-scrim: rgba(6, 7, 10, 0.6);
+  --raw-drop: rgba(0, 0, 0, 0.45);
+  --raw-amber: #f2bf5e;
+  --raw-green: #6fd39a;
+  --raw-rust: #f07c6a;
   --raw-kind-video: #ff7a90;
   --raw-kind-image: #ffb35c;
   --raw-kind-audio: #b98cff;
   --raw-kind-archive: #8fa3b8;
   --raw-kind-doc: #6fb6ff;
   --raw-kind-folder: #7fd4ff;
-  --raw-green: #7ee2a8;
-  --raw-rust: #ff8a78;
 
   /* What they mean. Everything else in the project uses these. */
-  --field-home: var(--raw-home);
-  --field-folder: var(--raw-folder);
-  --field-drain: var(--raw-drain);
-  --field: var(--field-home);
-  --veil: var(--raw-veil);
+  --field: var(--raw-window);
+  --rail: var(--raw-rail);
+  --surface: var(--raw-window);
+  --panel: var(--raw-panel);
+  --surface-hover: var(--raw-hover);
+  --surface-raised: var(--raw-raised);
+  --edge: var(--raw-edge);
+  --edge-strong: var(--raw-edge-strong);
+  --sheet: var(--raw-panel);
+  --veil: var(--raw-scrim);
+  --drop: 0 12px 32px var(--raw-drop);
+  --disabled: var(--raw-text-faint);
 
-  --surface: var(--raw-night);
-  --surface-hover: var(--raw-white-08);
-  --surface-raised: var(--raw-white-12);
-  --edge: var(--raw-white-16);
-  --rail: var(--raw-shade);
-  --glass: var(--raw-white-08);
-  /* Glass has a lit top edge, which is what separates it from a flat tint. */
-  --glass-lip: inset 0 1px 0 var(--raw-highlight);
-  --sheet: var(--raw-sheet);
-  --drop: 0 20px 60px var(--raw-drop);
-  --disabled: var(--raw-white-30);
-  --blur: blur(22px) saturate(1.3);
+  --text: var(--raw-text);
+  --text-quiet: var(--raw-text-quiet);
+  --text-faint: var(--raw-text-faint);
 
-  --text: var(--raw-white);
-  --text-quiet: var(--raw-white-74);
-  --text-faint: var(--raw-white-52);
+  /* Each section's own colour, for its icon tile. */
+  --tint-home: var(--raw-fluoresce);
+  --tint-folder: var(--raw-plum);
+  --tint-drain: var(--raw-blue);
+  --tint-history: var(--raw-slate);
+  --tint-ink: var(--raw-white);
+  --tint-home-ink: var(--raw-fluoresce-ink);
 
   /* Spent on the thing that is live or about to change, and on nothing else. */
   --accent: var(--raw-fluoresce);
+  --accent-soft: var(--raw-fluoresce-soft);
   --accent-ink: var(--raw-fluoresce-ink);
 
-  /* The one filled button on a screen. */
-  --control: var(--raw-white);
-  --control-ink: var(--raw-ink);
+  /* The one filled button on a screen, in the colour of the section it is in. */
+  --control: var(--raw-fluoresce);
+  --control-ink: var(--raw-fluoresce-ink);
 
   /* What kind of file a row is, told by colour before the name is read. */
   --kind-video: var(--raw-kind-video);
@@ -92,11 +94,10 @@
   --ok: var(--raw-green);
   --bad: var(--raw-rust);
 
-  /* Type. SF on a Mac, like the app this is modelled on. */
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --hero: 44px;
-  --display: 28px;
+  --hero: 34px;
+  --display: 22px;
   --title: 22px;
   --nav: 13.5px;
   --body: 14.5px;
@@ -114,13 +115,12 @@
   --radius: 8px;
   --radius-lg: 14px;
   --radius-xl: 20px;
-  --pill: 999px;
 
   --quick: 90ms;
   --slow: 220ms;
   --ease: cubic-bezier(0.2, 0, 0.2, 1);
 }
 
-/* Where you are decides the field. History shares Home's. */
-[data-half="folder"] { --field: var(--field-folder); }
-[data-half="drain"] { --field: var(--field-drain); }
+/* The section you are in colours the main button. */
+[data-half="folder"] { --control: var(--raw-plum); --control-ink: var(--raw-white); }
+[data-half="drain"] { --control: var(--raw-blue); --control-ink: var(--raw-white); }

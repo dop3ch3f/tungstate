@@ -63,18 +63,17 @@ onBeforeUnmount(() => {
   display: grid;
   place-items: center;
   background: var(--veil);
-  -webkit-backdrop-filter: blur(4px);
-  backdrop-filter: blur(4px);
   animation: fade var(--slow) var(--ease);
   z-index: 10;
 }
 .panel {
   width: min(460px, calc(100vw - var(--s6) * 2));
-  background: linear-gradient(var(--sheet), var(--sheet)), var(--field);
+  background: var(--sheet);
+  color: var(--text);
   border: 1px solid var(--edge);
   border-radius: var(--radius-xl);
   padding: var(--s5) var(--s5) var(--s4);
-  box-shadow: var(--glass-lip), var(--drop);
+  box-shadow: var(--drop);
 }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @media (prefers-reduced-motion: reduce) { .scrim { animation: none } }

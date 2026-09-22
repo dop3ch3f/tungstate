@@ -9,6 +9,7 @@ import { bytes, shortPath, when } from "../lib/format";
 import { toneOfStatus } from "../lib/tone";
 import type { Op } from "../engine/types";
 import Button from "../ui/Button.vue";
+import Tile from "../ui/Tile.vue";
 import Notice from "../ui/Notice.vue";
 import Empty from "../ui/Empty.vue";
 
@@ -63,7 +64,7 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
 <template>
   <div class="h-wrap">
     <div class="h-column">
-      <h1>What has happened</h1>
+      <div class="head"><Tile of="history" :size="26" /><h1>What has happened</h1></div>
       <form class="h-find" @submit.prevent="look()">
         <input
           v-model="asked"
@@ -98,9 +99,11 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
 </template>
 
 <style scoped>
+.head { display: flex; align-items: center; gap: var(--s3); }
 .h-wrap { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .h-column { max-width: 960px; margin: 0 auto; padding: var(--s5) var(--s6); }
-h1 { font-size: var(--display); font-weight: 700; margin: 0 0 var(--s4); letter-spacing: -0.01em; }
+h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
+.head { margin-bottom: var(--s4); }
 
 .h-find { display: flex; gap: var(--s2); align-items: center; }
 .h-in { min-width: 320px; }
@@ -129,6 +132,6 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0 0 var(--s4); letter-
    nearest directories survive; `bdi` keeps the path itself reading left to right. */
 .h-dir { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; direction: rtl; text-align: left; }
 .h-said-bad { color: var(--bad); font-weight: 600; }
-.h-row-bad { background: var(--glass); border-radius: var(--radius); }
+.h-row-bad { background: var(--panel); border-radius: var(--radius); }
 .h-said, .h-size, .h-when { color: var(--text-faint); text-align: right; }
 </style>

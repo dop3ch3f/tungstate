@@ -25,12 +25,11 @@ const LOOK = {
   font: inherit;
   font-size: var(--small);
   color: var(--text-quiet);
-  background: var(--glass);
+  background: var(--panel);
   border: 1px solid var(--edge);
-  border-radius: var(--pill);
-  min-height: 34px;
+  border-radius: var(--radius);
+  min-height: 30px;
   padding: 0 var(--s4);
-  box-shadow: var(--glass-lip);
   cursor: pointer;
   transition: background var(--quick) var(--ease), border-color var(--quick) var(--ease);
 }
@@ -40,16 +39,15 @@ const LOOK = {
 .control-plain { /* the default, already drawn above */ }
 
 .control-primary {
-  font-size: var(--body);
+  font-size: var(--small);
   font-weight: 600;
   color: var(--control-ink);
   background: var(--control);
   border-color: transparent;
-  padding: 0 22px;
-  box-shadow: var(--glass-lip), 0 6px 22px var(--veil);
+  padding: 0 var(--s4);
 }
 .control-primary:hover:not(:disabled) { color: var(--control-ink); background: var(--control); filter: brightness(1.06); }
-.control-primary:disabled { opacity: 0.35; box-shadow: none; }
+.control-primary:disabled { opacity: 0.35; }
 
 .control-danger { color: var(--bad); border-color: var(--bad); }
 .control-danger:hover:not(:disabled) { color: var(--bad); background: var(--surface-raised); }

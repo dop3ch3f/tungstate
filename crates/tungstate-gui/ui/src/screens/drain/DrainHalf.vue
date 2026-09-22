@@ -13,6 +13,7 @@ import LinksView from "./LinksView.vue";
 import ConnectionsView from "./ConnectionsView.vue";
 import TransferSetup from "./TransferSetup.vue";
 import Button from "../../ui/Button.vue";
+import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 import Sheet from "../../ui/Sheet.vue";
 
@@ -87,7 +88,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
 
 <template>
   <div class="dh">
-    <h1 class="dh-title">Move to another machine</h1>
+    <div class="head"><Tile of="drain" :size="26" /><h1 class="dh-title">Move to another machine</h1></div>
     <nav class="dh-tabs">
       <button
         v-for="(label, key) in WHERE"
@@ -179,10 +180,11 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
 </template>
 
 <style scoped>
+.head { display: flex; align-items: center; gap: var(--s3); }
 .dh { position: absolute; inset: 0; display: flex; flex-direction: column; padding: var(--s5) var(--s5) var(--s3); gap: var(--s3); }
 .dh-title { font-size: var(--display); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
 
-.dh-tabs { display: flex; gap: 2px; padding: 3px; background: var(--rail); border-radius: var(--pill); align-self: flex-start; }
+.dh-tabs { display: flex; gap: 2px; padding: 3px; background: var(--rail); border-radius: var(--radius); align-self: flex-start; }
 .dh-tabs button {
   font: inherit;
   font-size: var(--small);
@@ -190,7 +192,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
   border: none;
   color: var(--text-faint);
   padding: var(--s1) var(--s3);
-  border-radius: var(--pill);
+  border-radius: var(--radius);
   cursor: pointer;
 }
 .dh-tabs button:hover { color: var(--text-quiet); }

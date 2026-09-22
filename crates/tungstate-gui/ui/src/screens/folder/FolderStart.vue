@@ -6,6 +6,7 @@
 import { onMounted } from "vue";
 import { useFolders } from "../../state/useFolders";
 import Button from "../../ui/Button.vue";
+import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 import Empty from "../../ui/Empty.vue";
 
@@ -16,7 +17,7 @@ onMounted(() => f.listRegistered());
 <template>
   <div class="start">
     <div class="column">
-      <h1>Tidy a folder</h1>
+      <div class="head"><Tile of="folder" :size="26" /><h1>Tidy a folder</h1></div>
       <p class="intro">
         Point at one and you will see how it is filed now, beside what every
         other way of filing would do to it. Nothing moves until you say so.
@@ -47,10 +48,11 @@ onMounted(() => f.listRegistered());
 </template>
 
 <style scoped>
+.head { display: flex; align-items: center; gap: var(--s3); }
 .start { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
-.column { max-width: 720px; margin: 0 auto; padding: 72px var(--s6) var(--s6); }
+.column { max-width: 720px; margin: 0 auto; padding: var(--s5) var(--s6) var(--s6); }
 
-h1 { font-size: var(--hero); font-weight: 700; margin: 0; letter-spacing: -0.02em; }
+h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .intro {
   font-size: var(--body);
   line-height: 1.6;

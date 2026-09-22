@@ -9,6 +9,7 @@ import { wouldMove, outOf, moved, skipped, failed, putBack, files, dirsCounted }
 import { ask } from "../../ui/useDialog";
 import type { TreeEntry } from "../../engine/types";
 import Button from "../../ui/Button.vue";
+import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 import Working from "../../ui/Working.vue";
 
@@ -105,7 +106,7 @@ async function confirmPutBack() {
 <template>
   <div class="prev" v-if="p">
     <div class="column">
-      <h1>{{ name }}</h1>
+      <div class="head"><Tile of="folder" :size="26" /><h1>{{ name }}</h1></div>
       <p class="locus">
         <span class="path">{{ f.root.value }}</span>
         <span class="ruleset" v-if="p.folder">filed by the {{ p.folder }} rules</span>
@@ -242,6 +243,7 @@ async function confirmPutBack() {
 </template>
 
 <style scoped>
+.head { display: flex; align-items: center; gap: var(--s3); }
 .prev { position: absolute; inset: 0; overflow: hidden; }
 .column {
   max-width: 980px;
@@ -275,8 +277,8 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 }
 .views button:hover { color: var(--text-quiet); }
 .views .von { color: var(--text); background: var(--surface-raised); }
-.views { padding: 3px; background: var(--rail); border-radius: var(--pill); align-self: flex-start; margin-left: 0; }
-.views button { border-radius: var(--pill); padding: var(--s1) var(--s3); }
+.views { padding: 3px; background: var(--rail); border-radius: var(--radius); align-self: flex-start; margin-left: 0; }
+.views button { border-radius: var(--radius); padding: var(--s1) var(--s3); }
 .howmany { font-variant-numeric: tabular-nums; opacity: 0.7; margin-left: 2px; }
 
 /* The list scrolls on its own, so it stops above the action bar instead of
@@ -287,8 +289,6 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   min-height: 0;
   overflow-y: auto;
   padding-bottom: var(--s5);
-  -webkit-mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
-  mask-image: linear-gradient(to bottom, #000 calc(100% - 36px), transparent);
 }
 
 .trees { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s5); }
@@ -352,10 +352,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   flex: none;
   border: 1px solid var(--edge);
   border-radius: var(--radius-lg);
-  box-shadow: var(--glass-lip);
-  background: var(--glass);
-  -webkit-backdrop-filter: var(--blur);
-  backdrop-filter: var(--blur);
+  background: var(--panel);
 }
 .act { display: flex; align-items: center; gap: var(--s3); }
 .safe { font-size: var(--small); color: var(--text-faint); }
