@@ -459,6 +459,9 @@ fn largest_first_reclaims_the_most_space_soonest() {
 
     let mut seen = RecordingProgress::default();
     let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    // One at a time: with several workers the queue is still largest-first,
+    // but which worker calls `starting` first is up to the scheduler, and
+    // asserting on that raced on macOS CI.
     Transfer::new(
         &rig.link,
         &rig.source,
@@ -467,6 +470,7 @@ fn largest_first_reclaims_the_most_space_soonest() {
         &mut resolver,
         &mut seen,
     )
+    .parallel(1)
     .run()
     .unwrap();
 
