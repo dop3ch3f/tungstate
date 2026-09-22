@@ -13,7 +13,7 @@ import { toneOfStatus } from "../lib/tone";
 import type { FolderView, InterruptedRun, Link, Op } from "../engine/types";
 import Button from "../ui/Button.vue";
 import Notice from "../ui/Notice.vue";
-import Tile from "../ui/Tile.vue";
+import TitleBar from "../ui/TitleBar.vue";
 
 const nav = useNav();
 const f = useFolders();
@@ -68,13 +68,9 @@ const DOT = { plain: "o-plain", live: "o-live", ok: "o-ok", hold: "o-hold", bad:
 
       <div class="pair">
         <section class="panel">
-          <header class="ph">
-            <Tile of="folder" :size="28" />
-            <div class="ph-words">
-              <h2>Tidy a folder</h2>
-              <p>See how a folder is filed, beside every other way to file it.</p>
-            </div>
-          </header>
+          <TitleBar class="pbar" of="folder" title="Organize" />
+          <div class="pb">
+          <p class="lede">See how a folder is filed, beside every other way to file it.</p>
           <ul class="rows" v-if="governed.length">
             <li v-for="folder in governed.slice(0, 4)" :key="folder.root">
               <button class="row" @click="openFolder(folder)">
@@ -90,16 +86,13 @@ const DOT = { plain: "o-plain", live: "o-live", ok: "o-ok", hold: "o-hold", bad:
             <Button @click="pointAtFolder()">Point at a folder…</Button>
             <Button look="link" v-if="governed.length > 4" @click="nav.go('folder')">All {{ governed.length }}</Button>
           </footer>
+          </div>
         </section>
 
         <section class="panel">
-          <header class="ph">
-            <Tile of="drain" :size="28" />
-            <div class="ph-words">
-              <h2>Move to another machine</h2>
-              <p>Copy, check it arrived intact, then remove the original.</p>
-            </div>
-          </header>
+          <TitleBar class="pbar" of="drain" title="Transfer" />
+          <div class="pb">
+          <p class="lede">Copy to another machine, check it arrived intact, then remove the original.</p>
           <ul class="rows" v-if="pairs.length">
             <li v-for="pair in pairs.slice(0, 4)" :key="pair.name">
               <button class="row" @click="nav.go('drain')">
@@ -112,17 +105,15 @@ const DOT = { plain: "o-plain", live: "o-live", ok: "o-ok", hold: "o-hold", bad:
           <footer class="pf">
             <Button @click="nav.go('drain')">Open the file browser</Button>
           </footer>
+          </div>
         </section>
       </div>
 
       <section class="panel">
-        <header class="ph">
-          <Tile of="history" :size="28" />
-          <div class="ph-words">
-            <h2>What has happened</h2>
-          </div>
-          <Button look="link" class="ph-more" @click="nav.go('history')">Everything</Button>
-        </header>
+        <TitleBar class="pbar" of="history" title="History">
+          <Button look="link" @click="nav.go('history')">Everything</Button>
+        </TitleBar>
+        <div class="pb">
         <ul class="rows" v-if="recent.length">
           <li v-for="op in recent" :key="op.id" class="op">
             <span class="o-dot" :class="DOT[toneOfStatus(op.status)]"></span>
@@ -132,6 +123,7 @@ const DOT = { plain: "o-plain", live: "o-live", ok: "o-ok", hold: "o-hold", bad:
           </li>
         </ul>
         <p class="none" v-else>Nothing has happened yet.</p>
+        </div>
       </section>
     </div>
   </div>
@@ -149,39 +141,17 @@ h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin:
   background: var(--panel);
   border: 1px solid var(--edge);
   border-radius: var(--radius-lg);
-  padding: var(--s4);
   min-width: 0;
+  overflow: hidden;
   box-shadow: var(--lift-panel);
 }
-/* Retro: each panel is a little window, its header a title bar. The whole
-   selector sits inside :global(), because Vue drops anything after it. */
-:global([data-theme="retro"] .ph) {
-  margin: calc(var(--s4) * -1) calc(var(--s4) * -1) 0;
-  padding: var(--s2) var(--s4);
-  background: var(--surface-raised);
-  border-bottom: 1px solid var(--edge);
-  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
-  align-items: center;
-}
-:global([data-theme="retro"] .ph p) { display: none; }
-/* Three window controls in the retro primaries, drawn as one dot and two
-   shadows of it, ahead of the tile. */
-:global([data-theme="retro"] .ph::before) {
-  content: "";
-  flex: none;
-  width: 9px;
-  height: 9px;
-  margin-right: 30px;
-  border-radius: 50%;
-  background: var(--tint-folder);
-  box-shadow: 14px 0 0 var(--tint-home), 28px 0 0 var(--tint-drain);
-}
+.panel > .pbar { padding: var(--s4) var(--s4) 0; }
+.pb { display: flex; flex-direction: column; flex: 1; padding: var(--s2) var(--s4) var(--s4); }
+.lede { font-size: var(--small); color: var(--text-quiet); margin: 0; line-height: 1.45; }
+/* Retro: the bar is flush with the window's edges, and the body gets room. */
+:global([data-theme="retro"] .panel > .pbar) { padding: 6px 7px 6px var(--s3); }
+:global([data-theme="retro"] .pb) { padding-top: var(--s3); }
 :global([data-theme="retro"] .rows) { border-top: none; }
-.ph { display: flex; gap: var(--s3); align-items: flex-start; }
-.ph-words { min-width: 0; flex: 1; }
-.ph h2 { font-size: var(--body); font-weight: 600; margin: 3px 0 0; }
-.ph p { font-size: var(--small); color: var(--text-quiet); margin: 2px 0 0; line-height: 1.45; }
-.ph-more { align-self: center; font-size: var(--small); }
 
 .rows { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: 1px solid var(--edge); flex: 1; }
 .rows li { border-bottom: 1px solid var(--edge); }

@@ -41,6 +41,13 @@ onMounted(async () => {
 });
 
 const count = computed(() => props.legs.reduce((n, l) => n + l.names.length, 0));
+
+const LABELS: Record<keyof typeof CHOICES, string> = {
+  source_policy: "What happens to the originals",
+  verify: "Check each copy by",
+  order: "Take files",
+  on_conflict: "If the name is already taken there",
+};
 </script>
 
 <template>
@@ -72,7 +79,7 @@ const count = computed(() => props.legs.reduce((n, l) => n + l.names.length, 0))
 
     <div class="set-opts">
       <label v-for="(group, field) in CHOICES" :key="field">
-        <span class="set-lbl">{{ field.replace("_", " ") }}</span>
+        <span class="set-lbl">{{ LABELS[field] }}</span>
         <select
           :value="field === 'source_policy' ? policy : field === 'verify' ? verify : field === 'order' ? order : onConflict"
           @change="
@@ -86,7 +93,7 @@ const count = computed(() => props.legs.reduce((n, l) => n + l.names.length, 0))
         </select>
       </label>
       <label>
-        <span class="set-lbl">save this pair as</span>
+        <span class="set-lbl">Save this pair as</span>
         <input v-model="saveAs" placeholder="leave blank to skip" />
       </label>
     </div>

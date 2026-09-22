@@ -8,6 +8,14 @@ import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
 import Empty from "../../ui/Empty.vue";
+import Sheet from "../../ui/Sheet.vue";
+import Field from "../../ui/Field.vue";
+import ConnectionForm from "./ConnectionForm.vue";
+
+const emit = defineEmits<{ changed: []; browse: [location: string] }>();
+const form = ref<{ editing: Connection | null } | null>(null);
+const changing = ref<Connection | null>(null);
+const newSecret = ref("");
 
 const all = shallowRef<Connection[]>([]);
 const probes = ref<Record<string, Probe | string | "checking">>({});
@@ -21,6 +29,26 @@ async function load() {
   }
 }
 onMounted(load);
+
+async function saved(name: string) {
+  form.value = null;
+  await load();
+  emit("changed");
+  await check(name); // proving it works is why anyone opened the form
+}
+
+async function savePassword() {
+  const target = changing.value;
+  if (!target) return;
+  try {
+    await connections.setPassword(target.name, newSecret.value);
+    changing.value = null;
+    newSecret.value = "";
+    await check(target.name);
+  } catch (e) {
+    problem.value = String(e);
+  }
+}
 
 async function check(name: string) {
   probes.value = { ...probes.value, [name]: "checking" };
@@ -56,6 +84,7 @@ async function remove(name: string) {
   try {
     await connections.remove(name);
     await load();
+    emit("changed");
   } catch (e) {
     problem.value = String(e);
   }
@@ -64,6 +93,10 @@ async function remove(name: string) {
 
 <template>
   <div class="cx-wrap">
+    <div class="cx-top">
+      <p class="cx-lede">Places that are not this machine. Each one appears in the panes' "Go to…" list.</p>
+      <Button look="primary" @click="form = { editing: null }">Add a connection</Button>
+    </div>
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
     <Empty v-if="!all.length" line="No connections yet. You need one to reach a NAS over FTP. A volume you have mounted in Finder needs none." />
     <div class="cx-row" v-for="c in all" :key="c.name">
@@ -80,9 +113,25 @@ async function remove(name: string) {
       </div>
       <div class="cx-do">
         <Button @click="check(c.name)">Check</Button>
+        <Button @click="emit('browse', `${c.name}:`)">Browse</Button>
+        <Button @click="form = { editing: c }">Edit</Button>
+        <Button v-if="c.scheme !== 'fs'" @click="changing = c; newSecret = ''">Password</Button>
         <Button look="danger" @click="remove(c.name)">Remove</Button>
       </div>
     </div>
+
+    <ConnectionForm v-if="form" :editing="form.editing" @dismiss="form = null" @saved="saved" />
+
+    <Sheet v-if="changing" @dismiss="changing = null; newSecret = ''">
+      <h2 class="cx-qt">A new password for {{ changing.name }}</h2>
+      <Field label="Password" note="Replaces the one in your keychain. Check runs straight after, to prove it works.">
+        <input type="password" v-model="newSecret" autocomplete="off" />
+      </Field>
+      <div class="cx-qf">
+        <Button @click="changing = null; newSecret = ''">Cancel</Button>
+        <Button look="primary" :disabled="!newSecret" @click="savePassword()">Save it</Button>
+      </div>
+    </Sheet>
   </div>
 </template>
 
@@ -102,5 +151,9 @@ async function remove(name: string) {
 .cx-say { display: flex; flex-direction: column; gap: 2px; font-size: var(--fine); }
 .cx-state { color: var(--text-quiet); }
 .cx-warn { color: var(--hold); }
-.cx-do { display: flex; gap: var(--s2); }
+.cx-do { display: flex; gap: var(--s2); flex-wrap: wrap; justify-content: flex-end; }
+.cx-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s4); }
+.cx-lede { font-size: var(--small); color: var(--text-quiet); margin: 0; }
+.cx-qt { font-size: var(--body); font-weight: 700; margin: 0 0 var(--s4); }
+.cx-qf { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>

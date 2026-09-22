@@ -161,7 +161,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   position: sticky;
   top: 0;
   z-index: 1;
-  background: var(--field);
+  background: var(--window-bg);
   padding-top: 2px;
   font-weight: 600;
   letter-spacing: 0.04em;

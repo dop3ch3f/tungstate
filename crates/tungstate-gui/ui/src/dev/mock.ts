@@ -96,7 +96,13 @@ mockIPC((cmd, args) => {
     case "rules_text": return learned.as_is;
     case "recent": case "history": case "whereis": return ops;
     case "list_links": return links;
-    case "list_connections": return [];
+    case "list_connections":
+      return [{ name: "nas", scheme: "ftp", host: "nas.local", port: 21, username: "me", root: "/volume1/media", options: {}, encrypted: false, networked: true, rootless: null }];
+    case "test_connection": return { entries: 14, root: "/volume1/media", names: ["Movies", "Photos"], accepts_files: true };
+    case "archives": return [{ name: "2026-09-20T11-02-44", archived_at: Date.now() - 86_400_000, size: 184_320, links: 2, connections: 1, operations: 412 }];
+    case "preview_link":
+      return { overlapping: [], fresh: 3, same_size: 1, clashes: 1, too_recent: 0, bytes: 629_145_600, removes_originals: true,
+        items: listings[`${DEMO}/nas/incoming`].entries.map((e, i) => ({ path: e.path, size: e.size, outcome: ["move", "move", "move", "check", "clash"][i] ?? "move", existing: null, towards: "forward" })) };
     case "interrupted": return [];
     case "places": return [{ label: "Demo", path: DEMO }, { label: "NAS", path: `${DEMO}/nas` }];
     case "last_panes": return { left: `${DEMO}/photos-by-nothing`, right: `${DEMO}/nas/incoming` };
@@ -123,6 +129,15 @@ const nav = useNav();
 const f = useFolders();
 const t = useTransfer();
 const DL = `${DEMO}/messy-downloads`;
+
+const tick = () => new Promise((r) => setTimeout(r, 60));
+const click = (sel: string) => document.querySelector<HTMLButtonElement>(sel)?.click();
+/** Open one of the Transfer window's tabs by position, since its state is local. */
+async function tab(n: number) {
+  await tick();
+  document.querySelectorAll<HTMLButtonElement>(".dh-tabs button")[n]?.click();
+  await tick();
+}
 
 const scenes: Record<string, () => unknown> = {
   home: () => {},
@@ -165,6 +180,12 @@ const scenes: Record<string, () => unknown> = {
     }));
   },
   history: () => nav.go("history"),
+  settings: () => nav.go("settings"),
+  "drain-connections": async () => { nav.go("drain"); await tab(3); },
+  "drain-add-connection": async () => { nav.go("drain"); await tab(3); click(".cx-top button"); },
+  "drain-pairs": async () => { nav.go("drain"); await tab(2); },
+  "drain-add-pair": async () => { nav.go("drain"); await tab(2); click(".lk-top button"); },
+  "drain-preview-pair": async () => { nav.go("drain"); await tab(2); await tick(); click(".lk-do button"); },
 };
 await scenes[scene]?.();
 document.documentElement.dataset.ready = "1";

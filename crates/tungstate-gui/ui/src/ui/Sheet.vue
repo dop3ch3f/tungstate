@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, nextTick } from "vue";
 
+const props = defineProps<{ wide?: boolean }>();
 const emit = defineEmits<{ dismiss: [] }>();
 const card = ref<HTMLElement | null>(null);
 let restoreTo: HTMLElement | null = null;
@@ -50,7 +51,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="scrim" @click.self="emit('dismiss')">
-    <div ref="panel" class="panel" role="dialog" aria-modal="true">
+    <div ref="card" class="panel" :class="{ 'panel-wide': props.wide }" role="dialog" aria-modal="true">
       <slot />
     </div>
   </div>
@@ -75,6 +76,7 @@ onBeforeUnmount(() => {
   padding: var(--s5) var(--s5) var(--s4);
   box-shadow: var(--lift-panel), var(--drop);
 }
+.panel-wide { width: min(580px, calc(100vw - var(--s6) * 2)); max-height: calc(100vh - var(--s6) * 2); overflow-y: auto; }
 @keyframes fade { from { opacity: 0 } to { opacity: 1 } }
 @media (prefers-reduced-motion: reduce) { .scrim { animation: none } }
 </style>

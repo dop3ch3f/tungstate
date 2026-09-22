@@ -979,6 +979,30 @@ rule meant to hide a panel's subtitle compiled to `[data-theme="retro"] {
 display: none }` and blanked the whole page. The whole selector has to sit
 inside: `:global([data-theme="retro"] .y)`.
 
+## 12. What the redesign had quietly dropped
+
+Using the Transfer window turned up a Connections tab with no way to add a
+connection. Comparing the engine commands each window calls found the rest:
+the old window called 51, the new one 34. Missing were adding, editing and
+re-passwording a connection; creating a saved pair without moving anything,
+previewing one before running it, and seeing what one set aside; the whole of
+Storage (export, import, start fresh, archives); and remembering which folders
+the panes were showing. All of it is back. Storage lives in a Settings window
+at the foot of the sidebar, where the theme switch will go too.
+
+The lesson is the same one as the CSS checker's: a rebuild that is judged by
+looking at it can lose a feature nobody looks for. **Diffing the set of seam
+commands called, before and after, is a one-line check that would have caught
+this on the day.**
+
+The same pass found the dialog's focus trap had never worked: its template
+bound `ref="panel"` and the code read a ref called `card`, so Tab could walk out
+of every dialog and nothing was focused on open.
+
+Each section also now opens as a program window on the retro desktop, with a
+title bar whose minimise and close return to Home and whose maximise fills the
+stage.
+
 ## What is still not verified
 
 - **The colour pass has been seen in headless Chrome, not in the real

@@ -26,7 +26,7 @@ button, .chrome { user-select: none; }
 
 /* Form controls, drawn once so no screen falls back to the browser's own. */
 input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
-select, input[type="text"], input:not([type]) {
+select, input[type="text"], input[type="password"], input[type="number"], input:not([type]) {
   font: inherit;
   font-size: var(--small);
   color: var(--text);
@@ -61,3 +61,8 @@ input::placeholder { color: var(--text-faint); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }
+
+/* In the retro theme a section's window title bar carries its icon, so the
+   page heading inside the window drops its own. Here because it spans two
+   components: the window and whichever screen is in it. */
+[data-theme="retro"] .win-body .head .tile { display: none; }

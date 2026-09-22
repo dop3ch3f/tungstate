@@ -2,7 +2,7 @@
      files is the thing you came here to do; runs, saved pairs and connections
      are siblings one click away. -->
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef, useTemplateRef } from "vue";
+import { computed, onMounted, ref, shallowRef, useTemplateRef, watch } from "vue";
 import { transfers, links as linkApi } from "../../engine/commands";
 import { useTransfer } from "../../state/useTransfer";
 import { bytes, shortPath } from "../../lib/format";
@@ -54,6 +54,31 @@ const route = computed(() => {
   if (legs.value.length === 2) return `${shortPath(leftPath.value)} ⇄ ${shortPath(rightPath.value)}`;
   const leg = legs.value[0];
   return `${shortPath(leg.source)} → ${shortPath(leg.destination)}`;
+});
+
+/** Connections are places too, so adding or removing one changes the list. */
+async function loadPlaces() {
+  try {
+    places.value = await transfers.places();
+  } catch (e) {
+    problem.value = String(e);
+  }
+}
+
+/** Open a connection in the left pane, from the Connections tab. */
+function browse(location: string) {
+  leftStart.value = location;
+  where.value = "files";
+}
+
+// Which folders the panes were showing, kept for the next launch. Debounced,
+// so walking through folders quickly does not write the file on every step.
+let saveTimer: number | undefined;
+watch([leftPath, rightPath], ([l, r]) => {
+  window.clearTimeout(saveTimer);
+  saveTimer = window.setTimeout(() => {
+    transfers.rememberPanes({ left: l || null, right: r || null }).catch(() => {});
+  }, 400);
 });
 
 onMounted(async () => {
@@ -134,8 +159,8 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
     </div>
 
     <div class="dh-body dh-pad" v-else-if="where === 'runs'"><RunView /></div>
-    <div class="dh-body dh-pad" v-else-if="where === 'links'"><LinksView @ran="where = 'runs'" /></div>
-    <div class="dh-body dh-pad" v-else><ConnectionsView /></div>
+    <div class="dh-body dh-pad" v-else-if="where === 'links'"><LinksView :places="places" @ran="where = 'runs'" /></div>
+    <div class="dh-body dh-pad" v-else><ConnectionsView @changed="loadPlaces()" @browse="browse" /></div>
 
     <TransferSetup
       v-if="setup"
@@ -201,6 +226,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
 .dh-unfinished { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: baseline; }
 
 .dh-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s3); }
+.dh-pad { padding-right: var(--s1); }
 .dh-pad { overflow-y: auto; }
 .dh-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); }
 

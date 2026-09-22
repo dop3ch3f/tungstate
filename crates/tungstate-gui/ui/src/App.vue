@@ -4,19 +4,23 @@
      both halves' state and every modal, which is why nothing in it could be
      moved without moving all of it. -->
 <script setup lang="ts">
-import { onMounted, onUnmounted } from "vue";
+import { onMounted, onUnmounted, ref } from "vue";
 import { useNav } from "./nav";
 import { attachTransferStream, detachTransferStream, useTransfer } from "./state/useTransfer";
 import Home from "./screens/Home.vue";
 import FolderHalf from "./screens/folder/FolderHalf.vue";
 import DrainHalf from "./screens/drain/DrainHalf.vue";
 import HistoryView from "./screens/HistoryView.vue";
+import SettingsView from "./screens/SettingsView.vue";
 import DialogHost from "./ui/DialogHost.vue";
 import Mark from "./ui/Mark.vue";
 import Tile from "./ui/Tile.vue";
+import Window from "./ui/Window.vue";
 
 const nav = useNav();
 const t = useTransfer();
+/** Whether the open section's window fills the stage. Kept across sections. */
+const max = ref(false);
 
 onMounted(() => {
   // First, before anything that can throw. They were once registered last,
@@ -53,13 +57,28 @@ const WHERE = {
       </button>
       <span class="gap"></span>
       <span class="live" v-if="t.running.value" title="A transfer is running">●</span>
+      <button class="dest" :class="{ here: nav.view.value === 'settings' }" @click="nav.go('settings')">
+        <Tile of="settings" :size="22" />
+        Settings
+      </button>
     </nav>
 
     <main class="stage">
       <Home v-if="nav.view.value === 'home'" />
-      <FolderHalf v-else-if="nav.view.value === 'folder'" />
-      <DrainHalf v-else-if="nav.view.value === 'drain'" />
-      <HistoryView v-else />
+      <Window
+        v-else
+        :of="nav.view.value"
+        :title="nav.view.value === 'settings' ? 'Settings' : WHERE[nav.view.value]"
+        :max="max"
+        @minimize="nav.go('home')"
+        @close="nav.go('home')"
+        @maximize="max = !max"
+      >
+        <FolderHalf v-if="nav.view.value === 'folder'" />
+        <DrainHalf v-else-if="nav.view.value === 'drain'" />
+        <HistoryView v-else-if="nav.view.value === 'history'" />
+        <SettingsView v-else />
+      </Window>
     </main>
 
     <DialogHost />
