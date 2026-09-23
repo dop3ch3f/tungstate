@@ -76,6 +76,7 @@
   --tint-folder: var(--raw-plum);
   --tint-drain: var(--raw-blue);
   --tint-history: var(--raw-slate);
+  --tint-dupes: var(--raw-green);
   --tint-ink: var(--raw-white);
   --tint-home-ink: var(--raw-fluoresce-ink);
 
@@ -163,6 +164,7 @@
   --tint-folder: #8a4fd6;
   --tint-drain: #2f6bdf;
   --tint-history: #8d8a83;
+  --tint-dupes: #2f9e62;
   --accent: #0a8fd1;
   --accent-soft: rgba(10, 143, 209, 0.12);
   --accent-ink: #ffffff;
@@ -205,6 +207,7 @@
   --control-ink: #151515;
   --hold: #c47d00;
   --tint-history: #4a4d45;
+  --tint-dupes: #2f8f4e;
   --ok: #2f8f4e;
   --bad: #d23d1f;
   --radius: 4px;

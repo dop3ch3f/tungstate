@@ -6,7 +6,14 @@ import Pixels from "./Pixels.vue";
 
 const props = withDefaults(defineProps<{ of: Section; size?: number }>(), { size: 22 });
 // A lookup, because the CSS checker cannot follow a computed class name.
-const TINT = { home: "t-home", folder: "t-folder", drain: "t-drain", history: "t-history", settings: "t-history" } as const;
+const TINT = {
+  home: "t-home",
+  folder: "t-folder",
+  drain: "t-drain",
+  dupes: "t-dupes",
+  history: "t-history",
+  settings: "t-history",
+} as const;
 </script>
 
 <template>
@@ -34,4 +41,5 @@ const TINT = { home: "t-home", folder: "t-folder", drain: "t-drain", history: "t
 .t-folder { background: var(--tint-folder); }
 .t-drain { background: var(--tint-drain); }
 .t-history { background: var(--tint-history); }
+.t-dupes { background: var(--tint-dupes); }
 </style>

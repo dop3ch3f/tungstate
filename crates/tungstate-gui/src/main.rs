@@ -14,6 +14,7 @@
 #![allow(clippy::needless_pass_by_value)]
 
 mod bridge;
+mod dupes;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -42,6 +43,9 @@ struct App {
     journal: Journal,
     conflicts: ConflictChannel,
     cancel: Arc<Stop>,
+    /// The duplicate scan in flight, so it can be stopped. Its own flag
+    /// rather than the transfer's: stopping a scan must not stop a drain.
+    scan: dupes::Scan,
     /// Work the running transfer has not reached yet, and whether a worker
     /// exists to reach it. Shared rather than moved into the worker, which is
     /// the whole of what lets a transfer be added to one already in flight.
@@ -411,6 +415,81 @@ fn tidy_folder(root: String, state: State<'_, App>) -> Result<govern::TidyDone, 
         failed: applied.failed.len(),
         already_tidy: false,
     })
+}
+
+/// Look for duplicates under `target`, which may be a folder or
+/// `connection:folder`.
+///
+/// Reports progress as it goes: a drive scan takes minutes, and a window that
+/// says nothing for minutes looks hung. Async, like every command that walks
+/// a folder.
+#[tauri::command(async)]
+fn find_duplicates(
+    target: String,
+    app: AppHandle,
+    state: State<'_, App>,
+) -> Result<dupes::FoundView, String> {
+    let reporter = app.clone();
+    dupes::scan(&target, &state.journal, &state.scan, move |progress| {
+        // Dropped rather than raised: a window that cannot hear progress is
+        // not a reason to abandon a scan that is working.
+        let _ = reporter.emit("dupes://progress", progress);
+    })
+}
+
+/// Stop the scan that is running, if one is.
+#[tauri::command]
+fn stop_finding_duplicates(state: State<'_, App>) {
+    state.scan.stop();
+}
+
+/// Deal with the groups the person picked.
+///
+/// `only` names the groups by id and `choices` name any copy kept against the
+/// engine's own choice. Every group is confirmed byte for byte first: samples
+/// are enough to show a group and never enough to move a file.
+#[tauri::command(async)]
+fn clear_duplicates(
+    target: String,
+    only: Vec<String>,
+    choices: Vec<dupes::Choice>,
+    extras: String,
+    state: State<'_, App>,
+) -> Result<dupes::ClearedView, String> {
+    let extras = match extras.as_str() {
+        "set-aside" => tungstate_core::dupes::Extras::SetAside,
+        "trash" => tungstate_core::dupes::Extras::Trash,
+        other => return Err(format!("`{other}` is not a choice: set-aside or trash")),
+    };
+    dupes::clear(
+        &target,
+        &only,
+        &choices,
+        extras,
+        &state.journal,
+        &state.scan,
+    )
+}
+
+/// What the person said should happen to extra copies, if they have said.
+#[tauri::command]
+fn duplicate_action(state: State<'_, App>) -> Result<Option<String>, String> {
+    state
+        .journal
+        .setting(dupes::ACTION_SETTING)
+        .map_err(describe)
+}
+
+/// Remember what should happen to extra copies.
+#[tauri::command]
+fn set_duplicate_action(action: String, state: State<'_, App>) -> Result<(), String> {
+    if !matches!(action.as_str(), "set-aside" | "trash") {
+        return Err(format!("`{action}` is not a choice: set-aside or trash"));
+    }
+    state
+        .journal
+        .remember_setting(dupes::ACTION_SETTING, &action)
+        .map_err(describe)
 }
 
 #[tauri::command(async)]
@@ -1943,6 +2022,7 @@ fn main() {
             journal,
             conflicts: ConflictChannel::default(),
             cancel: Arc::new(Stop::new()),
+            scan: dupes::Scan::default(),
             queue: RunQueue::new(),
             at_once_ceiling: AtomicUsize::new(0),
         })
@@ -1959,6 +2039,11 @@ fn main() {
             tidy_folder,
             put_back,
             pick_folder,
+            find_duplicates,
+            stop_finding_duplicates,
+            clear_duplicates,
+            duplicate_action,
+            set_duplicate_action,
             list_links,
             create_link,
             run_link,

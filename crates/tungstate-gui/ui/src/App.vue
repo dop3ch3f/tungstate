@@ -7,9 +7,11 @@
 import { onMounted, onUnmounted, ref } from "vue";
 import { useNav } from "./nav";
 import { attachTransferStream, detachTransferStream, useTransfer } from "./state/useTransfer";
+import { attachDupeStream, detachDupeStream } from "./state/useDupes";
 import Home from "./screens/Home.vue";
 import FolderHalf from "./screens/folder/FolderHalf.vue";
 import DrainHalf from "./screens/drain/DrainHalf.vue";
+import DupesHalf from "./screens/dupes/DupesHalf.vue";
 import HistoryView from "./screens/HistoryView.vue";
 import SettingsView from "./screens/SettingsView.vue";
 import DialogHost from "./ui/DialogHost.vue";
@@ -28,13 +30,18 @@ onMounted(() => {
   // `onMounted` stopped there: transfers ran and the ledger stayed empty for
   // ever with nothing on screen to say why.
   void attachTransferStream();
+  void attachDupeStream();
 });
-onUnmounted(detachTransferStream);
+onUnmounted(() => {
+  detachTransferStream();
+  detachDupeStream();
+});
 
 const WHERE = {
   home: "Home",
   folder: "Organize",
   drain: "Transfer",
+  dupes: "Duplicates",
   history: "History",
 } as const;
 </script>
@@ -76,6 +83,7 @@ const WHERE = {
       >
         <FolderHalf v-if="nav.view.value === 'folder'" />
         <DrainHalf v-else-if="nav.view.value === 'drain'" />
+        <DupesHalf v-else-if="nav.view.value === 'dupes'" />
         <HistoryView v-else-if="nav.view.value === 'history'" />
         <SettingsView v-else />
       </Window>

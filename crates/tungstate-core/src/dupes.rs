@@ -106,6 +106,11 @@ pub struct Group {
     pub size: u64,
     /// The copy that stays where it is.
     pub keep: String,
+    /// That copy in full, so a screen can show its date beside the others
+    /// and "keep the newest" can consider it. Without this the kept copy is
+    /// the one row on screen with no date, which is the row being compared
+    /// against.
+    pub kept: Copy,
     /// Why that one.
     pub why: Kept,
     /// The copies that would be dealt with. Never empty.
@@ -230,6 +235,13 @@ impl Found {
     }
 }
 
+/// What a [`Digest`] returns when the person asked the pass to stop.
+///
+/// A sentinel rather than a variant on the trait's error, because the trait's
+/// error is "whatever reading failed with, as a sentence" and a stop is not a
+/// failure. `find` turns it back into [`Trouble::Stopped`].
+pub const STOPPED: &str = "stopped by request";
+
 /// Anything that stops a pass finishing.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum Trouble {
@@ -241,6 +253,9 @@ pub enum Trouble {
         /// What the backend said.
         why: String,
     },
+    /// Somebody asked the pass to stop, and it did.
+    #[error("stopped")]
+    Stopped,
     /// Two pinned paths hold the same content, so "keep this one" has two
     /// answers. Refused rather than resolved: the pin is the one instruction
     /// here that came from a person.
@@ -251,6 +266,19 @@ pub enum Trouble {
         /// The other.
         second: String,
     },
+}
+
+/// A digest's failure, as trouble: a stop is a stop, everything else is a
+/// file that could not be read.
+fn stopped_or(path: &str, why: String) -> Trouble {
+    if why == STOPPED {
+        Trouble::Stopped
+    } else {
+        Trouble::Unreadable {
+            path: path.to_string(),
+            why,
+        }
+    }
 }
 
 /// Find the duplicates in a snapshot.
@@ -315,10 +343,9 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
         let mut by_partial: BTreeMap<String, Vec<&Attributes>> = BTreeMap::new();
         for file in candidates {
             let path = file.relative_path();
-            let mark = digest.partial(&path).map_err(|why| Trouble::Unreadable {
-                path: path.clone(),
-                why,
-            })?;
+            let mark = digest
+                .partial(&path)
+                .map_err(|why| stopped_or(&path, why))?;
             found.digested += 1;
             by_partial.entry(mark).or_default().push(file);
         }
@@ -333,10 +360,7 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
                     continue;
                 }
                 let path = file.relative_path();
-                let whole = digest.whole(&path).map_err(|why| Trouble::Unreadable {
-                    path: path.clone(),
-                    why,
-                })?;
+                let whole = digest.whole(&path).map_err(|why| stopped_or(&path, why))?;
                 found.read_whole += 1;
                 by_hash.entry(whole).or_default().push(file);
             }
@@ -402,6 +426,21 @@ fn groups_of(
         }
 
         let (keep, why) = choose(copies, wants);
+        let kept = copies
+            .iter()
+            .find(|file| file.relative_path() == keep)
+            .map_or_else(
+                || Copy {
+                    path: keep.clone(),
+                    size: copies[0].size,
+                    mtime: None,
+                },
+                |file| Copy {
+                    path: file.relative_path(),
+                    size: file.size,
+                    mtime: file.mtime,
+                },
+            );
         let extras = copies
             .iter()
             .filter(|file| file.relative_path() != keep)
@@ -415,6 +454,7 @@ fn groups_of(
             id: hash.clone(),
             size: copies[0].size,
             keep,
+            kept,
             why,
             extras,
             sure,
@@ -744,10 +784,7 @@ pub fn confirm(group: &Group, digest: &mut dyn Digest) -> Result<Option<Group>, 
         return Ok(Some(group.clone()));
     }
     let read = |digest: &mut dyn Digest, path: &str| {
-        digest.whole(path).map_err(|why| Trouble::Unreadable {
-            path: path.to_string(),
-            why,
-        })
+        digest.whole(path).map_err(|why| stopped_or(path, why))
     };
 
     let keep = read(digest, &group.keep)?;
@@ -788,10 +825,7 @@ pub fn confirm_folder(
         return Ok(Some(group.clone()));
     }
     let read = |digest: &mut dyn Digest, path: &str| {
-        digest.whole(path).map_err(|why| Trouble::Unreadable {
-            path: path.to_string(),
-            why,
-        })
+        digest.whole(path).map_err(|why| stopped_or(path, why))
     };
 
     let inside: Vec<String> = snapshot

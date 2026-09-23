@@ -103,6 +103,11 @@ mockIPC((cmd, args) => {
     case "rules_text": return learned.as_is;
     case "recent": case "history": case "whereis": return ops;
     case "list_links": return links;
+    case "find_duplicates": return found(a.target ?? `${DEMO}/messy-downloads`);
+    case "duplicate_action": return null;
+    case "stop_finding_duplicates": return null;
+    case "clear_duplicates":
+      return { files: 3, bytes: 41_943_040, plan: 7, reversible: true, dropped: 1, failed: [] };
     case "list_connections":
       return [{ name: "nas", scheme: "ftp", host: "nas.local", port: 21, username: "me", root: "/volume1/media", options: {}, encrypted: false, networked: true, rootless: null }];
     case "test_connection": return { entries: 14, root: "/volume1/media", names: ["Movies", "Photos"], accepts_files: true };
@@ -119,6 +124,59 @@ mockIPC((cmd, args) => {
   }
 });
 
+/** A scan's answer, built from the fixture's real paths and sizes. */
+function found(root: string) {
+  const files = listings[`${DEMO}/photos-by-nothing`].entries.slice(0, 3);
+  const [one, two, three] = files;
+  return {
+    root,
+    files: 192,
+    extra_files: 5,
+    reclaimable: 41_943_040,
+    unsure: 1,
+    networked: false,
+    can_trash: true,
+    groups: [
+      {
+        id: "d1",
+        size: one?.size ?? 1_700_000,
+        keep: "holiday-final-2.mp4",
+        kept: { path: "holiday-final-2.mp4", size: one?.size ?? 1_700_000, mtime: "2025-08-14T10:02:00Z" },
+        why: "oldest",
+        sure: true,
+        extras: [
+          { path: "clips/IMG_4471.mov", size: one?.size ?? 1_700_000, mtime: "2026-01-20T19:07:00Z" },
+          { path: "backup/holiday.mov", size: one?.size ?? 1_700_000, mtime: "2026-02-02T09:00:00Z" },
+        ],
+      },
+      {
+        id: "d2",
+        size: two?.size ?? 2_400_000,
+        keep: "receipts/2026-03.pdf",
+        kept: { path: "receipts/2026-03.pdf", size: two?.size ?? 2_400_000, mtime: "2026-03-01T08:00:00Z" },
+        why: "path",
+        sure: false,
+        extras: [
+          { path: "Downloads/receipt (1).pdf", size: two?.size ?? 2_400_000, mtime: "2026-03-11T11:20:00Z" },
+        ],
+      },
+    ],
+    folders: [
+      {
+        id: "f1",
+        keep: "Pictures/Japan 2023",
+        extras: ["Desktop/Japan 2023 copy"],
+        files: 214,
+        bytes: 3_400_000_000,
+        sure: true,
+      },
+    ],
+    linked: [
+      { id: "l1", names: ["clip.mp4", "backup/clip-link.mp4"], size: three?.size ?? 200_000_000 },
+    ],
+  };
+}
+
 const params = new URLSearchParams(location.search);
 const scene = params.get("scene") ?? "home";
 document.documentElement.dataset.theme = params.get("theme") ?? "retro";
@@ -129,12 +187,14 @@ const { useNav } = await import("../nav");
 const { useFolders } = await import("../state/useFolders");
 const { useTransfer } = await import("../state/useTransfer");
 const { ask } = await import("../ui/useDialog");
+const { useDupes } = await import("../state/useDupes");
 
 createApp(App).mount("#app");
 
 const nav = useNav();
 const f = useFolders();
 const t = useTransfer();
+const dz = useDupes();
 const DL = `${DEMO}/messy-downloads`;
 
 /** Open a governed folder straight at its preview. */
@@ -213,6 +273,29 @@ const scenes: Record<string, () => unknown> = {
     }));
   },
   history: () => nav.go("history"),
+  "dupes-start": () => nav.go("dupes"),
+  "dupes-scanning": async () => {
+    nav.go("dupes");
+    await tick();
+    dz.phase.value = "scanning";
+    dz.root.value = `${DEMO}/photos-by-nothing`;
+    dz.progress.value = {
+      looked: 4210,
+      read: 12,
+      recalled: 180,
+      bytes: 14_680_064,
+      path: `${DEMO}/photos-by-nothing/DSC00412.jpg`,
+    };
+  },
+  "dupes-found": async () => {
+    nav.go("dupes");
+    await dz.look(`${DEMO}/photos-by-nothing`);
+  },
+  "dupes-done": async () => {
+    nav.go("dupes");
+    await dz.look(`${DEMO}/photos-by-nothing`);
+    await dz.clear("set-aside");
+  },
   settings: () => nav.go("settings"),
   "drain-connections": async () => { nav.go("drain"); await tab(3); },
   "drain-runs": async () => { nav.go("drain"); await tab(1); },

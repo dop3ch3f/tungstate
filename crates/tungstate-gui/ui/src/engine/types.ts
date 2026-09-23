@@ -139,6 +139,88 @@ export interface Outcome {
   example: { from: string; to: string } | null;
 }
 
+// --- duplicates ----------------------------------------------------------
+
+/** One copy of some content. */
+export interface DupeCopy {
+  path: string;
+  size: number;
+  mtime: string | null;
+}
+
+/** Why one copy was chosen over the others. */
+export type Kept = "pinned" | "settled" | "oldest" | "path";
+
+/** Files with identical content. `id` is stable across a rescan, which is what
+ *  lets a selection survive one. `sure` is false when the group was matched on
+ *  samples: shown, never acted on without confirming. */
+export interface DupeGroup {
+  id: string;
+  size: number;
+  keep: string;
+  /** The kept copy in full, so its date shows beside the others. */
+  kept: DupeCopy;
+  why: Kept;
+  extras: DupeCopy[];
+  sure: boolean;
+}
+
+/** Directories holding the same files, by content and by layout. */
+export interface DupeFolder {
+  id: string;
+  keep: string;
+  extras: string[];
+  files: number;
+  bytes: number;
+  sure: boolean;
+}
+
+/** Two or more names for one file: a hard link, and not a saving. */
+export interface DupeLinked {
+  id: string;
+  names: string[];
+  size: number;
+}
+
+export interface Found {
+  root: string;
+  groups: DupeGroup[];
+  folders: DupeFolder[];
+  linked: DupeLinked[];
+  files: number;
+  extra_files: number;
+  reclaimable: number;
+  unsure: number;
+  /** The bytes are a network away, so the groups were sampled. */
+  networked: boolean;
+  /** Whether the desktop's trash can be offered here. */
+  can_trash: boolean;
+}
+
+export interface ScanProgress {
+  looked: number;
+  read: number;
+  recalled: number;
+  bytes: number;
+  path: string;
+}
+
+export interface Cleared {
+  files: number;
+  bytes: number;
+  plan: number;
+  reversible: boolean;
+  /** Groups the confirmation found were not identical after all. */
+  dropped: number;
+  failed: string[];
+}
+
+/** Which copy to keep, when it is not the one the engine chose. */
+export interface DupeChoice {
+  group: string;
+  keep: string;
+}
+
 // --- history -------------------------------------------------------------
 
 export interface Op {

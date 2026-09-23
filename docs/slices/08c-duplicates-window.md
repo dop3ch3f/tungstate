@@ -101,20 +101,20 @@ Afterwards, the result and, when it can be, `Put it back`.
    promises: one is undoable here, the other is not.
 5. **Files are not operations.** The count on screen is files, never ops.
 
-## Decisions I would like you to confirm
+## Decisions taken (2026-09-23)
 
-1. **A scan of a whole drive.** Pointing at `/` would walk everything,
-   including system directories, and take a long time. I propose refusing
-   above the home directory, and warning past roughly 200,000 files with a
-   Stop always available. The alternative is to allow it and let people wait.
-2. **What "keep the newest" means for a folder copied whole.** A folder has no
-   single date. I propose the newest file inside it, and to say so in the
-   words on the button.
-3. **Whether the window may scan a connection** (the NAS over FTP) in this
-   slice. The engine supports it; the window's folder picker does not, so it
-   means a "Go to…" control like the transfer panes have. I would leave it to
-   a later slice and keep this one about local folders and mounted volumes,
-   which is where the space actually is.
+1. **A scan may be pointed anywhere, including a system folder.** No refusal:
+   somebody who picks `/System` knows they have picked something large. The
+   window says how big the job looks, keeps Stop available throughout, and
+   reports as it goes.
+2. **"Keep the newest" applies to files only.** A folder has no single date
+   and inventing one would be a rule nobody asked for. Folder groups keep the
+   engine's own choice, or whichever copy is picked by hand.
+3. **A connection can be scanned in this slice**, rather than being deferred:
+   deferred is how a feature gets dropped. The window gains a "Go to…" for
+   connections beside the folder picker, the pass samples automatically over a
+   network, and the trash is not offered there, because the desktop's trash is
+   this machine's.
 
 ## What is not in this slice
 
@@ -123,6 +123,8 @@ Afterwards, the result and, when it can be, `Put it back`.
   image pipeline, and reading a thumbnail out of every file is the
   expensive thing this whole design avoids. Worth its own decision later.
 - **Scanning several folders at once.** One root at a time, as the engine has.
+- **The command line scanning a connection.** `dedupe` still takes a local
+  path; the window is where the connection list lives.
 - **Automatic clearing.** Nothing here runs without being asked.
 
 ## Verification

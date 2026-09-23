@@ -10,6 +10,12 @@ import type * as T from "./types";
 const on = <P>(name: string) => (f: (payload: P) => void) =>
   listen<P>(name, (e) => f(e.payload));
 
+/** The only folder pass that reports progress. A drive scan takes minutes,
+ *  and `docs/SEAM.md` had this listed as a gap. */
+export const dupeEvents = {
+  progress: on<T.ScanProgress>("dupes://progress"),
+};
+
 export const transferEvents = {
   queued: on<T.Accepted>("transfer://queued"),
   began: on<T.Began>("transfer://began"),

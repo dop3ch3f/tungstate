@@ -14,7 +14,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use tungstate_backend::Backend;
-use tungstate_core::dupes::Digest;
+use tungstate_core::dupes::{Digest, STOPPED};
 use tungstate_journal::{Journal, Remembered};
 
 /// How much each sample reads. DESIGN §5 asks for the two ends; the interior
@@ -25,6 +25,28 @@ const SAMPLE: u64 = 64 * 1024;
 /// header and a trailer; the interior two catch two files that share both,
 /// which is every re-encode of the same video.
 const AT: [f64; 2] = [0.33, 0.66];
+
+/// Told how far a pass has got. Boxed because the caller decides what to do
+/// with it: the window emits an event, the command line counts.
+type Watcher<'a> = Box<dyn FnMut(&Watch) + Send + 'a>;
+
+/// Asked before every file, so a scan can be abandoned.
+type Asked<'a> = Box<dyn Fn() -> bool + Send + 'a>;
+
+/// How far a pass has got, for whoever is watching it.
+#[derive(Debug, Clone, Default)]
+pub struct Watch {
+    /// Files digested so far, however the answer was arrived at.
+    pub looked: usize,
+    /// Files read from the storage.
+    pub read: usize,
+    /// Files whose digest came from the journal.
+    pub recalled: usize,
+    /// Bytes pulled from the storage.
+    pub bytes: u64,
+    /// The file being handled right now.
+    pub path: String,
+}
 
 /// A [`Digest`] that reads through a backend and remembers what it computed.
 pub struct Cached<'a> {
@@ -39,6 +61,13 @@ pub struct Cached<'a> {
     recorded: usize,
     /// Bytes read from the storage.
     bytes: u64,
+    /// Told how far the pass has got, if anybody is watching. A scan of a
+    /// drive takes minutes, and a window with no progress looks hung.
+    watcher: Option<Watcher<'a>>,
+    /// Asked before every file. `true` ends the pass where it stands, which
+    /// is safe because this only ever reads.
+    stop: Option<Asked<'a>>,
+    looked: usize,
 }
 
 impl<'a> Cached<'a> {
@@ -53,7 +82,43 @@ impl<'a> Cached<'a> {
             reads: 0,
             recorded: 0,
             bytes: 0,
+            watcher: None,
+            stop: None,
+            looked: 0,
         }
+    }
+
+    /// Report progress to `watcher` as the pass goes.
+    #[must_use]
+    pub fn watched_by(mut self, watcher: Watcher<'a>) -> Self {
+        self.watcher = Some(watcher);
+        self
+    }
+
+    /// Stop when `stop` says so. Checked before every file.
+    #[must_use]
+    pub fn stopping_when(mut self, stop: Asked<'a>) -> Self {
+        self.stop = Some(stop);
+        self
+    }
+
+    /// Called at the top of every digest: refuses when asked to stop, and
+    /// tells whoever is watching where the pass has got to.
+    fn note(&mut self, path: &str) -> Result<(), String> {
+        if self.stop.as_ref().is_some_and(|asked| asked()) {
+            return Err(STOPPED.to_string());
+        }
+        self.looked += 1;
+        if let Some(watcher) = self.watcher.as_mut() {
+            watcher(&Watch {
+                looked: self.looked,
+                read: self.reads,
+                recalled: self.hits + self.recorded,
+                bytes: self.bytes,
+                path: path.to_string(),
+            });
+        }
+        Ok(())
     }
 
     /// How many digests came from the journal rather than the disk.
@@ -145,6 +210,7 @@ impl<'a> Cached<'a> {
 
 impl Digest for Cached<'_> {
     fn partial(&mut self, path: &str) -> Result<String, String> {
+        self.note(path)?;
         if let Some(found) = self.recall(path, false)? {
             return Ok(found);
         }
@@ -183,6 +249,7 @@ impl Digest for Cached<'_> {
     }
 
     fn whole(&mut self, path: &str) -> Result<String, String> {
+        self.note(path)?;
         if let Some(found) = self.recall(path, true)? {
             return Ok(found);
         }

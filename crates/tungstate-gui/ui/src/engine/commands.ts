@@ -31,6 +31,19 @@ export const folders = {
   pick: () => invoke<string | null>("pick_folder"),
 };
 
+export const dupes = {
+  /** Walks the whole of `target`, which may be a folder or `connection:folder`.
+   *  Emits `dupes://progress` as it goes; a long one is expected. */
+  find: (target: string) => invoke<T.Found>("find_duplicates", { target }),
+  stop: () => invoke<void>("stop_finding_duplicates"),
+  /** Confirms every group byte for byte before anything moves. */
+  clear: (target: string, only: string[], choices: T.DupeChoice[], extras: string) =>
+    invoke<T.Cleared>("clear_duplicates", { target, only, choices, extras }),
+  /** What the person said should happen to extra copies, if they have said. */
+  action: () => invoke<string | null>("duplicate_action"),
+  rememberAction: (action: string) => invoke<void>("set_duplicate_action", { action }),
+};
+
 export const history = {
   recent: () => invoke<T.Op[]>("recent"),
   ofPath: (path: string) => invoke<T.Op[]>("history", { path }),
