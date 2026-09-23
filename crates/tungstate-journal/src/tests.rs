@@ -1789,6 +1789,7 @@ fn a_digest_is_remembered_and_forgotten_when_the_file_changes() {
     let kept = Remembered {
         partial: Some("ends".to_string()),
         whole: Some("all".to_string()),
+        print: Some("pic1:0f0f0f0f0f0f0f0f:".to_string()),
     };
     journal
         .remember("/folder", "clip.mp4", 900, Some(1_700), &kept)
@@ -1829,7 +1830,7 @@ fn remembering_a_whole_digest_keeps_the_partial_one() {
             Some(1_700),
             &Remembered {
                 partial: Some("ends".to_string()),
-                whole: None,
+                ..Remembered::default()
             },
         )
         .unwrap();
@@ -1840,8 +1841,8 @@ fn remembering_a_whole_digest_keeps_the_partial_one() {
             900,
             Some(1_700),
             &Remembered {
-                partial: None,
                 whole: Some("all".to_string()),
+                ..Remembered::default()
             },
         )
         .unwrap();

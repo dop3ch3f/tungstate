@@ -180,6 +180,17 @@ const MIGRATIONS: &[&str] = &[
          value   TEXT NOT NULL,
          set_at  INTEGER NOT NULL
      );",
+    // v10: what a file looks and sounds like, beside what it hashes to.
+    //
+    // The same row rather than a table of its own, because a fingerprint goes
+    // stale under exactly the condition a digest does: the file changed. One
+    // row per file means one invalidation rule, and the rule is already
+    // written and already tested.
+    //
+    // The value carries the name of the algorithm that produced it, so a later
+    // version of the arithmetic simply fails to match and is recomputed. That
+    // is the migration for a change to the arithmetic, and it costs nothing.
+    "ALTER TABLE hashes ADD COLUMN print TEXT;",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

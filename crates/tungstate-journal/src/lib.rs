@@ -903,12 +903,16 @@ mod tests;
 /// The key is the path; the *check* is size and mtime, because a file edited
 /// in place keeps its name and a stale digest is a wrong answer about
 /// somebody's files rather than a slow one.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Remembered {
     /// Digest of the ends of the file, if one was taken.
     pub partial: Option<String>,
     /// Digest of every byte, if one was taken.
     pub whole: Option<String>,
+    /// What it looks or sounds like, if anything ever looked. Carries the name
+    /// of the algorithm that produced it, so a print from another version of
+    /// the arithmetic is not mistaken for this one's.
+    pub print: Option<String>,
 }
 
 impl Journal {
@@ -926,7 +930,7 @@ impl Journal {
         let conn = self.lock();
         let found = conn
             .query_row(
-                "SELECT partial, whole FROM hashes
+                "SELECT partial, whole, print FROM hashes
                  WHERE root = ?1 AND path = ?2 AND size = ?3
                    AND ((mtime IS NULL AND ?4 IS NULL) OR mtime = ?4)",
                 rusqlite::params![root, path, i64::try_from(size).unwrap_or(i64::MAX), mtime],
@@ -934,6 +938,7 @@ impl Journal {
                     Ok(Remembered {
                         partial: row.get("partial")?,
                         whole: row.get("whole")?,
+                        print: row.get("print")?,
                     })
                 },
             )
@@ -959,13 +964,14 @@ impl Journal {
     ) -> Result<()> {
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO hashes (root, path, size, mtime, partial, whole, seen_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "INSERT INTO hashes (root, path, size, mtime, partial, whole, print, seen_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
              ON CONFLICT (root, path) DO UPDATE SET
                  size = excluded.size,
                  mtime = excluded.mtime,
                  partial = COALESCE(excluded.partial, hashes.partial),
                  whole = COALESCE(excluded.whole, hashes.whole),
+                 print = COALESCE(excluded.print, hashes.print),
                  seen_at = excluded.seen_at",
             rusqlite::params![
                 root,
@@ -974,6 +980,7 @@ impl Journal {
                 mtime,
                 digest.partial,
                 digest.whole,
+                digest.print,
                 now_millis()
             ],
         )

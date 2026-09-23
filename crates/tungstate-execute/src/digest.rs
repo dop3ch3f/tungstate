@@ -242,7 +242,7 @@ impl Digest for Cached<'_> {
             path,
             &Remembered {
                 partial: Some(digest.clone()),
-                whole: None,
+                ..Remembered::default()
             },
         )?;
         Ok(digest)
@@ -265,8 +265,8 @@ impl Digest for Cached<'_> {
             self.keep(
                 path,
                 &Remembered {
-                    partial: None,
                     whole: Some(found.clone()),
+                    ..Remembered::default()
                 },
             )?;
             return Ok(found);
@@ -293,8 +293,8 @@ impl Digest for Cached<'_> {
         self.keep(
             path,
             &Remembered {
-                partial: None,
                 whole: Some(digest.clone()),
+                ..Remembered::default()
             },
         )?;
         Ok(digest)
