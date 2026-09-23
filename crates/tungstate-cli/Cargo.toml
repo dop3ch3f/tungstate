@@ -26,6 +26,7 @@ tungstate-transfer = { path = "../tungstate-transfer" }
 tungstate-core = { path = "../tungstate-core" }
 tungstate-attrs = { path = "../tungstate-attrs" }
 tungstate-execute = { path = "../tungstate-execute" }
+tungstate-watch = { path = "../tungstate-watch" }
 clap = { workspace = true }
 # The one place in the workspace that draws a policy span. Libraries carry
 # spans as data; only the edge knows how to render them (DESIGN.md §7).

@@ -7,6 +7,7 @@ mod explain;
 mod folder;
 mod folders;
 mod plan;
+mod watch;
 
 use std::path::{Path, PathBuf};
 
@@ -147,6 +148,22 @@ enum Command {
         /// Do not stop to ask; sets extra copies aside, which loses nothing.
         #[arg(long)]
         yes: bool,
+    },
+
+    /// Keep governed folders in order while this runs.
+    ///
+    /// Folders set to enforce are tidied on their own; the rest are only
+    /// reported. There is no background service yet, so this holds the
+    /// terminal.
+    Watch {
+        /// Only these folders. Defaults to every governed one.
+        paths: Vec<String>,
+        /// How often to look at everything regardless. Defaults to an hour.
+        #[arg(long, value_name = "DURATION")]
+        sweep: Option<String>,
+        /// Look once and stop, rather than staying open.
+        #[arg(long)]
+        once: bool,
     },
 
     /// Put back what `tungstate apply` did.
@@ -430,6 +447,7 @@ fn main() -> std::process::ExitCode {
                 },
             )
         }
+        Command::Watch { paths, sweep, once } => watch::run(paths, sweep.as_deref(), once),
         Command::Undo { target, last, plan } => apply::undo(target.as_deref(), last, plan),
         Command::Policy { action } => match action {
             PolicyAction::Validate { policy } => explain::validate(policy.as_deref()),

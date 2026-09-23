@@ -1760,3 +1760,87 @@ fn a_second_look_reads_nothing() {
 
     assert!(said.contains("0 opened"), "{said}");
 }
+
+// ---------------------------------------------------------------------------
+// `watch`
+
+/// A governed folder that files by extension, in the given mode.
+fn watched(mode: &str) -> tempfile::TempDir {
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(root.join(".tungstate")).unwrap();
+    std::fs::write(
+        root.join(".tungstate/policy.toml"),
+        format!(
+            "[folder]\nname = \"downloads\"\nmode = \"{mode}\"\n\n\
+             [defaults]\ncooldown = \"0s\"\n\n\
+             [[rule]]\nname = \"by kind\"\npath = \"{{ext}}\"\n\n\
+             [rule.match]\next = [\"jpg\"]\n"
+        ),
+    )
+    .unwrap();
+    std::fs::write(root.join("holiday.jpg"), b"a picture").unwrap();
+    home
+}
+
+#[test]
+fn one_sweep_files_what_arrived_in_an_enforce_folder() {
+    let home = watched("enforce");
+    let root = home.path().join("Downloads");
+    sandboxed(&home)
+        .args(["folder", "add", root.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let output = sandboxed(&home).args(["watch", "--once"]).output().unwrap();
+    let said = String::from_utf8_lossy(&output.stdout);
+
+    assert!(said.contains("filed 1 file(s)"), "{said}");
+    assert!(root.join("jpg/holiday.jpg").exists());
+}
+
+#[test]
+fn one_sweep_only_reports_an_observe_folder() {
+    let home = watched("observe");
+    let root = home.path().join("Downloads");
+    sandboxed(&home)
+        .args(["folder", "add", root.to_str().unwrap()])
+        .output()
+        .unwrap();
+
+    let output = sandboxed(&home).args(["watch", "--once"]).output().unwrap();
+    let said = String::from_utf8_lossy(&output.stdout);
+
+    assert!(said.contains("have arrived"), "{said}");
+    assert!(
+        root.join("holiday.jpg").exists(),
+        "nothing moves unless the folder says enforce"
+    );
+}
+
+#[test]
+fn watching_with_no_governed_folders_says_what_to_do() {
+    let home = sandbox();
+
+    let output = sandboxed(&home).args(["watch", "--once"]).output().unwrap();
+    let said = String::from_utf8_lossy(&output.stderr);
+
+    assert!(!output.status.success());
+    assert!(said.contains("folder add"), "{said}");
+}
+
+#[test]
+fn a_sweep_interval_that_is_not_a_time_is_refused() {
+    let home = watched("enforce");
+    let output = sandboxed(&home)
+        .args(["watch", "--sweep", "sometimes"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(
+        String::from_utf8_lossy(&output.stderr).contains("error:"),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}

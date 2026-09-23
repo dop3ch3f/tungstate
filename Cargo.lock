@@ -5902,6 +5902,7 @@ dependencies = [
  "tungstate-journal",
  "tungstate-secret",
  "tungstate-transfer",
+ "tungstate-watch",
 ]
 
 [[package]]
