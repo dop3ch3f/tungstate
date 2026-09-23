@@ -14,8 +14,10 @@ use std::process::ExitCode;
 
 use tungstate_backend::Backend as _;
 use tungstate_backend::local::LocalBackend;
-use tungstate_core::dupes::{self, Extras, Found, Kept, Wants};
+use tungstate_core::dupes::{self, Dealing, Extras, Found, Kept, Wants};
+use tungstate_core::similar::{self, Band, Resembling};
 use tungstate_execute::digest::Cached;
+use tungstate_execute::eye::Eye;
 use tungstate_journal::Journal;
 
 use crate::folder::{load, locate};
@@ -43,6 +45,8 @@ pub struct Asked {
     pub keep: Vec<String>,
     /// Only group files, never whole folders.
     pub files_only: bool,
+    /// Also look for files that are nearly the same.
+    pub similar: bool,
     /// Emit what was found as JSON and stop.
     pub json: bool,
     /// Do not stop to ask anything.
@@ -74,29 +78,10 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
         Err(error) => return crate::fail(&error),
     };
 
-    // A file already where the rules would put it wins the tie-break, so the
-    // copy that stays is the one the folder's own shape agrees with.
-    let plan = loaded.policy.plan(&snapshot);
-    let moving: BTreeSet<&str> = plan
-        .ops
-        .iter()
-        .filter_map(tungstate_core::Op::source)
-        .collect();
     // On a share, reading a file in full means pulling it across the network,
     // so the pass samples instead and says which groups are unconfirmed.
     let networked = backend.capabilities().networked;
-    let wants = Wants {
-        sampled: networked,
-        pinned: asked.keep.iter().cloned().collect(),
-        settled: snapshot
-            .entries
-            .iter()
-            .filter(|entry| !entry.is_dir)
-            .map(tungstate_core::attrs::Attributes::relative_path)
-            .filter(|path| !moving.contains(path.as_str()))
-            .collect(),
-        files_only: asked.files_only,
-    };
+    let wants = wanted(asked, &loaded.policy, &snapshot, networked);
 
     let mut digest = Cached::new(&backend, &journal, &root);
     let found = match dupes::find(&snapshot, &mut digest, &wants) {
@@ -125,8 +110,18 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
             digest.recorded()
         )
     );
-    if found.is_empty() || !asked.apply {
-        if !found.is_empty() {
+    // The second pass, over what the first one did not already account for.
+    let resembling = if asked.similar {
+        match resemblances(&located.root, networked, &snapshot, &found, &journal) {
+            Ok(resembling) => resembling,
+            Err(code) => return code,
+        }
+    } else {
+        Resembling::default()
+    };
+
+    if (found.is_empty() && resembling.is_empty()) || !asked.apply {
+        if !found.is_empty() || !resembling.is_empty() {
             println!("Nothing has been changed. Add --apply to deal with the extra copies.");
         }
         return ExitCode::SUCCESS;
@@ -138,7 +133,9 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
         Ok(found) => found,
         Err(code) => return code,
     };
-    if found.is_empty() {
+
+    let (dealings, extra_files, reclaimed) = what_to_deal_with(&found, &resembling);
+    if dealings.is_empty() {
         println!("Nothing left to do: the samples matched and the files did not.");
         return ExitCode::SUCCESS;
     }
@@ -151,7 +148,9 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
     };
     carry_out(
         &snapshot,
-        &found,
+        &dealings,
+        extra_files,
+        reclaimed,
         extras,
         &loaded.policy,
         &backend,
@@ -265,18 +264,21 @@ fn decide(asked: &Asked, journal: &Journal) -> Option<Extras> {
 }
 
 /// Build the plan and carry it out.
+#[allow(clippy::too_many_arguments)]
 fn carry_out(
     snapshot: &tungstate_core::Snapshot,
-    found: &Found,
+    dealings: &[Dealing],
+    extra_files: usize,
+    reclaimed: u64,
     extras: Extras,
     policy: &tungstate_core::Policy,
     backend: &LocalBackend,
     journal: &Journal,
     root: &str,
 ) -> ExitCode {
-    let plan = dupes::plan(
+    let plan = dupes::plan_dealings(
         snapshot,
-        found,
+        dealings,
         extras,
         &policy.folder.name,
         policy.folder.mode,
@@ -286,12 +288,12 @@ fn carry_out(
             println!();
             println!(
                 "{} file(s) {}. {} reclaimed.",
-                found.extra_files(),
+                extra_files,
                 match extras {
                     Extras::SetAside => "set aside",
                     Extras::Trash => "sent to the trash",
                 },
-                bytes(found.reclaimable())
+                bytes(reclaimed)
             );
             if extras.reversible() {
                 println!(
@@ -470,4 +472,189 @@ fn bytes(count: u64) -> String {
     } else {
         format!("{size:.1} {}", UNITS[unit])
     }
+}
+
+/// What the pass is being asked for, given the folder's own rules.
+///
+/// A file already where the rules would put it wins the tie-break, so the copy
+/// that stays is the one the folder's own shape agrees with.
+fn wanted(
+    asked: &Asked,
+    policy: &tungstate_core::Policy,
+    snapshot: &tungstate_core::Snapshot,
+    networked: bool,
+) -> Wants {
+    let plan = policy.plan(snapshot);
+    let moving: BTreeSet<&str> = plan
+        .ops
+        .iter()
+        .filter_map(tungstate_core::Op::source)
+        .collect();
+    Wants {
+        sampled: networked,
+        pinned: asked.keep.iter().cloned().collect(),
+        settled: snapshot
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_dir)
+            .map(tungstate_core::attrs::Attributes::relative_path)
+            .filter(|path| !moving.contains(path.as_str()))
+            .collect(),
+        files_only: asked.files_only,
+    }
+}
+
+/// The second pass: what resembles what, printed, and handed back.
+fn resemblances(
+    root: &Path,
+    networked: bool,
+    snapshot: &tungstate_core::Snapshot,
+    found: &Found,
+    journal: &Journal,
+) -> Result<Resembling, ExitCode> {
+    if networked {
+        eprintln!(
+            "error: finding files that are nearly the same means decoding every one of them, and over a connection that means downloading every one of them. Point --similar at a local folder."
+        );
+        return Err(ExitCode::FAILURE);
+    }
+    let mut eye = Eye::new(root, journal);
+    let wants = similar::Wants {
+        // A byte for byte copy is not news here, and offering it in both
+        // halves is how somebody decides about one file twice.
+        skip: found
+            .groups
+            .iter()
+            .flat_map(|group| group.extras.iter().map(|copy| copy.path.clone()))
+            .collect(),
+    };
+    match similar::resemble(snapshot, &mut eye, &wants) {
+        Ok(resembling) => {
+            print!(
+                "{}",
+                resemblance(&resembling, eye.decoded(), eye.recalled())
+            );
+            Ok(resembling)
+        }
+        Err(trouble) => {
+            eprintln!("error: {trouble}");
+            Err(ExitCode::FAILURE)
+        }
+    }
+}
+
+/// Every copy that is about to be dealt with, and what it adds up to.
+///
+/// A resemblance is a suggestion, so the command line acts on the strong half
+/// of it and never on *looks like the same moment*. There is no flag that
+/// changes that: choosing between two photographs of one moment needs somebody
+/// looking at both, which is what the window is for.
+fn what_to_deal_with(found: &Found, resembling: &Resembling) -> (Vec<Dealing>, usize, u64) {
+    let mut dealings = dupes::everything_extra(found);
+    let mut extra_files = found.extra_files();
+    let mut reclaimed = found.reclaimable();
+    for cluster in resembling
+        .clusters
+        .iter()
+        .filter(|it| it.band == Band::Same)
+    {
+        for near in &cluster.others {
+            dealings.push(Dealing {
+                path: near.copy.path.clone(),
+                instead_of: cluster.leader.path.clone(),
+                folder: false,
+            });
+            extra_files += 1;
+            reclaimed += near.copy.size;
+        }
+    }
+    let loose = resembling
+        .clusters
+        .iter()
+        .filter(|it| it.band == Band::Similar)
+        .count();
+    if loose > 0 {
+        println!(
+            "Leaving {loose} group(s) of files that only look alike. The Duplicates window is where those get decided, one at a time."
+        );
+    }
+    (dealings, extra_files, reclaimed)
+}
+
+/// What the second pass found, in the same voice as the first one.
+///
+/// Two sections, never one: *the same picture in a different wrapper* is safe
+/// to act on and *looks like the same moment* usually is not, and a finder
+/// that runs them together is asking somebody to delete half a burst.
+fn resemblance(resembling: &Resembling, decoded: usize, recalled: usize) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::new();
+    let _ = writeln!(out);
+    if resembling.is_empty() {
+        let _ = writeln!(
+            out,
+            "nothing here resembles anything else here ({} looked at)",
+            resembling.looked
+        );
+    }
+
+    for (band, heading) in [
+        (Band::Same, "the same thing, in a different wrapper"),
+        (Band::Similar, "looks like the same moment"),
+    ] {
+        let of_this_band: Vec<&similar::Cluster> = resembling
+            .clusters
+            .iter()
+            .filter(|cluster| cluster.band == band)
+            .collect();
+        if of_this_band.is_empty() {
+            continue;
+        }
+        let _ = writeln!(out, "{heading}");
+        for cluster in of_this_band {
+            let _ = writeln!(
+                out,
+                "  {} ({}, {})",
+                cluster.leader.path,
+                bytes(cluster.leader.size),
+                match cluster.sort {
+                    similar::Sort::Picture => "picture",
+                    similar::Sort::Moving => "video",
+                    similar::Sort::Sound => "sound",
+                }
+            );
+            for near in &cluster.others {
+                let _ = writeln!(
+                    out,
+                    "    {} ({}) — {}% alike",
+                    near.copy.path,
+                    bytes(near.copy.size),
+                    near.alike
+                );
+            }
+        }
+        let _ = writeln!(out);
+    }
+
+    if !resembling.unchecked.is_empty() {
+        let _ = writeln!(
+            out,
+            "{} file(s) could not be looked at:",
+            resembling.unchecked.len()
+        );
+        for one in resembling.unchecked.iter().take(5) {
+            let _ = writeln!(out, "  {}: {}", one.path, one.why);
+        }
+        if resembling.unchecked.len() > 5 {
+            let _ = writeln!(out, "  and {} more", resembling.unchecked.len() - 5);
+        }
+        let _ = writeln!(out);
+    }
+
+    let _ = writeln!(
+        out,
+        "looked at {} file(s): {decoded} opened, {recalled} remembered from last time",
+        resembling.looked
+    );
+    out
 }

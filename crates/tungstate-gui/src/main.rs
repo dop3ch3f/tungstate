@@ -2002,7 +2002,12 @@ fn describe(error: impl std::error::Error) -> String {
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            // Ours at info, everybody else's at warn. A media decoder narrates
+            // every atom of a container it does not like, and a corrupt mp4
+            // would otherwise fill somebody's terminal with a library's
+            // internal monologue. RUST_LOG still overrides all of it.
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "warn,tungstate=info".into()),
         )
         .init();
 

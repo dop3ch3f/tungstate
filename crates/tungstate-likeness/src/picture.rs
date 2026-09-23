@@ -50,7 +50,9 @@ pub fn decode(path: &Path) -> Result<DynamicImage, Trouble> {
     limits.max_alloc = Some(MOST_BYTES);
     reader.limits(limits);
     reader.decode().map_err(|error| match error {
-        image::ImageError::Unsupported(what) => Trouble::Unsupported(what.to_string()),
+        image::ImageError::Unsupported(what) => {
+            Trouble::Unsupported(format!("nothing here can read a {what}"))
+        }
         other => Trouble::Unreadable(other.to_string()),
     })
 }

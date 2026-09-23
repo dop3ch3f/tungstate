@@ -137,6 +137,10 @@ enum Command {
         /// Do not group whole folders, only files.
         #[arg(long = "files-only")]
         files_only: bool,
+        /// Also look for files that are nearly the same: a photo re-exported
+        /// smaller, a video re-encoded, one song at two bitrates.
+        #[arg(long)]
+        similar: bool,
         /// Emit what was found as JSON.
         #[arg(long)]
         json: bool,
@@ -335,7 +339,12 @@ enum LinkAction {
 fn main() -> std::process::ExitCode {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
+            // Ours at info, everybody else's at warn. A media decoder narrates
+            // every atom of a container it does not like, and a corrupt mp4
+            // would otherwise fill somebody's terminal with a library's
+            // internal monologue. RUST_LOG still overrides all of it.
+            tracing_subscriber::EnvFilter::try_from_default_env()
+                .unwrap_or_else(|_| "warn,tungstate=info".into()),
         )
         .init();
     let cli = Cli::parse();
@@ -395,6 +404,7 @@ fn main() -> std::process::ExitCode {
             extras,
             keep,
             files_only,
+            similar,
             json,
             yes,
         } => {
@@ -414,6 +424,7 @@ fn main() -> std::process::ExitCode {
                     extras: chosen,
                     keep,
                     files_only,
+                    similar,
                     json,
                     yes,
                 },

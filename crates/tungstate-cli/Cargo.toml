@@ -40,6 +40,8 @@ tracing-subscriber = { workspace = true }
 rpassword = { workspace = true }
 
 [dev-dependencies]
+# Drawing a picture for the near-duplicate test, so no binary is checked in.
+image = { workspace = true }
 assert_cmd = { workspace = true }
 predicates = { workspace = true }
 insta = { workspace = true }

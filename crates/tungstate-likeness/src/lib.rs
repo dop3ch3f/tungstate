@@ -46,7 +46,11 @@ pub enum Trouble {
     #[error("could not read it: {0}")]
     Unreadable(String),
     /// The format is one nothing here can decode.
-    #[error("nothing here can read a {0}")]
+    ///
+    /// Carries the whole sentence rather than a noun, because what can be said
+    /// differs: the picture side knows the format, the sound side has the
+    /// demuxer's own words, and ffmpeg only knows that it failed.
+    #[error("{0}")]
     Unsupported(String),
     /// A video with no sound, on a machine with no ffmpeg to look at frames.
     #[error("{0}")]

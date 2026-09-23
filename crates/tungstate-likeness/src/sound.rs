@@ -29,6 +29,13 @@ use symphonia::core::meta::MetadataOptions;
 
 use crate::{Print, SOUND, Shot, Trouble};
 
+/// Give up after this many packets, however little sound they held.
+///
+/// A container whose bytes are not what its name claims can hand back an
+/// endless run of empty packets. Two minutes of real sound is a few thousand
+/// packets, so this only ever fires on a file that is lying.
+const MOST_PACKETS: usize = 100_000;
+
 /// Listen to at most this many seconds.
 ///
 /// Two minutes is more than enough to tell one recording from another, and it
@@ -78,27 +85,38 @@ fn listen(path: &Path) -> Result<Vec<u32>, Trouble> {
             FormatOptions::default(),
             MetadataOptions::default(),
         )
-        .map_err(|error| Trouble::Unsupported(error.to_string()))?;
+        .map_err(|error| Trouble::Unsupported(format!("not sound this can read: {error}")))?;
 
     let track = format
         .default_track(TrackType::Audio)
-        .ok_or_else(|| Trouble::Unsupported("file with no sound in it".into()))?;
+        .ok_or_else(|| Trouble::Unsupported("there is no sound in it".into()))?;
     let track_id = track.id;
     let params = match &track.codec_params {
         Some(symphonia::core::codecs::CodecParameters::Audio(params)) => params.clone(),
-        _ => return Err(Trouble::Unsupported("track with no codec".into())),
+        _ => {
+            return Err(Trouble::Unsupported(
+                "its sound is in no known format".into(),
+            ));
+        }
     };
     let mut decoder = symphonia::default::get_codecs()
         .make_audio_decoder(&params, &AudioDecoderOptions::default())
-        .map_err(|error| Trouble::Unsupported(error.to_string()))?;
+        .map_err(|error| {
+            Trouble::Unsupported(format!("nothing here decodes its sound: {error}"))
+        })?;
 
     let config = Configuration::preset_test1();
     let mut printer = Fingerprinter::new(&config);
     let mut started = false;
     let mut heard = 0u64;
     let mut samples = Vec::new();
+    let mut packets = 0;
 
     while let Ok(Some(packet)) = format.next_packet() {
+        packets += 1;
+        if packets > MOST_PACKETS {
+            break;
+        }
         if packet.track_id != track_id {
             continue;
         }
@@ -114,11 +132,11 @@ fn listen(path: &Path) -> Result<Vec<u32>, Trouble> {
         let channels = sound.spec().channels().count() as u32;
         if !started {
             if rate == 0 || channels == 0 {
-                return Err(Trouble::Unsupported("sound with no sample rate".into()));
+                return Err(Trouble::Unsupported("its sound has no sample rate".into()));
             }
-            printer
-                .start(rate, channels)
-                .map_err(|error| Trouble::Unsupported(error.to_string()))?;
+            printer.start(rate, channels).map_err(|error| {
+                Trouble::Unsupported(format!("its sound cannot be read: {error}"))
+            })?;
             started = true;
         }
         sound.copy_to_vec_interleaved(&mut samples);

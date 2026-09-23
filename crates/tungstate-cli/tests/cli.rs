@@ -1693,3 +1693,70 @@ fn compare_shows_every_layout_against_one_folder_and_changes_nothing() {
         .stdout(predicates::str::contains("(the rules you have)"))
         .stdout(predicates::str::contains("nothing would change"));
 }
+
+// ---------------------------------------------------------------------------
+// `dedupe --similar`
+
+/// A picture, and the same picture at a quarter of the size.
+///
+/// Drawn here rather than checked in, so the test carries no binary and the
+/// second picture is provably a rendition of the first rather than a file
+/// somebody once said was one.
+#[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+fn two_sizes_of_one_picture(dir: &std::path::Path) {
+    use std::f32::consts::TAU;
+    let draw = |width: u32, height: u32| {
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(width, height, |x, y| {
+            let across = f64::from(x) / f64::from(width);
+            let down = f64::from(y) / f64::from(height);
+            let value = (across * f64::from(TAU) * 3.0).sin() * (down * f64::from(TAU)).cos();
+            let level = ((value + 1.0) * 127.5).clamp(0.0, 255.0) as u8;
+            image::Rgb([level, 100, 255 - level])
+        }))
+    };
+    draw(800, 600).save(dir.join("IMG_4471.jpg")).unwrap();
+    draw(200, 150).save(dir.join("for the web.jpg")).unwrap();
+}
+
+#[test]
+fn a_re_export_is_found_and_an_unrelated_picture_is_not() {
+    let home = governed();
+    let root = home.path().join("Downloads");
+    two_sizes_of_one_picture(&root);
+
+    let output = sandboxed(&home)
+        .args(["dedupe", root.to_str().unwrap(), "--similar"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&output.stdout);
+
+    assert!(
+        said.contains("the same thing, in a different wrapper"),
+        "{said}"
+    );
+    assert!(said.contains("for the web.jpg"), "{said}");
+    // The folder's other files are named, because they could not be read,
+    // and named is not the same as grouped: nothing joined the one group.
+    assert_eq!(said.matches("% alike").count(), 1, "{said}");
+    assert!(said.contains("could not be looked at"), "{said}");
+    assert!(said.contains("Nothing has been changed"), "{said}");
+}
+
+#[test]
+fn a_second_look_reads_nothing() {
+    let home = governed();
+    let root = home.path().join("Downloads");
+    two_sizes_of_one_picture(&root);
+
+    sandboxed(&home)
+        .args(["dedupe", root.to_str().unwrap(), "--similar"])
+        .output()
+        .unwrap();
+    let output = sandboxed(&home)
+        .args(["dedupe", root.to_str().unwrap(), "--similar"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&output.stdout);
+
+    assert!(said.contains("0 opened"), "{said}");
+}

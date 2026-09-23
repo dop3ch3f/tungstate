@@ -153,7 +153,9 @@ fn run(tool: &str, args: &[&str]) -> Result<Vec<u8>, Trouble> {
         .output()
         .map_err(|error| Trouble::NoDecoder(error.to_string()))?;
     if !out.status.success() {
-        return Err(Trouble::Unsupported(format!("{tool} could not read it")));
+        return Err(Trouble::Unsupported(format!(
+            "{tool} could not read it either"
+        )));
     }
     Ok(out.stdout)
 }
