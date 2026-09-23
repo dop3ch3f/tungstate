@@ -14,7 +14,17 @@ const d = useDupes();
     <p class="dz-what">
       Looking through <span class="path">{{ shortPath(d.root.value ?? "") }}</span>
     </p>
-    <p class="dz-counts num" v-if="d.progress.value">
+    <!-- Which pass, in the window's own words. The second one decodes every
+         picture and every video, so it is slower by an order of magnitude and
+         saying nothing about that looks like a hang. -->
+    <p class="dz-stage" v-if="d.progress.value?.stage === 'alike'">
+      Looking at what things are, not just what they are made of.
+    </p>
+    <p class="dz-counts num" v-if="d.progress.value?.stage === 'alike'">
+      {{ d.progress.value.looked }} file(s) looked at, {{ d.progress.value.read }} opened,
+      {{ d.progress.value.recalled }} remembered from last time.
+    </p>
+    <p class="dz-counts num" v-else-if="d.progress.value">
       {{ d.progress.value.looked }} file(s) checked, {{ d.progress.value.read }} read,
       {{ d.progress.value.recalled }} already known, {{ bytes(d.progress.value.bytes) }} read.
     </p>
@@ -33,6 +43,7 @@ const d = useDupes();
 <style scoped>
 .dz-run { display: flex; flex-direction: column; gap: var(--s3); padding-top: var(--s5); }
 .dz-what { font-size: var(--body); margin: 0; }
+.dz-stage { font-size: var(--small); color: var(--text); margin: 0; }
 .dz-counts { font-size: var(--small); color: var(--text-quiet); margin: 0; }
 .dz-at { color: var(--text-faint); margin: 0; }
 .dz-act { display: flex; align-items: center; gap: var(--s3); margin-top: var(--s4); }

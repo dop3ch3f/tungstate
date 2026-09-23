@@ -7,9 +7,15 @@
 import { computed, ref, shallowRef } from "vue";
 import { dupes, folders } from "../engine/commands";
 import { dupeEvents, type UnlistenFn } from "../engine/events";
-import type { Cleared, DupeChoice, Found, ScanProgress } from "../engine/types";
+import type { Claim, Cleared, DupeKind, DupeRow, Found, ScanProgress } from "../engine/types";
 
 export type Phase = "start" | "scanning" | "found" | "clearing" | "done";
+
+/** Which drawer of the left pane is open. */
+export interface Drawer {
+  claim: Claim;
+  kind: DupeKind | null;
+}
 
 const phase = ref<Phase>("start");
 const root = ref<string | null>(null);
@@ -22,13 +28,22 @@ const stopping = ref(false);
 const action = ref<string | null>(null);
 /** Places scanned before, so a second look is one click. */
 const recent = shallowRef<string[]>([]);
+/** Whether to look for files that merely resemble each other, which costs a
+ *  decode of every picture and video and is therefore asked for rather than
+ *  assumed. */
+const alsoSimilar = ref(true);
 
-/** Which groups are ticked, by id. Everything is ticked when a scan lands,
- *  because that is what somebody clearing space came to do; untick what you
- *  want to keep. */
-const picked = ref<Set<string>>(new Set());
-/** Which copy to keep, where it is not the engine's own choice. */
-const keeping = ref<Record<string, string>>({});
+/** Which copies are ticked, by path.
+ *
+ *  Copies rather than groups: every checkbox on screen is its own copy, and
+ *  keeping two of four is a thing people want. */
+const ticked = ref<Set<string>>(new Set());
+/** Which drawer is open on the left. */
+const drawer = ref<Drawer>({ claim: "identical", kind: null });
+/** Which copy the preview is showing. */
+const highlighted = ref<string | null>(null);
+/** Which groups are open in the middle pane. */
+const opened = ref<Set<string>>(new Set());
 
 let attached = false;
 const unlisten: UnlistenFn[] = [];
@@ -53,6 +68,23 @@ export function detachDupeStream() {
   attached = false;
 }
 
+/** Everything a scan ticks for you: the extra copies of files that are
+ *  provably identical, and nothing that was matched on a resemblance.
+ *
+ *  The asymmetry is the whole point. An identical group has proof, so the work
+ *  is already done and unticking is the exception. A resemblance is a guess,
+ *  and a guess that arrives pre-agreed is how somebody loses a photograph. */
+function ticksFor(answer: Found): Set<string> {
+  const next = new Set<string>();
+  for (const row of answer.rows) {
+    if (row.claim !== "identical") continue;
+    for (const copy of row.copies) {
+      if (!copy.keep) next.add(copy.path);
+    }
+  }
+  return next;
+}
+
 async function look(target: string) {
   root.value = target;
   // The last run's result is not this run's: leaving it on screen would let
@@ -63,15 +95,19 @@ async function look(target: string) {
   problem.value = null;
   progress.value = null;
   stopping.value = false;
+  highlighted.value = null;
+  opened.value = new Set();
   phase.value = "scanning";
   try {
-    const answer = await dupes.find(target);
+    const answer = await dupes.find(target, alsoSimilar.value);
     found.value = answer;
-    picked.value = new Set([
-      ...answer.groups.map((group) => group.id),
-      ...answer.folders.map((group) => group.id),
-    ]);
-    keeping.value = {};
+    ticked.value = ticksFor(answer);
+    drawer.value = { claim: firstClaimWithRows(answer), kind: null };
+    // The first group opens, so the screen arrives showing what a group is
+    // rather than a list of closed drawers.
+    const first = answer.rows.find((row) => row.claim === drawer.value.claim);
+    opened.value = new Set(first ? [first.id] : []);
+    highlighted.value = first?.copies[0]?.path ?? null;
     phase.value = "found";
     void loadRecent();
   } catch (e) {
@@ -82,83 +118,170 @@ async function look(target: string) {
   }
 }
 
+function firstClaimWithRows(answer: Found): Claim {
+  for (const claim of ["identical", "same", "similar"] as Claim[]) {
+    if (answer.rows.some((row) => row.claim === claim)) return claim;
+  }
+  return "identical";
+}
+
 async function stop() {
   stopping.value = true;
   await dupes.stop().catch(() => {});
 }
 
-/** Tick or untick one group. */
-function pick(id: string, on: boolean) {
-  const next = new Set(picked.value);
+/** Tick or untick one copy. */
+function tick(path: string, on: boolean) {
+  const next = new Set(ticked.value);
+  if (on) next.add(path);
+  else next.delete(path);
+  ticked.value = next;
+}
+
+/** Open or close one group in the middle pane. */
+function open(id: string, on: boolean) {
+  const next = new Set(opened.value);
   if (on) next.add(id);
   else next.delete(id);
-  picked.value = next;
+  opened.value = next;
 }
 
-/** Keep this copy in this group, instead of the one the engine chose. */
-function keep(group: string, path: string) {
-  keeping.value = { ...keeping.value, [group]: path };
-}
-
-/** The copy a group would keep, as things stand. */
-function kept(group: { id: string; keep: string }): string {
-  return keeping.value[group.id] ?? group.keep;
-}
-
-/** Keep the newest copy in every ticked group, or the oldest.
- *
- *  Files only: a folder has no single date, and inventing one would be a rule
- *  nobody asked for. */
-function keepBy(which: "newest" | "oldest") {
+/** The rows in the open drawer. */
+const shown = computed<DupeRow[]>(() => {
   const answer = found.value;
-  if (!answer) return;
-  const next = { ...keeping.value };
-  for (const group of answer.groups) {
-    if (!picked.value.has(group.id)) continue;
-    const copies = [group.kept, ...group.extras];
-    const dated = copies.filter((copy) => copy.mtime !== null);
-    if (dated.length < 2) continue;
-    dated.sort((a, b) => String(a.mtime).localeCompare(String(b.mtime)));
-    next[group.id] = which === "newest" ? dated[dated.length - 1].path : dated[0].path;
-  }
-  keeping.value = next;
+  if (!answer) return [];
+  return answer.rows.filter(
+    (row) => row.claim === drawer.value.claim && (!drawer.value.kind || row.kind === drawer.value.kind),
+  );
+});
+
+/** How many copies of a row are ticked. */
+function tickedIn(row: DupeRow): number {
+  return row.copies.filter((copy) => ticked.value.has(copy.path)).length;
 }
 
-/** Files that would be dealt with, given what is ticked and what is kept.
+/** The copy the preview is showing, or the first one worth showing. */
+const showing = computed(() => {
+  const rows = shown.value;
+  const want = highlighted.value;
+  for (const row of rows) {
+    for (const copy of row.copies) {
+      if (copy.path === want) return { row, copy };
+    }
+  }
+  const first = rows[0];
+  return first ? { row: first, copy: first.copies[0] } : null;
+});
+
+/** Set the ticks in the open drawer by a rule.
+ *
+ *  A rule never acts. It moves the checkboxes and leaves the list on screen,
+ *  so the preview still gets the last word. Every one of them keeps a copy by
+ *  construction, and the engine checks again anyway. */
+function keepBy(which: "newest" | "oldest" | "biggest" | "none" | "all") {
+  const next = new Set(ticked.value);
+  for (const row of shown.value) {
+    for (const copy of row.copies) next.delete(copy.path);
+    if (which === "none") continue;
+    if (which === "all") {
+      // Everything but the copy the pass chose, which is the one rule that
+      // cannot empty a group.
+      for (const copy of row.copies) if (!copy.keep) next.add(copy.path);
+      continue;
+    }
+    const keeping = pick(row, which);
+    if (!keeping) continue;
+    for (const copy of row.copies) if (copy.path !== keeping) next.add(copy.path);
+  }
+  ticked.value = next;
+}
+
+/** Which copy a rule would keep, or null when the row cannot answer. */
+function pick(row: DupeRow, which: "newest" | "oldest" | "biggest"): string | null {
+  if (which === "biggest") {
+    let best = row.copies[0];
+    for (const copy of row.copies) if (copy.size > best.size) best = copy;
+    return best?.path ?? null;
+  }
+  // Dates only, and only where there are two of them. A folder has no single
+  // date, and inventing one would be a rule nobody asked for.
+  if (row.folder) return null;
+  const dated = row.copies.filter((copy) => copy.mtime !== null);
+  if (dated.length < 2) return null;
+  dated.sort((a, b) => String(a.mtime).localeCompare(String(b.mtime)));
+  return which === "newest" ? dated[dated.length - 1].path : dated[0].path;
+}
+
+/** Keep whichever copy sits under this directory, in the open drawer. */
+function keepIn(directory: string) {
+  const inside = (path: string) => path === directory || path.startsWith(`${directory}/`);
+  const next = new Set(ticked.value);
+  for (const row of shown.value) {
+    const keeping = row.copies.find((copy) => inside(copy.path));
+    if (!keeping) continue;
+    for (const copy of row.copies) {
+      if (copy.path === keeping.path) next.delete(copy.path);
+      else next.add(copy.path);
+    }
+  }
+  ticked.value = next;
+}
+
+/** Files that would be dealt with, given what is ticked.
  *
  *  A count of files, never of operations: a plan also removes the directories
  *  it empties, and slice 7b shipped "moved 9 file(s)" for five moved files. */
 const chosenFiles = computed(() => {
   const answer = found.value;
   if (!answer) return 0;
-  const files = answer.groups
-    .filter((group) => picked.value.has(group.id))
-    .reduce((count, group) => count + group.extras.length, 0);
-  const folders = answer.folders
-    .filter((group) => picked.value.has(group.id))
-    .reduce((count, group) => count + group.files * group.extras.length, 0);
-  return files + folders;
+  let total = 0;
+  for (const row of answer.rows) {
+    const count = tickedIn(row);
+    total += row.folder ? count * row.files : count;
+  }
+  return total;
 });
 
 const chosenBytes = computed(() => {
   const answer = found.value;
   if (!answer) return 0;
-  const files = answer.groups
-    .filter((group) => picked.value.has(group.id))
-    .reduce((sum, group) => sum + group.size * group.extras.length, 0);
-  const folders = answer.folders
-    .filter((group) => picked.value.has(group.id))
-    .reduce((sum, group) => sum + group.bytes * group.extras.length, 0);
-  return files + folders;
+  let total = 0;
+  for (const row of answer.rows) {
+    for (const copy of row.copies) if (ticked.value.has(copy.path)) total += copy.size;
+  }
+  return total;
 });
 
 /** Whether anything ticked was matched on samples rather than read in full. */
 const anyUnsure = computed(() => {
   const answer = found.value;
   if (!answer) return false;
-  return [...answer.groups, ...answer.folders].some(
-    (group) => picked.value.has(group.id) && !group.sure,
-  );
+  return answer.rows.some((row) => !row.sure && tickedIn(row) > 0);
+});
+
+/** Whether any ticked copy came from a resemblance rather than from proof.
+ *
+ *  The confirm sheet says so out loud, because a guess and an irreversible
+ *  delete is the one combination that can lose somebody a photograph. */
+const anyGuessed = computed(() => {
+  const answer = found.value;
+  if (!answer) return false;
+  return answer.rows.some((row) => row.claim !== "identical" && tickedIn(row) > 0);
+});
+
+/** How much each drawer holds, for the left pane. */
+const tallies = computed(() => {
+  const answer = found.value;
+  const out: Record<string, { rows: number; bytes: number }> = {};
+  if (!answer) return out;
+  for (const row of answer.rows) {
+    for (const key of [row.claim, `${row.claim}:${row.kind}`]) {
+      const at = (out[key] ??= { rows: 0, bytes: 0 });
+      at.rows += 1;
+      at.bytes += row.reclaimable;
+    }
+  }
+  return out;
 });
 
 async function loadRecent() {
@@ -188,12 +311,8 @@ async function clear(extras: string) {
   phase.value = "clearing";
   problem.value = null;
   putBackCount.value = null;
-  const choices: DupeChoice[] = Object.entries(keeping.value).map(([group, path]) => ({
-    group,
-    keep: path,
-  }));
   try {
-    cleared.value = await dupes.clear(target, [...picked.value], choices, extras);
+    cleared.value = await dupes.clear(target, [...ticked.value], alsoSimilar.value, extras);
     phase.value = "done";
   } catch (e) {
     problem.value = String(e);
@@ -232,18 +351,26 @@ export function useDupes() {
     cleared,
     problem,
     stopping,
-    picked,
-    keeping,
+    ticked,
+    drawer,
+    opened,
+    highlighted,
+    shown,
+    showing,
+    tallies,
     action,
+    alsoSimilar,
     chosenFiles,
     chosenBytes,
     anyUnsure,
+    anyGuessed,
     look,
     stop,
-    pick,
-    keep,
-    kept,
+    tick,
+    tickedIn,
+    open,
     keepBy,
+    keepIn,
     clear,
     recent,
     loadRecent,

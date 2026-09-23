@@ -1,18 +1,38 @@
-<!-- What the scan found, and what to do about it.
-     Three promises live on this screen: a saving shown is a saving that is
-     real, nothing moves on the strength of a sample, and every group keeps a
-     copy whichever one you pick. -->
+<!-- What the scan found, in three panes: what kind of thing, which groups,
+     and the file itself.
+
+     Four promises live on this screen. A saving shown is a saving that is
+     real. Nothing moves on the strength of a sample. Every group keeps a copy,
+     whichever one you tick. And a resemblance is never ticked for you. -->
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useDupes } from "../../state/useDupes";
-import { bytes, when } from "../../lib/format";
+import { bytes } from "../../lib/format";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
-import Empty from "../../ui/Empty.vue";
+import DupesDrawers from "./DupesDrawers.vue";
+import DupesList from "./DupesList.vue";
+import DupesPreview from "./DupesPreview.vue";
 
 const d = useDupes();
 const found = computed(() => d.found.value);
+
+/** Whether all three panes fit. Below this the preview folds into a toggle
+ *  rather than squeezing three columns into the window's own minimum. */
+const roomy = ref(true);
+const showPreview = ref(false);
+let watcher: MediaQueryList | null = null;
+const measure = () => {
+  roomy.value = watcher?.matches ?? true;
+};
+
+onMounted(() => {
+  watcher = window.matchMedia("(min-width: 1040px)");
+  watcher.addEventListener("change", measure);
+  measure();
+});
+onUnmounted(() => watcher?.removeEventListener("change", measure));
 
 /** What the button will do, in the words it will say. */
 const doing = computed(() =>
@@ -52,6 +72,16 @@ async function go() {
   if (d.anyUnsure.value) {
     detail.push("Every one is compared byte for byte first; any that differ are left alone.");
   }
+  // Said out loud, every time, because a resemblance is arithmetic on pixels
+  // rather than proof, and a guess plus an irreversible delete is the one
+  // combination that can lose somebody a photograph.
+  if (d.anyGuessed.value) {
+    detail.push(
+      doing.value === "trash"
+        ? "Some of these were matched because they look alike, not because they are the same file. That is a resemblance, and the Trash cannot be undone from here."
+        : "Some of these were matched because they look alike, not because they are the same file.",
+    );
+  }
   const confirmed = await ask({
     title: `${action} ${d.chosenFiles.value} file(s)?`,
     why: "One copy of each stays exactly where it is.",
@@ -67,147 +97,91 @@ async function go() {
 
 <template>
   <div class="dz-found" v-if="found">
-    <p class="dz-sum">
-      <b class="num">{{ bytes(found.reclaimable) }}</b>
-      in {{ found.extra_files }} extra file(s), out of {{ found.files }} looked at.
-    </p>
     <Notice tone="hold" v-if="found.networked">
       This is over a network, so files were matched on samples rather than read
       in full. Anything you clear is compared byte for byte first.
     </Notice>
     <Notice tone="bad" v-if="d.problem.value">{{ d.problem.value }}</Notice>
 
-    <Empty
-      v-if="!found.groups.length && !found.folders.length"
-      art="nothing-found"
-      line="Nothing here is duplicated. Every file is the only copy of it."
-    />
+    <div class="none" v-if="!found.rows.length">
+      <p>
+        Nothing here is a copy of anything else here.
+        {{ found.files }} file(s) looked at.
+      </p>
+      <Button @click="d.again()">Look somewhere else</Button>
+    </div>
 
     <template v-else>
-      <div class="dz-rules">
-        <span class="dz-lbl">In every ticked group, keep</span>
-        <Button @click="d.keepBy('newest')">the newest file</Button>
-        <Button @click="d.keepBy('oldest')">the oldest file</Button>
+      <div class="rules">
+        <span class="rules-lbl">Keep</span>
+        <Button look="link" @click="d.keepBy('newest')">the newest</Button>
+        <Button look="link" @click="d.keepBy('oldest')">the oldest</Button>
+        <Button look="link" @click="d.keepBy('biggest')">the biggest</Button>
+        <span class="rules-gap"></span>
+        <Button look="link" @click="d.keepBy('all')">Tick every extra</Button>
+        <Button look="link" @click="d.keepBy('none')">Tick nothing</Button>
+        <Button
+          v-if="!roomy"
+          look="link"
+          @click="showPreview = !showPreview"
+        >{{ showPreview ? "Hide the file" : "Show the file" }}</Button>
       </div>
 
-      <section class="dz-part" v-if="found.folders.length">
-        <h2>Folders copied whole</h2>
-        <div class="dz-group" v-for="group in found.folders" :key="group.id">
-          <label class="dz-head">
-            <input
-              type="checkbox"
-              :checked="d.picked.value.has(group.id)"
-              @change="d.pick(group.id, ($event.target as HTMLInputElement).checked)"
-            />
-            <span class="dz-name">{{ group.keep }}</span>
-            <span class="dz-meta">
-              {{ group.files }} file(s), {{ bytes(group.bytes) }} each
-            </span>
-            <span class="dz-unsure" v-if="!group.sure">checked before anything moves</span>
-          </label>
-          <p class="path dz-copy" v-for="extra in group.extras" :key="extra">
-            also at {{ extra }}
-          </p>
-        </div>
-      </section>
+      <div class="panes" :class="{ wide: roomy, peek: showPreview && !roomy }">
+        <DupesDrawers class="pane-left" />
+        <DupesList class="pane-mid" />
+        <DupesPreview v-if="roomy || showPreview" class="pane-right" />
+      </div>
 
-      <section class="dz-part" v-if="found.groups.length">
-        <h2>The same file, more than once</h2>
-        <div class="dz-group" v-for="group in found.groups" :key="group.id">
-          <label class="dz-head">
-            <input
-              type="checkbox"
-              :checked="d.picked.value.has(group.id)"
-              @change="d.pick(group.id, ($event.target as HTMLInputElement).checked)"
-            />
-            <span class="dz-name">{{ bytes(group.size) }} each</span>
-            <span class="dz-meta">{{ group.extras.length + 1 }} copies</span>
-            <span class="dz-unsure" v-if="!group.sure">checked before anything moves</span>
-          </label>
-          <!-- Every copy, and clicking one keeps that one instead. The kept
-               copy is never in the list of things to deal with. -->
-          <button
-            v-for="copy in [group.kept, ...group.extras]"
-            :key="copy.path"
-            class="dz-row"
-            :class="{ 'dz-keeps': d.kept(group) === copy.path }"
-            @click="d.keep(group.id, copy.path)"
-          >
-            <span class="dz-tick">{{ d.kept(group) === copy.path ? "keep" : "" }}</span>
-            <span class="path dz-path">{{ copy.path }}</span>
-            <span class="dz-when">{{ copy.mtime ? when(Date.parse(copy.mtime)) : "" }}</span>
-          </button>
-        </div>
-      </section>
-
-      <section class="dz-part" v-if="found.linked.length">
-        <h2>Two names for one file</h2>
-        <p class="dz-note">These are hard links. Dealing with one frees nothing, so they are not offered.</p>
-        <p class="path dz-copy" v-for="linked in found.linked" :key="linked.id">
-          {{ linked.names.join("  =  ") }} ({{ bytes(linked.size) }})
+      <footer class="foot">
+        <p class="foot-sum">
+          <b>{{ bytes(found.reclaimable) }}</b> in
+          {{ found.extra_files }} extra file(s), out of {{ found.files }} looked at.
+          <span v-if="found.unchecked.length" class="foot-note">
+            {{ found.unchecked.length }} could not be looked at.
+          </span>
         </p>
-      </section>
+        <Button
+          look="primary"
+          :disabled="!d.chosenFiles.value"
+          @click="go()"
+        >
+          {{ doing === "trash" ? "Send" : "Set aside" }}
+          {{ d.chosenFiles.value }} file(s)
+        </Button>
+      </footer>
     </template>
-
-    <footer class="dz-foot" v-if="found.groups.length || found.folders.length">
-      <Button look="primary" :disabled="!d.chosenFiles.value" @click="go()">
-        {{ doing === "trash" ? "Send" : "Set aside" }} {{ d.chosenFiles.value }} file(s)
-      </Button>
-      <span class="dz-safe">
-        {{ bytes(d.chosenBytes.value) }} comes back. One copy of each stays where it is.
-      </span>
-    </footer>
   </div>
 </template>
 
 <style scoped>
-.dz-found { display: flex; flex-direction: column; gap: var(--s3); height: 100%; }
-/* Room for the action bar, which floats over the end of the list. */
-.dz-part:last-of-type { padding-bottom: 64px; }
-.dz-sum { font-size: var(--body); color: var(--text-quiet); margin: 0; }
-.dz-sum b { font-size: var(--title); color: var(--text); }
-.dz-rules { display: flex; align-items: center; gap: var(--s2); }
-.dz-lbl { font-size: var(--small); color: var(--text-faint); }
-.dz-part { margin-top: var(--s4); }
-.dz-part h2 { font-size: var(--small); font-weight: 700; margin: 0 0 var(--s2); text-transform: uppercase; letter-spacing: 0.04em; }
-.dz-note { font-size: var(--fine); color: var(--text-faint); margin: 0 0 var(--s2); }
-.dz-group { border-top: var(--bw) solid var(--edge); padding: var(--s2) 0; }
-.dz-head { display: flex; align-items: center; gap: var(--s2); font-size: var(--small); cursor: pointer; }
-.dz-name { font-weight: 600; }
-.dz-meta { color: var(--text-faint); }
-.dz-unsure { margin-left: auto; font-size: var(--fine); color: var(--hold); }
-.dz-copy { color: var(--text-faint); margin: 2px 0 0 22px; }
-.dz-row {
-  display: flex;
-  align-items: baseline;
-  gap: var(--s2);
-  width: 100%;
-  margin: 2px 0 0;
-  padding: 3px var(--s2) 3px 22px;
-  font: inherit;
-  text-align: left;
-  color: var(--text-quiet);
-  background: none;
-  border: none;
-  border-radius: var(--radius);
-  cursor: pointer;
+.dz-found { display: flex; flex-direction: column; gap: var(--s3); flex: 1; min-height: 0; }
+.none { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s3); }
+.none p { font-size: var(--body); color: var(--text-quiet); margin: 0; }
+.rules { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.rules-lbl { font-size: var(--fine); color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.rules-gap { flex: 1; }
+.panes {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: var(--s3);
+  flex: 1;
+  min-height: 0;
+  border-top: var(--bw) solid var(--edge);
+  padding-top: var(--s3);
 }
-.dz-row:hover { background: var(--surface-hover); }
-.dz-keeps { color: var(--text); background: var(--surface-raised); }
-.dz-tick { width: 34px; flex: none; font-size: var(--fine); color: var(--accent); }
-.dz-path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dz-when { margin-left: auto; flex: none; font-size: var(--fine); color: var(--text-faint); }
-.dz-foot {
-  margin-top: auto;
+.wide { grid-template-columns: 190px minmax(280px, 1fr) minmax(260px, 0.85fr); }
+.peek { grid-template-columns: 170px minmax(0, 1fr) minmax(220px, 0.8fr); }
+.pane-left { min-height: 0; }
+.pane-mid { min-height: 0; }
+.pane-right { min-height: 0; }
+.foot {
   display: flex;
   align-items: center;
-  gap: var(--s3);
-  padding: var(--s3) var(--s4);
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  position: sticky;
-  bottom: 0;
+  gap: var(--s4);
+  padding-top: var(--s3);
+  border-top: var(--bw) solid var(--edge);
 }
-.dz-safe { font-size: var(--small); color: var(--text-quiet); }
+.foot-sum { flex: 1; font-size: var(--small); color: var(--text-quiet); margin: 0; }
+.foot-note { color: var(--text-faint); }
 </style>

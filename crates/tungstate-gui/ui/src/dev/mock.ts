@@ -128,51 +128,100 @@ mockIPC((cmd, args) => {
 function found(root: string) {
   const files = listings[`${DEMO}/photos-by-nothing`].entries.slice(0, 3);
   const [one, two, three] = files;
+  const copy = (path: string, size: number, mtime: string, extra: Record<string, unknown> = {}) => ({
+    path,
+    name: path.split("/").pop() ?? path,
+    size,
+    mtime,
+    keep: false,
+    alike: null,
+    thumb: null,
+    ...extra,
+  });
+  const big = one?.size ?? 1_700_000;
+  const mid = two?.size ?? 2_400_000;
   return {
     root,
     files: 192,
-    extra_files: 5,
-    reclaimable: 41_943_040,
+    extra_files: 217 + 2 + 1 + 1 + 1,
+    reclaimable: 3_400_000_000 + big * 2 + mid + 240_000 + 3_900_000,
     unsure: 1,
     networked: false,
     can_trash: true,
-    groups: [
+    looked_alike: true,
+    rows: [
+      {
+        id: "f1",
+        kind: "folders",
+        claim: "identical",
+        folder: true,
+        reclaimable: 3_400_000_000,
+        sure: true,
+        files: 214,
+        copies: [
+          copy("Pictures/Japan 2023", 3_400_000_000, "2023-11-02T09:00:00Z", { keep: true }),
+          copy("Desktop/Japan 2023 copy", 3_400_000_000, "2024-04-18T17:40:00Z"),
+        ],
+      },
       {
         id: "d1",
-        size: one?.size ?? 1_700_000,
-        keep: "holiday-final-2.mp4",
-        kept: { path: "holiday-final-2.mp4", size: one?.size ?? 1_700_000, mtime: "2025-08-14T10:02:00Z" },
-        why: "oldest",
+        kind: "video",
+        claim: "identical",
+        folder: false,
+        reclaimable: big * 2,
         sure: true,
-        extras: [
-          { path: "clips/IMG_4471.mov", size: one?.size ?? 1_700_000, mtime: "2026-01-20T19:07:00Z" },
-          { path: "backup/holiday.mov", size: one?.size ?? 1_700_000, mtime: "2026-02-02T09:00:00Z" },
+        files: 0,
+        copies: [
+          copy("holiday-final-2.mp4", big, "2025-08-14T10:02:00Z", { keep: true }),
+          copy("clips/IMG_4471.mov", big, "2026-01-20T19:07:00Z"),
+          copy("backup/holiday.mov", big, "2026-02-02T09:00:00Z"),
         ],
       },
       {
         id: "d2",
-        size: two?.size ?? 2_400_000,
-        keep: "receipts/2026-03.pdf",
-        kept: { path: "receipts/2026-03.pdf", size: two?.size ?? 2_400_000, mtime: "2026-03-01T08:00:00Z" },
-        why: "path",
+        kind: "documents",
+        claim: "identical",
+        folder: false,
+        reclaimable: mid,
         sure: false,
-        extras: [
-          { path: "Downloads/receipt (1).pdf", size: two?.size ?? 2_400_000, mtime: "2026-03-11T11:20:00Z" },
+        files: 0,
+        copies: [
+          copy("receipts/2026-03.pdf", mid, "2026-03-01T08:00:00Z", { keep: true }),
+          copy("Downloads/receipt (1).pdf", mid, "2026-03-11T11:20:00Z"),
         ],
       },
-    ],
-    folders: [
       {
-        id: "f1",
-        keep: "Pictures/Japan 2023",
-        extras: ["Desktop/Japan 2023 copy"],
-        files: 214,
-        bytes: 3_400_000_000,
+        id: "same-1",
+        kind: "pictures",
+        claim: "same",
+        folder: false,
+        reclaimable: 240_000,
         sure: true,
+        files: 0,
+        copies: [
+          copy("Pictures/IMG_4471.jpg", 4_200_000, "2026-02-01T12:00:00Z", { keep: true }),
+          copy("Desktop/for the web.jpg", 240_000, "2026-02-03T15:30:00Z", { alike: 100 }),
+        ],
+      },
+      {
+        id: "like-1",
+        kind: "pictures",
+        claim: "similar",
+        folder: false,
+        reclaimable: 3_900_000,
+        sure: true,
+        files: 0,
+        copies: [
+          copy("Pictures/DSC00412.jpg", 4_100_000, "2026-02-01T12:00:01Z", { keep: true }),
+          copy("Pictures/DSC00413.jpg", 3_900_000, "2026-02-01T12:00:02Z", { alike: 84 }),
+        ],
       },
     ],
     linked: [
       { id: "l1", names: ["clip.mp4", "backup/clip-link.mp4"], size: three?.size ?? 200_000_000 },
+    ],
+    unchecked: [
+      { path: "Downloads/broken.jpg", why: "could not read it: premature end of image" },
     ],
   };
 }
@@ -285,11 +334,25 @@ const scenes: Record<string, () => unknown> = {
       recalled: 180,
       bytes: 14_680_064,
       path: `${DEMO}/photos-by-nothing/DSC00412.jpg`,
+      stage: "identical",
     };
   },
   "dupes-found": async () => {
     nav.go("dupes");
     await dz.look(`${DEMO}/photos-by-nothing`);
+  },
+  "dupes-alike": async () => {
+    nav.go("dupes");
+    await dz.look(`${DEMO}/photos-by-nothing`);
+    dz.drawer.value = { claim: "similar", kind: null };
+    dz.highlighted.value = null;
+  },
+  "dupes-rewrapped": async () => {
+    nav.go("dupes");
+    await dz.look(`${DEMO}/photos-by-nothing`);
+    dz.drawer.value = { claim: "same", kind: null };
+    dz.opened.value = new Set(["same-1"]);
+    dz.highlighted.value = "Desktop/for the web.jpg";
   },
   "dupes-done": async () => {
     nav.go("dupes");

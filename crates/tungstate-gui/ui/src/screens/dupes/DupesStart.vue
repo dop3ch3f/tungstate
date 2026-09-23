@@ -36,6 +36,16 @@ async function point() {
       in full unless it has to be, and nothing moves until you say so.
     </p>
 
+    <label class="dz-also">
+      <input type="checkbox" v-model="d.alsoSimilar.value" />
+      <span>
+        Also find files that are nearly the same
+        <em>a photo re-exported smaller, a video re-encoded, one song at two
+        bitrates. This opens every picture and video, so it takes longer the
+        first time and is quick after that.</em>
+      </span>
+    </label>
+
     <div class="dz-pick">
       <Button look="primary" @click="point()">Point at a folder…</Button>
       <label class="dz-go">
@@ -73,6 +83,8 @@ async function point() {
 <style scoped>
 .dz-column { display: flex; flex-direction: column; gap: var(--s4); }
 .dz-intro { font-size: var(--body); color: var(--text-quiet); margin: 0; max-width: 70ch; line-height: 1.55; }
+.dz-also { display: flex; align-items: flex-start; gap: var(--s2); font-size: var(--small); max-width: 62ch; }
+.dz-also em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.5; margin-top: 2px; }
 .dz-pick { display: flex; align-items: flex-end; gap: var(--s4); flex-wrap: wrap; }
 .dz-go { display: flex; flex-direction: column; gap: 5px; }
 .dz-lbl { font-size: var(--fine); color: var(--text-faint); }

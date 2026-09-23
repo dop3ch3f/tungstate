@@ -34,13 +34,16 @@ export const folders = {
 export const dupes = {
   /** Walks the whole of `target`, which may be a folder or `connection:folder`.
    *  Emits `dupes://progress` as it goes; a long one is expected. */
-  find: (target: string) => invoke<T.Found>("find_duplicates", { target }),
+  find: (target: string, similar: boolean) =>
+    invoke<T.Found>("find_duplicates", { target, similar }),
   stop: () => invoke<void>("stop_finding_duplicates"),
   /** Where scans have been pointed before, newest first. */
   recent: () => invoke<string[]>("recent_scans"),
-  /** Confirms every group byte for byte before anything moves. */
-  clear: (target: string, only: string[], choices: T.DupeChoice[], extras: string) =>
-    invoke<T.Cleared>("clear_duplicates", { target, only, choices, extras }),
+  /** Takes copies, not groups: every checkbox on screen is its own copy.
+   *  Anything matched on samples is confirmed byte for byte first, and the
+   *  engine refuses a set of ticks that would empty a group. */
+  clear: (target: string, paths: string[], similar: boolean, extras: string) =>
+    invoke<T.Cleared>("clear_duplicates", { target, paths, similar, extras }),
   /** What the person said should happen to extra copies, if they have said. */
   action: () => invoke<string | null>("duplicate_action"),
   rememberAction: (action: string) => invoke<void>("set_duplicate_action", { action }),

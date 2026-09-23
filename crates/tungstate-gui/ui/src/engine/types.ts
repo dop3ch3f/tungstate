@@ -148,31 +148,48 @@ export interface DupeCopy {
   mtime: string | null;
 }
 
-/** Why one copy was chosen over the others. */
-export type Kept = "pinned" | "settled" | "oldest" | "path";
+/** Which drawer of the window a group belongs in. */
+export type DupeKind =
+  | "pictures"
+  | "video"
+  | "sound"
+  | "documents"
+  | "archives"
+  | "applications"
+  | "folders"
+  | "other";
 
-/** Files with identical content. `id` is stable across a rescan, which is what
- *  lets a selection survive one. `sure` is false when the group was matched on
- *  samples: shown, never acted on without confirming. */
-export interface DupeGroup {
-  id: string;
+/** How strong the claim about a group is. `identical` is proof; the other two
+ *  are arithmetic on pixels or on sound, and are suggestions. */
+export type Claim = "identical" | "same" | "similar";
+
+/** One copy, as a row. `keep` marks the one the pass would keep, which is the
+ *  one that starts unticked. `alike` is absent when the match is proof. */
+export interface DupeCopy {
+  path: string;
+  name: string;
   size: number;
-  keep: string;
-  /** The kept copy in full, so its date shows beside the others. */
-  kept: DupeCopy;
-  why: Kept;
-  extras: DupeCopy[];
-  sure: boolean;
+  mtime: string | null;
+  keep: boolean;
+  alike: number | null;
+  /** The name of its small picture, served over the `thumb` scheme. */
+  thumb: string | null;
 }
 
-/** Directories holding the same files, by content and by layout. */
-export interface DupeFolder {
+/** One group of copies, whichever pass found it. `id` is stable across a
+ *  rescan, which is what lets a selection survive one. */
+export interface DupeRow {
   id: string;
-  keep: string;
-  extras: string[];
-  files: number;
-  bytes: number;
+  kind: DupeKind;
+  claim: Claim;
+  folder: boolean;
+  reclaimable: number;
+  /** False when the group was matched on samples: shown, never acted on
+   *  without confirming first. */
   sure: boolean;
+  /** How many files one of the directories holds. Zero for a file group. */
+  files: number;
+  copies: DupeCopy[];
 }
 
 /** Two or more names for one file: a hard link, and not a saving. */
@@ -182,11 +199,17 @@ export interface DupeLinked {
   size: number;
 }
 
+/** A file that could not be looked at, and why. Counted rather than skipped. */
+export interface Unchecked {
+  path: string;
+  why: string;
+}
+
 export interface Found {
   root: string;
-  groups: DupeGroup[];
-  folders: DupeFolder[];
+  rows: DupeRow[];
   linked: DupeLinked[];
+  unchecked: Unchecked[];
   files: number;
   extra_files: number;
   reclaimable: number;
@@ -195,6 +218,8 @@ export interface Found {
   networked: boolean;
   /** Whether the desktop's trash can be offered here. */
   can_trash: boolean;
+  /** Whether resemblances were looked for at all. */
+  looked_alike: boolean;
 }
 
 export interface ScanProgress {
@@ -203,6 +228,8 @@ export interface ScanProgress {
   recalled: number;
   bytes: number;
   path: string;
+  /** Which pass is running: `identical` or `alike`. */
+  stage: string;
 }
 
 export interface Cleared {
@@ -213,12 +240,6 @@ export interface Cleared {
   /** Groups the confirmation found were not identical after all. */
   dropped: number;
   failed: string[];
-}
-
-/** Which copy to keep, when it is not the one the engine chose. */
-export interface DupeChoice {
-  group: string;
-  keep: string;
 }
 
 // --- history -------------------------------------------------------------

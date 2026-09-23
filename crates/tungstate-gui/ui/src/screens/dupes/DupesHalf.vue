@@ -16,7 +16,7 @@ onMounted(() => d.loadAction());
 </script>
 
 <template>
-  <div class="dz">
+  <div class="dz" :class="{ fills: d.phase.value === 'found' }">
     <div class="dz-inner">
       <div class="head">
         <Tile of="dupes" :size="26" /><h1>Duplicates</h1>
@@ -77,6 +77,11 @@ onMounted(() => d.loadAction());
 
 <style scoped>
 .dz { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
+/* A result is three panes and a foot with the action in it. The panes scroll
+   inside themselves; the screen itself must not, or the button that does the
+   thing scrolls off the bottom at the window's own minimum size. */
+.fills { overflow: hidden; }
+.fills .dz-inner { height: 100%; }
 .dz-inner { padding: var(--win-pad); display: flex; flex-direction: column; gap: var(--s4); min-height: 100%; }
 .head { display: flex; align-items: center; gap: var(--s3); }
 .head-out { margin-left: auto; }
