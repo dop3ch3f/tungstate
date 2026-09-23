@@ -18,7 +18,17 @@ onMounted(() => d.loadAction());
 <template>
   <div class="dz">
     <div class="dz-inner">
-      <div class="head"><Tile of="dupes" :size="26" /><h1>Duplicates</h1></div>
+      <div class="head">
+        <Tile of="dupes" :size="26" /><h1>Duplicates</h1>
+        <!-- A way out of a result, which otherwise only a scan or a clearing
+             could leave. -->
+        <Button
+          v-if="d.phase.value === 'found'"
+          look="link"
+          class="head-out"
+          @click="d.again()"
+        >Look somewhere else</Button>
+      </div>
 
       <Notice v-if="d.putBackCount.value !== null">
         Put {{ d.putBackCount.value }} file(s) back where they were.
@@ -69,6 +79,7 @@ onMounted(() => d.loadAction());
 .dz { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .dz-inner { padding: var(--win-pad); display: flex; flex-direction: column; gap: var(--s4); min-height: 100%; }
 .head { display: flex; align-items: center; gap: var(--s3); }
+.head-out { margin-left: auto; }
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .dz-done { display: flex; flex-direction: column; gap: var(--s3); }
 .dz-back { font-size: var(--small); color: var(--text-quiet); margin: 0; }

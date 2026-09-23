@@ -437,6 +437,12 @@ fn find_duplicates(
     })
 }
 
+/// The places scanned before, newest first.
+#[tauri::command]
+fn recent_scans(state: State<'_, App>) -> Result<Vec<String>, String> {
+    dupes::recent(&state.journal)
+}
+
 /// Stop the scan that is running, if one is.
 #[tauri::command]
 fn stop_finding_duplicates(state: State<'_, App>) {
@@ -2041,6 +2047,7 @@ fn main() {
             pick_folder,
             find_duplicates,
             stop_finding_duplicates,
+            recent_scans,
             clear_duplicates,
             duplicate_action,
             set_duplicate_action,

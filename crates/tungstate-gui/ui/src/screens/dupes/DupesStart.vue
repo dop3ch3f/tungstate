@@ -4,6 +4,7 @@
 import { onMounted, ref, shallowRef } from "vue";
 import { useDupes } from "../../state/useDupes";
 import { folders, transfers } from "../../engine/commands";
+import { shortPath } from "../../lib/format";
 import type { Place } from "../../engine/types";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
@@ -14,6 +15,7 @@ const places = shallowRef<Place[]>([]);
 const chosen = ref("");
 
 onMounted(async () => {
+  void d.loadRecent();
   try {
     places.value = await transfers.places();
   } catch {
@@ -47,8 +49,21 @@ async function point() {
       </label>
     </div>
 
+    <section class="dz-again" v-if="d.recent.value.length">
+      <h2>Looked at before</h2>
+      <button
+        v-for="place in d.recent.value"
+        :key="place"
+        class="dz-recent"
+        @click="d.look(place)"
+      >
+        <span class="path">{{ shortPath(place) }}</span>
+      </button>
+    </section>
+
     <Notice tone="bad" v-if="d.problem.value">{{ d.problem.value }}</Notice>
     <Empty
+      v-if="!d.recent.value.length"
       art="no-folders"
       line="A whole drive is allowed and will take a while. Downloads and Movies are where the copies usually are."
     />
@@ -61,4 +76,19 @@ async function point() {
 .dz-pick { display: flex; align-items: flex-end; gap: var(--s4); flex-wrap: wrap; }
 .dz-go { display: flex; flex-direction: column; gap: 5px; }
 .dz-lbl { font-size: var(--fine); color: var(--text-faint); }
+.dz-again h2 { font-size: var(--small); font-weight: 700; margin: 0 0 var(--s2); text-transform: uppercase; letter-spacing: 0.04em; }
+.dz-recent {
+  display: block;
+  width: 100%;
+  margin: 0 0 2px;
+  padding: 5px var(--s2);
+  font: inherit;
+  text-align: left;
+  color: var(--text-quiet);
+  background: none;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.dz-recent:hover { color: var(--text); background: var(--surface-hover); }
 </style>

@@ -36,6 +36,8 @@ export const dupes = {
    *  Emits `dupes://progress` as it goes; a long one is expected. */
   find: (target: string) => invoke<T.Found>("find_duplicates", { target }),
   stop: () => invoke<void>("stop_finding_duplicates"),
+  /** Where scans have been pointed before, newest first. */
+  recent: () => invoke<string[]>("recent_scans"),
   /** Confirms every group byte for byte before anything moves. */
   clear: (target: string, only: string[], choices: T.DupeChoice[], extras: string) =>
     invoke<T.Cleared>("clear_duplicates", { target, only, choices, extras }),

@@ -25,6 +25,37 @@ use tungstate_journal::Journal;
 /// line so the question is asked once for the whole product.
 pub const ACTION_SETTING: &str = "dedupe.extras";
 
+/// Where the last few scanned places are kept.
+pub const RECENT_SETTING: &str = "dupes.recent";
+
+/// How many are worth offering. More than this is a list to read rather than
+/// a shortcut to click.
+const RECENT_KEPT: usize = 6;
+
+/// The places scanned before, newest first.
+///
+/// # Errors
+/// [`tungstate_journal::JournalError`] as a sentence, if the row cannot be read.
+pub fn recent(journal: &Journal) -> Result<Vec<String>, String> {
+    let stored = journal
+        .setting(RECENT_SETTING)
+        .map_err(|error| error.to_string())?;
+    Ok(stored
+        .and_then(|text| serde_json::from_str::<Vec<String>>(&text).ok())
+        .unwrap_or_default())
+}
+
+/// Remember a place, newest first and without repeats.
+fn remember(journal: &Journal, target: &str) {
+    let mut places = recent(journal).unwrap_or_default();
+    places.retain(|place| place != target);
+    places.insert(0, target.to_string());
+    places.truncate(RECENT_KEPT);
+    if let Ok(text) = serde_json::to_string(&places) {
+        let _ = journal.remember_setting(RECENT_SETTING, &text);
+    }
+}
+
 /// How far a scan has got.
 #[derive(Debug, Clone, Serialize)]
 pub struct ScanProgress {
@@ -185,6 +216,7 @@ pub fn scan(
         dupes::find(&snapshot, &mut digest, &wants).map_err(describe)?
     };
 
+    remember(journal, &place.root);
     Ok(FoundView {
         root: place.root,
         files,

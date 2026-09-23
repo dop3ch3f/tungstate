@@ -20,6 +20,8 @@ const problem = ref<string | null>(null);
 const stopping = ref(false);
 /** What happens to extra copies, once the person has said. */
 const action = ref<string | null>(null);
+/** Places scanned before, so a second look is one click. */
+const recent = shallowRef<string[]>([]);
 
 /** Which groups are ticked, by id. Everything is ticked when a scan lands,
  *  because that is what somebody clearing space came to do; untick what you
@@ -53,6 +55,9 @@ export function detachDupeStream() {
 
 async function look(target: string) {
   root.value = target;
+  // The last run's result is not this run's: leaving it on screen would let
+  // "Put 2 files back" sit above a fresh scan that put nothing anywhere.
+  putBackCount.value = null;
   found.value = null;
   cleared.value = null;
   problem.value = null;
@@ -68,6 +73,7 @@ async function look(target: string) {
     ]);
     keeping.value = {};
     phase.value = "found";
+    void loadRecent();
   } catch (e) {
     // "stopped" is an answer, not a failure: it is what the Stop button does.
     const said = String(e);
@@ -155,6 +161,14 @@ const anyUnsure = computed(() => {
   );
 });
 
+async function loadRecent() {
+  try {
+    recent.value = await dupes.recent();
+  } catch {
+    recent.value = [];
+  }
+}
+
 async function loadAction() {
   try {
     action.value = await dupes.action();
@@ -173,6 +187,7 @@ async function clear(extras: string) {
   if (!target) return;
   phase.value = "clearing";
   problem.value = null;
+  putBackCount.value = null;
   const choices: DupeChoice[] = Object.entries(keeping.value).map(([group, path]) => ({
     group,
     keep: path,
@@ -230,6 +245,8 @@ export function useDupes() {
     kept,
     keepBy,
     clear,
+    recent,
+    loadRecent,
     loadAction,
     chooseAction,
     putBack,
