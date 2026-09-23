@@ -262,6 +262,12 @@ any copy the samples got wrong, and say how many. A folder group is its files,
 so confirming one is confirming each pair. Past a gigabyte of confirming over
 a network it asks first, and `--yes` skips the question.
 
+The Linux half of that `statfs` call is compiled out on a Mac, so the first
+version of it went to CI unchecked and came back with two lint errors.
+`rustup target add x86_64-unknown-linux-gnu` and `cargo clippy --target
+x86_64-unknown-linux-gnu` compile the other platform's branch here, which is
+worth doing whenever a `cfg` is involved.
+
 The safety property is unchanged and now enforced in two places: **nothing is
 moved on the strength of a sample.** `a_group_the_samples_got_wrong_is_dropped_entirely`
 is the test that says so.

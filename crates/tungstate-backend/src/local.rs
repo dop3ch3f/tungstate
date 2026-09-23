@@ -360,15 +360,18 @@ fn on_a_network_volume(root: &std::path::Path) -> bool {
     )
 }
 
+/// The magic numbers `statfs(2)` documents for storage on another machine:
+/// NFS, the two SMB versions, and FUSE, which is how sshfs and davfs appear.
+#[cfg(target_os = "linux")]
+const REMOTE_FILESYSTEMS: [rustix::fs::FsWord; 5] =
+    [0x6969, 0xFF53_4D42, 0xFE53_4D42, 0x0065_7355, 0x6553_5546];
+
 #[cfg(target_os = "linux")]
 fn on_a_network_volume(root: &std::path::Path) -> bool {
     let Some(info) = statfs_of(root) else {
         return false;
     };
-    // The magic numbers `statfs(2)` documents: NFS, the two SMB versions, and
-    // FUSE, which is how sshfs and davfs both appear.
-    const REMOTE: [i64; 5] = [0x6969, 0xFF53_4D42, 0xFE53_4D42, 0x0065_7355, 0x6553_5546];
-    REMOTE.contains(&(info.f_type as i64))
+    REMOTE_FILESYSTEMS.contains(&info.f_type)
 }
 
 #[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
