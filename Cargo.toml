@@ -54,6 +54,14 @@ infer = "0.19"
 # platform rather than whatever the host happens to have installed.
 jiff = { version = "0.2", features = ["serde"] }
 kamadak-exif = "0.6"
+# Decoding pictures, so two renditions of one photo can be recognised as one
+# photo. Default features minus the formats nothing here will meet.
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "tiff", "bmp", "ico"] }
+# Demuxing and decoding sound in pure Rust, including the audio track of an
+# mp4, which is the cheapest honest fingerprint of a re-encoded video.
+symphonia = { version = "0.6", features = ["aac", "alac", "isomp4", "mp3", "mkv", "flac", "ogg", "vorbis", "wav", "adpcm", "pcm"] }
+# A pure Rust port of chromaprint, the fingerprint every music tool uses.
+rusty-chromaprint = "0.3"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

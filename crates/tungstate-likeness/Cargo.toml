@@ -1,0 +1,22 @@
+[package]
+name = "tungstate-likeness"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# What a file looks and sounds like, as numbers that survive re-encoding.
+# The decoders live here and nowhere else: tungstate-core stays pure, and
+# nothing that only moves files pays for an image or audio decoder.
+[dependencies]
+thiserror = { workspace = true }
+image = { workspace = true }
+symphonia = { workspace = true }
+rusty-chromaprint = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true
