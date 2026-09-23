@@ -77,9 +77,21 @@ Grouped by the question being asked rather than by call name.
 `learn_folder`, `compare_folder`, `pick_folder`.
 
 **Duplicates** — `find_duplicates` (any folder or `connection:folder`, emits
-`dupes://progress`), `stop_finding_duplicates`, `clear_duplicates`,
-`recent_scans`, `duplicate_action`, `set_duplicate_action`. The scan needs no
-governed folder: finding duplicates has nothing to do with rules.
+`dupes://progress`; `similar` also looks for files that are nearly the same,
+which is local-only), `stop_finding_duplicates`, `clear_duplicates`,
+`undo_duplicates`, `recent_scans`, `duplicate_action`, `set_duplicate_action`.
+The scan needs no governed folder: finding duplicates has nothing to do with
+rules. That is also why the undo is here rather than shared with the folder
+half, whose `put_back` walks up to a policy file and refuses without one.
+
+`clear_duplicates` takes **copies, not groups**, because every checkbox on the
+screen is its own copy. It refuses any set of them that would leave a group
+with nothing, so *every group keeps one copy* is enforced by the engine rather
+than arranged by the window (slice 8d).
+
+Small pictures do not travel through a command at all: they are served over a
+`thumb` URI scheme from the app's cache directory, because fifty photographs as
+base64 is most of a megabyte of JSON per redraw.
 
 **History and search** — `recent`, `history`, `whereis`, `quarantined`.
 `history` and `whereis` accept a path spelled any way a person might type it
