@@ -61,6 +61,7 @@ pub fn print_of(full: &DynamicImage) -> Print {
     Print {
         algo: PICTURE,
         signature: gradient(&grey, 8).first().copied().unwrap_or_default(),
+        weight: u64::from(grey.width()) * u64::from(grey.height()),
         detail: gradient(&grey, 16),
     }
 }
@@ -94,15 +95,14 @@ fn gradient(grey: &GrayImage, edge: u32) -> Vec<u64> {
 }
 
 /// How alike two pictures are, as a percentage of the detail bits that agree.
-pub fn alike(one: &Print, other: &Print) -> Option<u8> {
-    if one.detail.len() != other.detail.len() || one.detail.is_empty() {
+pub fn alike(one: &[u64], other: &[u64]) -> Option<u8> {
+    if one.len() != other.len() || one.is_empty() {
         return None;
     }
-    let bits = one.detail.len() * 64;
+    let bits = one.len() * 64;
     let differ: u32 = one
-        .detail
         .iter()
-        .zip(&other.detail)
+        .zip(other)
         .map(|(a, b)| (a ^ b).count_ones())
         .sum();
     // Half the bits differing is what two unrelated pictures score, so the

@@ -14,9 +14,13 @@
 //! half-applied plan buys nothing and risks acting on a stale view.
 
 pub mod digest;
+pub mod eye;
 mod recover;
+pub mod thumbs;
 mod undo;
 
+#[cfg(test)]
+mod eye_tests;
 #[cfg(test)]
 mod tests;
 

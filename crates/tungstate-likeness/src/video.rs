@@ -70,12 +70,20 @@ pub fn still(path: &Path) -> Result<DynamicImage, Trouble> {
 fn from_frames(path: &Path) -> Result<Print, Trouble> {
     let length = length(path)?;
     let mut detail = Vec::with_capacity(AT.len());
+    let mut first = 0;
     for fraction in AT {
         let frame = frame_at(path, Some(length * fraction))?;
-        detail.push(picture::print_of(&frame).signature);
+        let print = picture::print_of(&frame);
+        if first == 0 {
+            first = print.weight;
+        }
+        detail.push(print.signature);
     }
     Ok(Print {
         algo: MOVING_FRAMES,
+        // A frame's worth of pixels times the frames looked at, so a 4K clip
+        // leads a group its 720p re-encode is in.
+        weight: first * AT.len() as u64,
         // The middle of a video is the least likely part of it to be a title
         // card, which makes it the most useful thing to index.
         signature: detail[AT.len() / 2],

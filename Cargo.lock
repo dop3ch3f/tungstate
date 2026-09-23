@@ -5825,6 +5825,7 @@ name = "tungstate-execute"
 version = "0.1.0-alpha.2"
 dependencies = [
  "blake3",
+ "image",
  "jiff",
  "proptest",
  "tempfile",
@@ -5835,6 +5836,7 @@ dependencies = [
  "tungstate-backend",
  "tungstate-core",
  "tungstate-journal",
+ "tungstate-likeness",
 ]
 
 [[package]]

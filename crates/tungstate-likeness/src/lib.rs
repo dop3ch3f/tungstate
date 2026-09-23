@@ -66,6 +66,12 @@ pub struct Print {
     pub algo: &'static str,
     /// The 64 bits a tree indexes.
     pub signature: u64,
+    /// How much of the thing there is: pixels for a picture, fingerprint
+    /// items for sound. Not part of the comparison. It decides which copy
+    /// leads a group, because the copy with the most in it is the one worth
+    /// keeping, and it is stored with the print so that a second scan can
+    /// answer that without opening the file again.
+    pub weight: u64,
     /// What decides a pair the signature brought together.
     pub detail: Vec<u64>,
 }
@@ -88,7 +94,10 @@ impl Print {
     #[must_use]
     pub fn encode(&self) -> String {
         use std::fmt::Write as _;
-        let mut out = format!("{}:{:016x}:", self.algo, self.signature);
+        let mut out = format!(
+            "{}:{:016x}:{:016x}:",
+            self.algo, self.signature, self.weight
+        );
         for word in &self.detail {
             let _ = write!(out, "{word:016x}");
         }
@@ -102,8 +111,10 @@ impl Print {
     #[must_use]
     pub fn decode(stored: &str, algo: &'static str) -> Option<Self> {
         let rest = stored.strip_prefix(algo)?.strip_prefix(':')?;
-        let (signature, detail) = rest.split_once(':')?;
+        let (signature, rest) = rest.split_once(':')?;
+        let (weight, detail) = rest.split_once(':')?;
         let signature = u64::from_str_radix(signature, 16).ok()?;
+        let weight = u64::from_str_radix(weight, 16).ok()?;
         if !detail.len().is_multiple_of(16) {
             return None;
         }
@@ -115,6 +126,7 @@ impl Print {
         Some(Self {
             algo,
             signature,
+            weight,
             detail,
         })
     }
@@ -138,7 +150,18 @@ pub fn alike(one: &Print, other: &Print) -> Option<u8> {
     if one.algo != other.algo {
         return None;
     }
-    match one.algo {
+    alike_parts(one.algo, &one.detail, &other.detail)
+}
+
+/// [`alike`], for a caller holding the pieces rather than a [`Print`].
+///
+/// This exists so the pass in `tungstate-core` can compare its own plain data
+/// without building a `Print` first. Comparison happens once per candidate
+/// pair, and a clone of a fingerprint per pair would be the most expensive
+/// thing in the whole search.
+#[must_use]
+pub fn alike_parts(algo: &str, one: &[u64], other: &[u64]) -> Option<u8> {
+    match algo {
         PICTURE | MOVING_FRAMES => picture::alike(one, other),
         SOUND | MOVING_SOUND => sound::alike(one, other),
         _ => None,

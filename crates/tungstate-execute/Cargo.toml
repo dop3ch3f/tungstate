@@ -17,6 +17,7 @@ trash = { workspace = true }
 tungstate-core = { path = "../tungstate-core" }
 tungstate-backend = { path = "../tungstate-backend" }
 tungstate-journal = { path = "../tungstate-journal" }
+tungstate-likeness = { path = "../tungstate-likeness" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 jiff = { workspace = true }
@@ -24,6 +25,8 @@ jiff = { workspace = true }
 [dev-dependencies]
 tempfile = { workspace = true }
 tungstate-attrs = { path = "../tungstate-attrs" }
+# Drawing a picture to look at, in the only place that needs one.
+image = { workspace = true }
 proptest = { workspace = true }
 
 [lints]

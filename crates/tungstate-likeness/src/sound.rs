@@ -55,6 +55,10 @@ pub fn print_of(path: &Path, algo: &'static str) -> Result<Print, Trouble> {
     Ok(Print {
         algo,
         signature: summarise(&raw),
+        // How long it is, near enough: chromaprint emits one item per short
+        // slice of sound, so the count stands in for the duration without
+        // needing the container to have been honest about it.
+        weight: raw.len() as u64,
         detail: pack(&raw),
     })
 }
@@ -177,8 +181,8 @@ fn summarise(raw: &[u32]) -> u64 {
 /// A four second jingle matching inside two different hour-long videos is a
 /// perfect score over nothing, so the score is weighted by the share of the
 /// shorter fingerprint the match accounts for.
-pub fn alike(one: &Print, other: &Print) -> Option<u8> {
-    let (first, second) = (unpack(&one.detail), unpack(&other.detail));
+pub fn alike(one: &[u64], other: &[u64]) -> Option<u8> {
+    let (first, second) = (unpack(one), unpack(other));
     let shorter = first.len().min(second.len());
     if shorter < 16 {
         return None;

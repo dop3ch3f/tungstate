@@ -144,6 +144,7 @@ fn a_print_survives_being_written_down() {
     let print = Print {
         algo: PICTURE,
         signature: 0x0123_4567_89ab_cdef,
+        weight: 12_000_000,
         detail: vec![1, u64::MAX, 0],
     };
     let written = print.encode();
@@ -156,6 +157,7 @@ fn a_print_from_another_algorithm_is_never_read_back() {
     let written = Print {
         algo: SOUND,
         signature: 7,
+        weight: 900,
         detail: vec![9],
     }
     .encode();
@@ -168,11 +170,13 @@ fn prints_of_different_kinds_are_never_compared() {
     let one = Print {
         algo: PICTURE,
         signature: 0,
+        weight: 1,
         detail: vec![0, 0, 0, 0],
     };
     let other = Print {
         algo: SOUND,
         signature: 0,
+        weight: 1,
         detail: vec![0, 0, 0, 0],
     };
 
