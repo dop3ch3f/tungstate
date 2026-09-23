@@ -212,6 +212,27 @@ nothing, rather than trusting the window to have counted. The property that
 every group keeps one copy moves from being something the UI arranges into
 something the engine will not let the UI get wrong.
 
+### Choosing without ticking four hundred boxes
+
+Selecting by hand is the point of the preview, and it is not how anybody deals
+with three thousand files. So the same list carries rules, and every rule is
+just a way of setting the ticks that you can then correct one by one:
+
+- keep the newest copy in every group, or the oldest;
+- keep the biggest copy, which for a resized photo or a re-encoded video is the
+  one worth keeping;
+- keep the copy that sits in a folder you name, for "my library is the real
+  one and the rest are strays";
+- tick everything, or nothing.
+
+A rule never acts. It moves the checkboxes and leaves the list on screen, so
+the preview still gets the last word, and the foot still shows what is about to
+happen before the button is pressed.
+
+The one rule that stays automatic is the safety one: **no rule may empty a
+group.** Each of them keeps a copy by construction, and the engine checks again
+anyway.
+
 ## What the window must never do
 
 1. **Never tick a resemblance for you.** The exact pass ticks everything
