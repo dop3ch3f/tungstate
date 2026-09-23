@@ -27,6 +27,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 // `ends` is the shared reading of a composite location string. It lives in the
 // journal crate because that crate owns `Endpoint` and `Connection`, and
 // because the command line was already using every line of it.
+use tungstate_execute::thumbs::Thumbs;
 use tungstate_journal::{
     ConflictAction, Connection, ConnectionSettings, Endpoint, Journal, JournalError, Link, Locator,
     NewConnection, NewLink, Op, OpStatus, Order, Scheme, SourcePolicy, VerifyLevel, ends,
@@ -50,6 +51,11 @@ struct App {
     /// exists to reach it. Shared rather than moved into the worker, which is
     /// the whole of what lets a transfer be added to one already in flight.
     queue: RunQueue<Link>,
+    /// Where small pictures of what a scan found are kept.
+    ///
+    /// `None` when the cache directory could not be made, which costs pictures
+    /// and nothing else: the scan still runs and the rows still list.
+    thumbs: Option<Thumbs>,
     /// A ceiling on how many files move at once, when one has been asked for.
     ///
     /// Raises the number the governor climbs towards; it does not skip the
@@ -173,6 +179,52 @@ fn open_journal() -> tungstate_journal::Result<Journal> {
         Some(path) => Journal::open(Path::new(&path)),
         None => Journal::open_default(),
     }
+}
+
+/// Where small pictures live between scans.
+///
+/// The operating system's own cache directory, so it is somewhere a person
+/// already understands and somewhere the system may clear without asking.
+/// `TUNGSTATE_JOURNAL` moves it too, for the same reason it moves the journal:
+/// walking through the window by hand should leave nothing behind.
+fn cache_dir() -> Option<PathBuf> {
+    if let Some(path) = std::env::var_os("TUNGSTATE_JOURNAL") {
+        return Path::new(&path).parent().map(Path::to_path_buf);
+    }
+    directories::ProjectDirs::from("dev", "tungstate", "tungstate")
+        .map(|dirs| dirs.cache_dir().to_path_buf())
+}
+
+/// One small picture, by the name a scan gave it.
+fn serve_picture(thumbs: Option<&Thumbs>, path: &str) -> tauri::http::Response<Vec<u8>> {
+    let name = path.trim_start_matches('/');
+    // One path component and nothing else. A name with a slash or a dot-dot in
+    // it is not a name this wrote, and serving it would let the window read any
+    // file it can spell.
+    let safe = !name.is_empty() && !name.contains('/') && !name.contains("..");
+    let bytes = thumbs
+        .filter(|_| safe)
+        .and_then(|thumbs| std::fs::read(thumbs.at_name(name)).ok());
+    match bytes {
+        Some(bytes) => tauri::http::Response::builder()
+            .header("Content-Type", "image/jpeg")
+            .header("Cache-Control", "no-cache")
+            .body(bytes)
+            .unwrap_or_else(|_| empty_picture()),
+        None => empty_picture(),
+    }
+}
+
+/// What the picture scheme answers with when there is no picture.
+///
+/// An empty body with a plain status rather than an error page: the window
+/// asked for a thumbnail, and "there isn't one" is a normal answer that the
+/// row already knows how to draw around.
+fn empty_picture() -> tauri::http::Response<Vec<u8>> {
+    tauri::http::Response::builder()
+        .status(404)
+        .body(Vec::new())
+        .unwrap_or_default()
 }
 
 /// Where passwords are kept. One store for the life of the window.
@@ -426,15 +478,24 @@ fn tidy_folder(root: String, state: State<'_, App>) -> Result<govern::TidyDone, 
 #[tauri::command(async)]
 fn find_duplicates(
     target: String,
+    similar: bool,
     app: AppHandle,
     state: State<'_, App>,
 ) -> Result<dupes::FoundView, String> {
     let reporter = app.clone();
-    dupes::scan(&target, &state.journal, &state.scan, move |progress| {
+    let mut watcher = move |progress: &dupes::ScanProgress| {
         // Dropped rather than raised: a window that cannot hear progress is
         // not a reason to abandon a scan that is working.
         let _ = reporter.emit("dupes://progress", progress);
-    })
+    };
+    dupes::scan(
+        &target,
+        similar,
+        &state.journal,
+        &state.scan,
+        state.thumbs.as_ref(),
+        &mut watcher,
+    )
 }
 
 /// The places scanned before, newest first.
@@ -449,16 +510,16 @@ fn stop_finding_duplicates(state: State<'_, App>) {
     state.scan.stop();
 }
 
-/// Deal with the groups the person picked.
+/// Deal with the copies the person ticked.
 ///
-/// `only` names the groups by id and `choices` name any copy kept against the
-/// engine's own choice. Every group is confirmed byte for byte first: samples
-/// are enough to show a group and never enough to move a file.
+/// `paths` are copies, not groups: every checkbox on screen is its own copy.
+/// Anything matched on samples is confirmed byte for byte first, and the
+/// engine refuses ticks that would leave a group with nothing.
 #[tauri::command(async)]
 fn clear_duplicates(
     target: String,
-    only: Vec<String>,
-    choices: Vec<dupes::Choice>,
+    paths: Vec<String>,
+    similar: bool,
     extras: String,
     state: State<'_, App>,
 ) -> Result<dupes::ClearedView, String> {
@@ -469,8 +530,8 @@ fn clear_duplicates(
     };
     dupes::clear(
         &target,
-        &only,
-        &choices,
+        &paths,
+        similar,
         extras,
         &state.journal,
         &state.scan,
@@ -2021,7 +2082,17 @@ fn main() {
         }
     };
 
+    let thumbs = cache_dir().and_then(|dir| Thumbs::at(&dir.join("thumbnails")).ok());
+    let serving = thumbs.clone();
+
     tauri::Builder::default()
+        // Small pictures reach the window over their own scheme rather than
+        // inside a command's answer: fifty photographs as base64 is most of a
+        // megabyte of JSON on every redraw, and this is a file on disk being
+        // asked for by name.
+        .register_uri_scheme_protocol("thumb", move |_ctx, request| {
+            serve_picture(serving.as_ref(), request.uri().path())
+        })
         // Deliberately no close handler. The window and the run are the same
         // thing until slice 10 puts the engine in a daemon, and pretending
         // otherwise — hiding the window so a drain continues invisibly — buys
@@ -2034,6 +2105,7 @@ fn main() {
             conflicts: ConflictChannel::default(),
             cancel: Arc::new(Stop::new()),
             scan: dupes::Scan::default(),
+            thumbs,
             queue: RunQueue::new(),
             at_once_ceiling: AtomicUsize::new(0),
         })

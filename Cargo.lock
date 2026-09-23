@@ -5845,6 +5845,8 @@ name = "tungstate-gui"
 version = "0.1.0-alpha.2"
 dependencies = [
  "directories",
+ "image",
+ "jiff",
  "serde",
  "serde_json",
  "tauri",
@@ -5859,6 +5861,7 @@ dependencies = [
  "tungstate-core",
  "tungstate-execute",
  "tungstate-journal",
+ "tungstate-likeness",
  "tungstate-secret",
  "tungstate-transfer",
 ]

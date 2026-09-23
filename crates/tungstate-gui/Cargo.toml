@@ -18,6 +18,7 @@ tungstate-backend = { path = "../tungstate-backend" }
 tungstate-backend-opendal = { path = "../tungstate-backend-opendal" }
 tungstate-secret = { path = "../tungstate-secret" }
 tungstate-journal = { path = "../tungstate-journal" }
+tungstate-likeness = { path = "../tungstate-likeness" }
 tungstate-transfer = { path = "../tungstate-transfer" }
 tungstate-execute = { path = "../tungstate-execute" }
 tungstate-attrs = { path = "../tungstate-attrs" }
@@ -25,12 +26,15 @@ tungstate-core = { path = "../tungstate-core" }
 directories = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+jiff = { workspace = true }
 tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 [dev-dependencies]
+# Drawing a picture for the resemblance tests, so no binary is checked in.
+image = { workspace = true }
 # A real directory for the browse tests, so a connection is walked rather than
 # mocked. Nothing here touches the real journal or the real keychain.
 tempfile = { workspace = true }

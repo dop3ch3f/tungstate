@@ -124,6 +124,12 @@ pub struct Group {
 }
 
 impl Group {
+    /// Whether any of these paths is a copy in this group.
+    #[must_use]
+    pub fn copies_touched(&self, paths: &BTreeSet<String>) -> bool {
+        paths.contains(&self.keep) || self.extras.iter().any(|copy| paths.contains(&copy.path))
+    }
+
     /// Bytes that come back if every extra copy goes.
     #[must_use]
     pub fn reclaimable(&self) -> u64 {
@@ -149,6 +155,12 @@ pub struct FolderGroup {
 }
 
 impl FolderGroup {
+    /// Whether any of these paths is a copy in this group.
+    #[must_use]
+    pub fn copies_touched(&self, paths: &BTreeSet<String>) -> bool {
+        paths.contains(&self.keep) || self.extras.iter().any(|extra| paths.contains(extra))
+    }
+
     /// Bytes that come back if every copied directory goes.
     #[must_use]
     pub fn reclaimable(&self) -> u64 {
