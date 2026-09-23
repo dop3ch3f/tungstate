@@ -189,13 +189,14 @@ pub fn watch(
         sweeping: folders.len() - watching,
     });
 
-    // The path an event carries is the one the platform resolved, not the one
-    // we asked about: on macOS a folder under `/tmp` is reported under
-    // `/private/tmp`, so a root spelled the first way matches nothing. The
-    // journal hit this in slice 8b and it is the same trap.
+    // Every spelling an event might use for each root, all naming one folder.
     let resolved: Vec<(String, &Watched)> = folders
         .iter()
-        .map(|folder| (spelled_back(&folder.root), folder))
+        .flat_map(|folder| {
+            spellings(&folder.root)
+                .into_iter()
+                .map(move |at| (at, folder))
+        })
         .collect();
     let roots: Vec<String> = resolved.iter().map(|(root, _)| root.clone()).collect();
     let mut schedule = Schedule::default();
@@ -249,8 +250,8 @@ pub fn watch(
 
         let now = Instant::now();
         echoes.forget_old(now);
-        for root in schedule.ready(now) {
-            if let Some((_, folder)) = resolved.iter().find(|(at, _)| *at == root) {
+        for key in schedule.ready(now) {
+            if let Some(folder) = folders.iter().find(|folder| key_of(folder) == key) {
                 look(folder, journal, Because::Stirred, &mut echoes, told);
             }
         }
@@ -295,7 +296,7 @@ fn note(
         return;
     }
     if let Some((_, folder)) = resolved.iter().find(|(at, _)| at == root) {
-        schedule.stirred(root, now, cooldown(folder));
+        schedule.stirred(&key_of(folder), now, cooldown(folder));
     }
 }
 
@@ -313,7 +314,7 @@ fn stir_all(
                 .iter()
                 .any(|path| path.starts_with(root) || Path::new(root).starts_with(path));
         if touched {
-            schedule.stirred(root, now, cooldown(folder));
+            schedule.stirred(&key_of(folder), now, cooldown(folder));
         }
     }
 }
@@ -324,14 +325,28 @@ fn cooldown(folder: &Watched) -> Duration {
     rules_at(&folder.root).map_or(Duration::from_secs(30), |policy| policy.defaults.cooldown)
 }
 
-/// A root spelled the way the platform will spell it back.
+/// One name per folder for the schedule, whichever spelling stirred it.
+fn key_of(folder: &Watched) -> String {
+    folder.root.to_string_lossy().to_string()
+}
+
+/// Every way the platform might spell this root back in an event.
 ///
-/// Not bare `canonicalize`: on Windows that answers `\\?\C:\...` while the
-/// watcher reports `C:\...`, and no event would ever match a folder.
-fn spelled_back(root: &Path) -> String {
-    tungstate_journal::resolve_for_lookup(root)
+/// Platforms disagree about which. `FSEvents` reports the resolved path, so a
+/// folder under `/tmp` arrives as `/private/tmp`. Windows reports the path as
+/// it was watched, so `C:\Users\RUNNER~1` stays short while resolving makes it
+/// long. Resolving goes through the journal's `resolve_for_lookup`, because
+/// bare `canonicalize` on Windows adds a `\\?\` prefix no event carries.
+fn spellings(root: &Path) -> Vec<String> {
+    let given = root.to_string_lossy().to_string();
+    let resolved = tungstate_journal::resolve_for_lookup(root)
         .to_string_lossy()
-        .to_string()
+        .to_string();
+    if resolved == given {
+        vec![given]
+    } else {
+        vec![given, resolved]
+    }
 }
 
 /// Look at one folder, and do whatever its own mode says to do.
@@ -418,16 +433,21 @@ fn look(
             }
             // Every path it wrote comes back as an event about a file that just
             // changed. Expecting them is what stops each action costing a
-            // second survey of the whole folder.
-            // Both ends of every move: the source vanished and the target
-            // appeared, and the platform reports both.
-            let here = PathBuf::from(spelled_back(&folder.root));
+            // second survey of the whole folder. Both ends of every move, in
+            // every spelling the platform might use: the source vanished and
+            // the target appeared, and the platform reports both.
+            let written: Vec<&str> = plan
+                .ops
+                .iter()
+                .flat_map(|op| [op.source(), op.target(), op.directory()])
+                .flatten()
+                .collect();
             echoes.expect(
-                plan.ops
-                    .iter()
-                    .flat_map(|op| [op.source(), op.target(), op.directory()])
-                    .flatten()
-                    .map(|path| here.join(path).to_string_lossy().to_string()),
+                spellings(&folder.root).iter().flat_map(|here| {
+                    written
+                        .iter()
+                        .map(move |path| Path::new(here).join(path).to_string_lossy().to_string())
+                }),
                 Instant::now() + ECHO_FOR,
             );
             if moved > 0 {

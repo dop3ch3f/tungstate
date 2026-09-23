@@ -192,6 +192,44 @@ fn an_event_about_the_root_itself_is_not_news() {
     assert!(!schedule.is_empty(), "a file arriving should stir it");
 }
 
+#[cfg(unix)]
+#[test]
+fn either_spelling_of_a_root_wakes_the_one_folder() {
+    // FSEvents reports the resolved path and Windows the path as watched, so
+    // a root with two names must answer to both. A symlink gives it two names
+    // here, as `RUNNER~1` does on Windows. Two names are still one folder,
+    // stirred once, not twice.
+    let real = tempfile::tempdir().expect("temp dir");
+    let links = tempfile::tempdir().expect("temp dir");
+    let alias = links.path().join("alias");
+    std::os::unix::fs::symlink(real.path(), &alias).expect("symlink");
+    let folder = Watched {
+        name: "demo".to_string(),
+        root: alias.clone(),
+        networked: false,
+    };
+    let names = spellings(&folder.root);
+    assert_eq!(names.len(), 2, "{names:?}");
+    let resolved: Vec<(String, &Watched)> = names.iter().map(|at| (at.clone(), &folder)).collect();
+    let mut schedule = Schedule::default();
+    let now = Instant::now();
+
+    for at in &names {
+        let path = Path::new(at).join("holiday.jpg");
+        note(
+            &path,
+            &names,
+            &resolved,
+            &Echoes::default(),
+            now,
+            &mut schedule,
+        );
+    }
+
+    let later = now + Duration::from_secs(3600);
+    assert_eq!(schedule.ready(later), [alias.to_string_lossy().to_string()]);
+}
+
 // --- when the platform admits it lost events -----------------------------
 
 fn two_folders() -> [Watched; 2] {
@@ -434,8 +472,10 @@ fn a_file_dropped_into_a_watched_folder_is_filed_without_anybody_asking() {
                 filed = Some(files);
                 break;
             }
-            Ok(_) => {}
-            Err(_) => break,
+            // Silence is not failure: Windows and a busy CI runner can be
+            // slow, so only the overall deadline ends the wait.
+            Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => break,
         }
     }
     stop.ask();

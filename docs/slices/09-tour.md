@@ -90,13 +90,35 @@ watch. On macOS `/tmp` is a symlink, so a folder governed as `/tmp/watch9` is
 reported as `/private/tmp/watch9`, and a root spelled the first way matches no
 event at all. The journal hit this in 8b and the duplicate scan hit it after.
 
-The fix already existed. `tungstate_journal::resolve_for_lookup` resolves what
-exists and puts the rest back, and it also takes off Windows's verbatim prefix:
-bare `canonicalize` there answers `\\?\C:\media`, while `notify` reports
-`C:\media`. The first draft used bare `canonicalize`, so on Windows no event
-would ever have matched a folder. Nothing would have failed. Every folder
-would have waited for the hourly sweep. The roots and the command line's
-folder filter now both go through `resolve_for_lookup`.
+The first draft used bare `canonicalize`, which on Windows answers
+`\\?\C:\media` while `notify` reports `C:\media`. The project already had a
+fix: `tungstate_journal::resolve_for_lookup` takes that prefix off, and the
+command line's folder filter now uses it too.
+
+**Then Windows CI failed anyway**, and the reason is that the platforms
+disagree about which spelling an event uses. FSEvents reports the resolved
+path. Windows reports the path exactly as it was watched, and the CI runner's
+temp folder is `C:\Users\RUNNER~1\...`, an old-style short name that
+resolving turns into the long one. So resolving fixed macOS and broke Windows.
+Neither spelling can be preferred, which is the same lesson the journal
+learned in 8b. So each root is now matched under both:
+
+```rust
+fn spellings(root: &Path) -> Vec<String> {
+    let given = root.to_string_lossy().to_string();
+    let resolved = tungstate_journal::resolve_for_lookup(root)...;
+    if resolved == given { vec![given] } else { vec![given, resolved] }
+}
+```
+
+Both spellings lead to one folder, and the schedule is keyed by the folder
+rather than by whichever spelling stirred it, so two names never mean two
+surveys. The echo set expects every write under both spellings too. A test
+recreates it on Unix with a symlink, which gives one folder two names the
+same way the short name does.
+
+Nothing would have failed loudly without that CI run. Every folder on
+Windows would have been tidied an hour late, by the sweep.
 
 ## 5. A share is swept, not watched
 
@@ -162,7 +184,10 @@ Every test was green before anybody drove the window. Driving it found these:
 The fifth one was also why the real-watcher test had been passing: the probe
 events woke the folder, and the dropped file got filed along with them. With
 the loop gone, only the dropped file's own event can wake the folder, so the
-test now proves the event was heard. It passed ten runs in a row.
+test now proves the event was heard. It passed ten runs in a row on macOS,
+and its first Windows run found section 4's second half. It also used to give
+up after five quiet seconds, which is not generous on a busy runner; only the
+30 second deadline ends the wait now.
 
 ## 8. What was checked by hand
 
@@ -180,14 +205,15 @@ the embedded build:
 
 ## 9. What is checked
 
-- **19 tests in `tungstate-watch`.** The deadline arithmetic, the echo set, the
+- **20 tests in `tungstate-watch`.** The deadline arithmetic, the echo set, the
   root mapping and the rescan stirring are pure. What a look decides is tested
   against real folders through `sweep`, which runs the same code an event does.
   One test uses the real platform watcher, with generous timeouts.
 - Probe files and the root's own event are tested as not news, so the loop in
-  section 7 cannot quietly come back.
-- `cargo fmt`, `clippy -D warnings`, 559 tests in parallel and again with
-  `--test-threads=1`, and `npm run build`.
+  section 7 cannot quietly come back. A root with two names is tested to wake
+  its one folder once.
+- `cargo fmt`, `clippy -D warnings`, 560 tests in parallel and again with
+  `--test-threads=1`, `npm run build`, and CI on Linux, macOS and Windows.
 
 ## What is still not verified
 
