@@ -285,11 +285,13 @@ is the test that says so.
 
 ## What is still not verified
 
-- **The sampling path has not been run against a real share.** It is tested in
-  the core pass and the decision point is `Capabilities.networked`, which is
-  answered by `statfs`, but nothing has yet pointed `dedupe` at a mounted NAS
-  or an FTP connection. The CLI also still only accepts a local path: a
-  `connection:folder` target is the window's slice.
+- **The sampling path has only been run against an SMB mount, not FTP.** On
+  2026-09-23 `dedupe` was pointed at a folder on a NAS mounted over SMB. It
+  was detected as networked, the pairs were reported as *almost certainly the
+  same*, both groups were confirmed in full before anything moved, the extras
+  were set aside inside the folder, and `undo` put them back byte-identical.
+  Nothing has pointed it at an FTP connection. The CLI also still only accepts
+  a local path: a `connection:folder` target is the window's slice.
 - **Windows treats every volume as local**, so a mapped network drive there
   will be read in full rather than sampled. `GetDriveType` answers it and
   needs an API crate the workspace does not carry.

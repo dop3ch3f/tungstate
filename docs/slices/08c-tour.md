@@ -191,6 +191,7 @@ warnings`, 499 tests, and CI on Linux, macOS and Windows.
 - **A connection has never been scanned.** The code path is there and the
   sampling it turns on is tested in the core pass, but nothing has pointed the
   window at a real NAS over FTP. It needs a connection this machine can reach.
+  A NAS *mounted* over SMB has been scanned from the command line (see 8b).
 - **Only at 1080 by 720, and only in the retro theme.** The smallest window
   size and the other two themes have not been looked at for these screens.
 - **Memory on a very large scan.** A group holds every copy's path; a drive

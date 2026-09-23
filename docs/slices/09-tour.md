@@ -220,9 +220,11 @@ the embedded build:
 - **Linux and Windows watcher behaviour is only checked by CI.** The real
   watcher test runs there, but nobody has dropped a file into a watched folder
   on either by hand.
-- **No share has been watched.** That a folder on SMB is detected as networked
-  and reported as "checked on the hour" is written and not yet seen on a real
-  NAS.
+- **The hourly sweep of a share has not run for a full hour.** On a real NAS
+  mounted over SMB, `tungstate watch` said `watching 0 folder(s), checking 1
+  on the hour` with the reason, and its opening sweep reported the files
+  waiting in a suggest folder without moving any. The same folder refused
+  `dedupe --similar` with its sentence. The hour itself was not waited out.
 - **`max_user_watches` has not been hit.** The code reports a folder that
   cannot be watched as trouble and keeps sweeping it, and nothing has made
   that happen.
