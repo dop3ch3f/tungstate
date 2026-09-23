@@ -11,6 +11,7 @@ import { useWatch } from "../state/useWatch";
 import { folders, links, transfers, history } from "../engine/commands";
 import { shortPath, when } from "../lib/format";
 import { toneOfStatus } from "../lib/tone";
+import { files, noticed } from "../lib/counts";
 import type { FolderView, InterruptedRun, Link, Op } from "../engine/types";
 import Button from "../ui/Button.vue";
 import Notice from "../ui/Notice.vue";
@@ -138,10 +139,10 @@ const WATCH_DOT: Record<string, string> = {
               <span class="o-dot" :class="WATCH_DOT[notice.kind] ?? 'o-plain'"></span>
               <span class="o-kind">{{ notice.folder }}</span>
               <span class="o-leaf" v-if="notice.kind === 'tidied'">
-                filed {{ notice.files }} file(s)
+                filed {{ files(noticed(notice)) }}
               </span>
               <span class="o-leaf" v-else-if="notice.kind === 'waiting'">
-                {{ notice.files }} file(s) arrived, waiting for you
+                {{ files(noticed(notice)) }} arrived, waiting for you
               </span>
               <span class="o-leaf" v-else>{{ notice.why }}</span>
               <span class="o-when">{{ when(notice.at) }}</span>
@@ -192,7 +193,9 @@ h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin:
 /* Retro: the bar is flush with the window's edges, and the body gets room. */
 :global([data-theme="retro"] .panel > .pbar) { padding: 6px 7px 6px var(--s3); }
 :global([data-theme="retro"] .pb) { padding-top: var(--s3); }
-:global([data-theme="retro"] .rows) { border-top: none; }
+/* Retro: a list straight under the bar needs no rule of its own, the bar's
+   edge is one. Specific enough to beat `.rows` below whatever the order. */
+:global([data-theme="retro"] .pb > .rows:first-child) { border-top: none; margin-top: 0; }
 
 .rows { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: var(--bw) solid var(--edge); flex: 1; }
 .rows li { border-bottom: var(--bw) solid var(--edge); }

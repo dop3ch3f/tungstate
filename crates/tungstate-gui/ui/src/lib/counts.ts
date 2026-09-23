@@ -15,7 +15,7 @@
 // `moves.length` or `ops.length` where a `FileCount` is wanted and `vue-tsc`
 // refuses it, on every platform CI runs on.
 
-import type { Outcome, PreviewView, PutBackDone, TidyDone } from "../engine/types";
+import type { Notice, Outcome, PreviewView, PutBackDone, TidyDone } from "../engine/types";
 
 declare const isFileCount: unique symbol;
 
@@ -39,6 +39,10 @@ export const putBack = (done: PutBackDone): FileCount => seal(done.files);
 
 /** Files a preview says would move. `blast.files`, never `plan.ops.length`. */
 export const wouldMove = (view: PreviewView): FileCount => seal(view.files);
+
+/** Files the watcher filed, or found waiting. The engine counts what moved,
+ *  not the plan's operations. */
+export const noticed = (notice: Notice): FileCount => seal(notice.files);
 
 /** Files a preview looked at. */
 export const outOf = (view: PreviewView): FileCount => seal(view.of);
