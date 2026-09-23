@@ -76,6 +76,11 @@ Grouped by the question being asked rather than by call name.
 `give_rules`, `rules_text`, `folder_preview`, `tidy_folder`, `put_back`,
 `learn_folder`, `compare_folder`, `pick_folder`.
 
+**Duplicates** — `find_duplicates` (any folder or `connection:folder`, emits
+`dupes://progress`), `stop_finding_duplicates`, `clear_duplicates`,
+`recent_scans`, `duplicate_action`, `set_duplicate_action`. The scan needs no
+governed folder: finding duplicates has nothing to do with rules.
+
 **History and search** — `recent`, `history`, `whereis`, `quarantined`.
 `history` and `whereis` accept a path spelled any way a person might type it
 (slice 7d) and `whereis` also takes a BLAKE3 digest.
@@ -117,9 +122,10 @@ important rather than less:
 
 ## What is deliberately not in the seam yet
 
-- **Progress for a long tidy.** Transfers emit events; tidying does not. A
-  folder of 100,000 files would tidy with no feedback. Needs an event, not a
-  command.
+- **Progress for a long tidy.** Transfers emit events, and as of slice 8c the
+  duplicate scan emits `dupes://progress`; tidying still does not. A folder of
+  100,000 files would tidy with no feedback. The pattern is now established
+  twice over, so this is a command away rather than a design question.
 - **Extended attributes.** macOS records the downloading app in
   `com.apple.quarantine`; `Attributes` has no field for it, so no command can
   expose it.
