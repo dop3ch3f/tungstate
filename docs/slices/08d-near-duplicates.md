@@ -88,10 +88,27 @@ group can be, and it makes the leader the obvious copy to keep.
 
 ### 5. Two bands, because they mean different things
 
-| Distance | What the screen says | What it usually is |
+| How alike | What the screen says | What it usually is |
 |---|---|---|
-| 0 to 4 | the same picture, at a different size | a re-export, a resize, a screenshot saved twice |
-| 5 to 10 | looks like the same moment | two frames of a burst, two edits of one shot |
+| 90 and over | the same picture, in a different wrapper | a re-export, a resize, a second save at another quality |
+| 70 to 89 | looks like the same moment | two frames of a burst, two edits of one shot |
+
+**Measured, not guessed**, on real photographs with
+`cargo run -p tungstate-likeness --example score`:
+
+| Pair | Alike | Signatures apart |
+|---|---|---|
+| a photo and the same photo at 400px | 100 | 1 bit |
+| a photo and the same photo at awful JPEG quality | 100 | 0 bits |
+| a photo and a 15% crop of itself | 49 | 8 bits |
+| two unrelated photographs, worst case of 45 pairs | 36 | 19 bits |
+
+Two things fall out of that and both are written down rather than smoothed
+over. The gap between an honest match and an honest miss is enormous, which is
+why the thresholds are not delicate. And **a crop is not found**: at 49 it sits
+nearer the unrelated pairs than the real ones, and dragging the threshold down
+to catch it would start offering people unrelated photographs. A crop is a
+picture somebody deliberately changed, so missing it is the right failure.
 
 The first is safe to clear and the second is usually not, and a finder that
 shows them in one undifferentiated list is asking somebody to delete half a

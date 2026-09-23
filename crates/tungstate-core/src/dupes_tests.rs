@@ -529,3 +529,82 @@ proptest! {
         );
     }
 }
+
+#[test]
+fn ticking_every_copy_in_a_group_is_refused_rather_than_obeyed() {
+    let bundles = [dupes::Bundle {
+        id: "abc",
+        members: vec!["one.jpg", "two.jpg"],
+        folder: false,
+    }];
+    let wanted = ["one.jpg".to_string(), "two.jpg".to_string()]
+        .into_iter()
+        .collect();
+
+    let refused = dupes::decide(&bundles, &wanted);
+
+    assert_eq!(
+        refused,
+        Err(Trouble::WouldEmpty {
+            group: "abc".to_string()
+        })
+    );
+}
+
+#[test]
+fn the_copy_that_stays_is_one_nobody_ticked() {
+    // The pass would have kept `one.jpg`. The person untick it and ticked it
+    // instead, so the copy that stays is the one they left alone.
+    let bundles = [dupes::Bundle {
+        id: "abc",
+        members: vec!["one.jpg", "two.jpg", "three.jpg"],
+        folder: false,
+    }];
+    let wanted = ["one.jpg".to_string(), "three.jpg".to_string()]
+        .into_iter()
+        .collect();
+
+    let dealings = dupes::decide(&bundles, &wanted).expect("two of three is allowed");
+
+    assert_eq!(dealings.len(), 2);
+    for dealing in &dealings {
+        assert_eq!(dealing.instead_of, "two.jpg");
+    }
+}
+
+#[test]
+fn a_copy_that_sits_in_two_groups_is_dealt_with_once() {
+    // The copy an exact group keeps is also the copy a resemblance was
+    // measured against. Two moves of one file is one move and one failure.
+    let bundles = [
+        dupes::Bundle {
+            id: "exact",
+            members: vec!["keep.jpg", "shared.jpg"],
+            folder: false,
+        },
+        dupes::Bundle {
+            id: "similar",
+            members: vec!["leader.jpg", "shared.jpg"],
+            folder: false,
+        },
+    ];
+    let wanted = ["shared.jpg".to_string()].into_iter().collect();
+
+    let dealings = dupes::decide(&bundles, &wanted).expect("allowed");
+
+    assert_eq!(dealings.len(), 1);
+    assert_eq!(dealings[0].path, "shared.jpg");
+}
+
+#[test]
+fn a_group_nobody_ticked_produces_nothing() {
+    let bundles = [dupes::Bundle {
+        id: "abc",
+        members: vec!["one.jpg", "two.jpg"],
+        folder: false,
+    }];
+
+    let dealings = dupes::decide(&bundles, &BTreeSet::new()).expect("allowed");
+
+    assert!(dealings.is_empty());
+}

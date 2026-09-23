@@ -233,6 +233,26 @@ impl Found {
     pub fn is_empty(&self) -> bool {
         self.groups.is_empty() && self.folders.is_empty()
     }
+
+    /// Every group, in the shape [`decide`] needs.
+    #[must_use]
+    pub fn bundles(&self) -> Vec<Bundle<'_>> {
+        let files = self.groups.iter().map(|group| Bundle {
+            id: &group.id,
+            members: std::iter::once(group.keep.as_str())
+                .chain(group.extras.iter().map(|copy| copy.path.as_str()))
+                .collect(),
+            folder: false,
+        });
+        let folders = self.folders.iter().map(|group| Bundle {
+            id: &group.id,
+            members: std::iter::once(group.keep.as_str())
+                .chain(group.extras.iter().map(String::as_str))
+                .collect(),
+            folder: true,
+        });
+        files.chain(folders).collect()
+    }
 }
 
 /// What a [`Digest`] returns when the person asked the pass to stop.
@@ -265,6 +285,16 @@ pub enum Trouble {
         first: String,
         /// The other.
         second: String,
+    },
+    /// Every copy in a group was asked for, which would leave none of it.
+    ///
+    /// Refused here rather than prevented in the window, because the window is
+    /// not the only thing that can ask, and "a group always keeps one copy" is
+    /// a promise about somebody's files rather than a habit of one screen.
+    #[error("that would deal with every copy in {group} and leave none")]
+    WouldEmpty {
+        /// Which group, by its id.
+        group: String,
     },
 }
 
@@ -659,6 +689,120 @@ impl Extras {
 /// decides about a folder, and the folder is its files.
 #[must_use]
 pub fn plan(snapshot: &Snapshot, found: &Found, extras: Extras, folder: &str, mode: Mode) -> Plan {
+    plan_dealings(snapshot, &everything_extra(found), extras, folder, mode)
+}
+
+/// Every extra copy in a set of findings, as dealings: what [`plan`] has
+/// always done, said in the vocabulary [`plan_dealings`] takes.
+#[must_use]
+pub fn everything_extra(found: &Found) -> Vec<Dealing> {
+    let mut dealings = Vec::new();
+    for group in &found.groups {
+        for copy in &group.extras {
+            dealings.push(Dealing {
+                path: copy.path.clone(),
+                instead_of: group.keep.clone(),
+                folder: false,
+            });
+        }
+    }
+    for group in &found.folders {
+        for extra in &group.extras {
+            dealings.push(Dealing {
+                path: extra.clone(),
+                instead_of: group.keep.clone(),
+                folder: true,
+            });
+        }
+    }
+    dealings
+}
+
+/// A group of copies, whichever pass found it, as the one thing the rule about
+/// never emptying a group needs to see.
+///
+/// Borrowed rather than owned: this exists for the length of one decision and
+/// copying every path to make it would be the most expensive part of it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Bundle<'a> {
+    /// The group's id, which is what a refusal names.
+    pub id: &'a str,
+    /// Every copy in it, the one the pass would keep first.
+    pub members: Vec<&'a str>,
+    /// True when the members are directories copied whole.
+    pub folder: bool,
+}
+
+/// Turn the copies somebody ticked into dealings, or refuse.
+///
+/// This is where "every group keeps one copy" stops being something a screen
+/// arranges and becomes something the engine will not let a screen get wrong.
+/// The window ticks checkboxes; only this decides whether that is allowed.
+///
+/// # Errors
+/// [`Trouble::WouldEmpty`] when every copy in some group was asked for.
+pub fn decide(bundles: &[Bundle<'_>], wanted: &BTreeSet<String>) -> Result<Vec<Dealing>, Trouble> {
+    let mut dealings = Vec::new();
+    let mut already: BTreeSet<&str> = BTreeSet::new();
+    for bundle in bundles {
+        let (asked, staying): (Vec<&str>, Vec<&str>) = bundle
+            .members
+            .iter()
+            .partition(|path| wanted.contains(**path));
+        if asked.is_empty() {
+            continue;
+        }
+        let Some(instead_of) = staying.first() else {
+            return Err(Trouble::WouldEmpty {
+                group: bundle.id.to_string(),
+            });
+        };
+        for path in asked {
+            // One file can sit in two groups: the copy an exact group keeps is
+            // also the copy a resemblance was measured against. Dealing with it
+            // twice would be two moves of one file, and the second would fail.
+            if !already.insert(path) {
+                continue;
+            }
+            dealings.push(Dealing {
+                path: path.to_string(),
+                instead_of: (*instead_of).to_string(),
+                folder: bundle.folder,
+            });
+        }
+    }
+    Ok(dealings)
+}
+
+/// One copy to deal with, and the copy it is a copy of.
+///
+/// The seam speaks in these rather than in groups, because a window where every
+/// copy has its own checkbox can ask for two of four copies and no description
+/// in terms of whole groups can say that.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dealing {
+    /// The copy being dealt with. A directory when `folder` is set.
+    pub path: String,
+    /// The copy that stays, which is what the journal records it as a
+    /// duplicate of.
+    pub instead_of: String,
+    /// True when `path` is a directory copied whole, which is expanded into
+    /// its files here rather than in the executor.
+    pub folder: bool,
+}
+
+/// What to do about a set of copies somebody chose, one by one.
+///
+/// # Panics
+/// Never: the expansion of a folder dealing is bounded by the snapshot.
+#[must_use]
+pub fn plan_dealings(
+    snapshot: &Snapshot,
+    dealings: &[Dealing],
+    extras: Extras,
+    folder: &str,
+    mode: Mode,
+) -> Plan {
     let mut ops = Vec::new();
     // Names already spoken for in the set-aside area, under this volume's own
     // rules: on a case-insensitive disk `Photo.JPG` and `photo.jpg` are one
@@ -669,32 +813,29 @@ pub fn plan(snapshot: &Snapshot, found: &Found, extras: Extras, folder: &str, mo
         .iter()
         .map(|path| snapshot.key(path))
         .collect();
-    for group in &found.groups {
-        for copy in &group.extras {
-            ops.push(deal_with(
-                &copy.path,
-                &group.keep,
-                extras,
-                snapshot,
-                &mut taken,
-            ));
-        }
-    }
-    for group in &found.folders {
-        for extra in &group.extras {
-            let prefix = format!("{extra}/");
+    for dealing in dealings {
+        if dealing.folder {
+            let prefix = format!("{}/", dealing.path);
             for file in snapshot.entries.iter().filter(|entry| !entry.is_dir) {
                 let path = file.relative_path();
                 if let Some(rest) = path.strip_prefix(&prefix) {
                     ops.push(deal_with(
                         &path,
-                        &format!("{}/{rest}", group.keep),
+                        &format!("{}/{rest}", dealing.instead_of),
                         extras,
                         snapshot,
                         &mut taken,
                     ));
                 }
             }
+        } else {
+            ops.push(deal_with(
+                &dealing.path,
+                &dealing.instead_of,
+                extras,
+                snapshot,
+                &mut taken,
+            ));
         }
     }
     // Directories the plan itself empties go too, so a folder copied whole

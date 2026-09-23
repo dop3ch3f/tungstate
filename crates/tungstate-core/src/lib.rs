@@ -21,6 +21,7 @@ pub mod learn;
 pub mod matcher;
 pub mod plan;
 pub mod policy;
+pub mod similar;
 pub mod snapshot;
 pub mod template;
 pub mod templates;
@@ -38,5 +39,7 @@ pub use templates::{TEMPLATES, Template};
 mod dupes_tests;
 #[cfg(test)]
 mod plan_tests;
+#[cfg(test)]
+mod similar_tests;
 #[cfg(test)]
 mod tests;
