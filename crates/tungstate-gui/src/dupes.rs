@@ -368,8 +368,11 @@ pub fn scan(
     };
 
     remember(journal, &place.root);
-    let mut rows = rows_of(&found, &snapshot);
     let mut unchecked = Vec::new();
+    let mut rows = match &resembling {
+        Some((_, eye)) => rows_of(&found, &snapshot, Some(eye)),
+        None => rows_of(&found, &snapshot, None),
+    };
     if let Some((resembling, eye)) = resembling {
         rows.extend(resembling_rows(&resembling, &eye));
         unchecked = resembling.unchecked;
@@ -416,11 +419,26 @@ impl Row {
 }
 
 /// The exact pass's findings, as rows.
-fn rows_of(found: &dupes::Found, snapshot: &tungstate_core::Snapshot) -> Vec<Row> {
+///
+/// The eye is borrowed purely for its pictures. Only the copy a group keeps
+/// was ever fingerprinted, because the second pass skips what the first one
+/// already accounted for, and that is enough: every copy in an exact group is
+/// the same bytes, so it is the same picture.
+fn rows_of(
+    found: &dupes::Found,
+    snapshot: &tungstate_core::Snapshot,
+    eye: Option<&Eye<'_>>,
+) -> Vec<Row> {
     let mut rows = Vec::new();
     for group in &found.groups {
-        let mut copies = vec![as_copy(&group.kept, true, None)];
-        copies.extend(group.extras.iter().map(|copy| as_copy(copy, false, None)));
+        let thumb = eye.and_then(|eye| picture_name(eye, &group.keep));
+        let mut copies = vec![as_copy(&group.kept, true, None, thumb.clone())];
+        copies.extend(
+            group
+                .extras
+                .iter()
+                .map(|copy| as_copy(copy, false, None, thumb.clone())),
+        );
         rows.push(Row {
             id: group.id.clone(),
             kind: kind_of(&group.keep, false),
@@ -524,7 +542,7 @@ fn resembling_rows(resembling: &similar::Resembling, eye: &Eye<'_>) -> Vec<Row> 
         .collect()
 }
 
-fn as_copy(copy: &dupes::Copy, keep: bool, alike: Option<u8>) -> CopyView {
+fn as_copy(copy: &dupes::Copy, keep: bool, alike: Option<u8>, thumb: Option<String>) -> CopyView {
     CopyView {
         name: leaf(&copy.path),
         path: copy.path.clone(),
@@ -532,8 +550,16 @@ fn as_copy(copy: &dupes::Copy, keep: bool, alike: Option<u8>) -> CopyView {
         mtime: copy.mtime,
         keep,
         alike,
-        thumb: None,
+        thumb,
     }
+}
+
+/// The name a file's small picture was kept under, if one was.
+fn picture_name(eye: &Eye<'_>, path: &str) -> Option<String> {
+    eye.picture_of(path).and_then(|at| {
+        at.file_name()
+            .map(|name| name.to_string_lossy().to_string())
+    })
 }
 
 fn leaf(path: &str) -> String {
@@ -705,6 +731,38 @@ fn under<'a>(
         .entries
         .iter()
         .filter(move |entry| !entry.is_dir && entry.relative_path().starts_with(&prefix))
+}
+
+/// Put back what a clearing set aside.
+///
+/// Its own entry point rather than the folder half's `put_back`, which walks
+/// up to a `.tungstate/policy.toml` and refuses without one. This window
+/// scans anything, governed or not, by design; an undo that needs rules the
+/// scan never needed is an undo that is not there when it is wanted. Found by
+/// driving the window at an ordinary folder of photographs.
+///
+/// # Errors
+/// A sentence, from opening the place or from the undo itself.
+pub fn put_back(target: &str, plan: i64, journal: &Journal) -> Result<usize, String> {
+    let place = place(target, journal)?;
+    let snapshot = look(place.backend.as_ref())?;
+    let undone = tungstate_execute::undo(
+        tungstate_journal::plans::PlanId(plan),
+        &snapshot,
+        place.backend.as_ref(),
+        journal,
+        &place.root,
+    )
+    .map_err(|error| error.to_string())?;
+    // The same trap as everywhere else: undoing a plan also recreates the
+    // directories it emptied, and only the renames moved a file.
+    Ok(journal
+        .ops_for_plan(tungstate_journal::plans::PlanId(plan))
+        .map_or(undone.done, |ops| {
+            ops.iter()
+                .filter(|op| op.kind == tungstate_journal::OpKind::Rename)
+                .count()
+        }))
 }
 
 /// The folder's own name, for the plan's record.
@@ -942,6 +1000,32 @@ mod tests {
 
         assert_eq!(stopped.err(), Some("stopped".to_string()));
         assert!(dir.path().join("copies/other-name.bin").exists());
+    }
+
+    #[test]
+    fn what_was_set_aside_goes_back_without_any_rules() {
+        // The folder has no policy and never needed one to be scanned, so it
+        // must not need one to be undone either. This is the defect driving
+        // the window by hand found.
+        let dir = folder();
+        let journal = Journal::open_in_memory().expect("journal");
+        let scanning = Scan::default();
+        let root = dir.path().to_string_lossy().to_string();
+        let cleared = clear(
+            &root,
+            &["copies/other-name.bin".to_string()],
+            false,
+            Extras::SetAside,
+            &journal,
+            &scanning,
+        )
+        .expect("it clears");
+
+        let back = put_back(&root, cleared.plan, &journal).expect("it goes back");
+
+        assert_eq!(back, 1);
+        assert!(dir.path().join("copies/other-name.bin").exists());
+        assert!(dir.path().join("keep.bin").exists());
     }
 
     #[test]

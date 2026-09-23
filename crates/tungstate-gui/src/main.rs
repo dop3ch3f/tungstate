@@ -498,6 +498,15 @@ fn find_duplicates(
     )
 }
 
+/// Put back what a clearing set aside.
+///
+/// Not the folder half's `put_back`: that one needs a `.tungstate/policy.toml`
+/// and this window scans folders that have none.
+#[tauri::command(async)]
+fn undo_duplicates(target: String, plan: i64, state: State<'_, App>) -> Result<usize, String> {
+    dupes::put_back(&target, plan, &state.journal)
+}
+
 /// The places scanned before, newest first.
 #[tauri::command]
 fn recent_scans(state: State<'_, App>) -> Result<Vec<String>, String> {
@@ -2125,6 +2134,7 @@ fn main() {
             find_duplicates,
             stop_finding_duplicates,
             recent_scans,
+            undo_duplicates,
             clear_duplicates,
             duplicate_action,
             set_duplicate_action,

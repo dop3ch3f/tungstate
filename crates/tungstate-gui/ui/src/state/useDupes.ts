@@ -5,7 +5,7 @@
 // for the reason `useTransfer` has in a comment.
 
 import { computed, ref, shallowRef } from "vue";
-import { dupes, folders } from "../engine/commands";
+import { dupes } from "../engine/commands";
 import { dupeEvents, type UnlistenFn } from "../engine/events";
 import type { Claim, Cleared, DupeKind, DupeRow, Found, ScanProgress } from "../engine/types";
 
@@ -322,18 +322,20 @@ async function clear(extras: string) {
 
 /** Put back what the last clearing set aside.
  *
- *  The same command the folder half uses, given this plan's id: `put_back`
- *  takes any plan, and this is the one place the window knows one outright. */
+ *  The duplicates window's own undo rather than the folder half's, which walks
+ *  up to a policy file and refuses without one. This window scans anything,
+ *  governed or not, so an undo that needs rules is an undo that is missing
+ *  exactly when somebody wants it. */
 async function putBack() {
   const target = root.value;
   const done = cleared.value;
   if (!target || !done || !done.reversible) return;
   problem.value = null;
   try {
-    const back = await folders.putBack(target, done.plan);
+    const files = await dupes.putBack(target, done.plan);
     cleared.value = null;
     phase.value = "start";
-    putBackCount.value = back.files;
+    putBackCount.value = files;
   } catch (e) {
     problem.value = String(e);
   }

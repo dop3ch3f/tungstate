@@ -44,6 +44,9 @@ onMounted(() => d.loadAction());
       />
 
       <div class="dz-done" v-else-if="d.cleared.value">
+        <!-- A result screen that swallows an error is a button that does
+             nothing and says nothing, which is what Put it back did here. -->
+        <Notice tone="bad" v-if="d.problem.value">{{ d.problem.value }}</Notice>
         <Notice>
           {{ d.cleared.value.files }} file(s)
           {{ d.cleared.value.reversible ? "set aside" : "sent to the Trash" }}.

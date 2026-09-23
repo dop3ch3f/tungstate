@@ -44,6 +44,10 @@ export const dupes = {
    *  engine refuses a set of ticks that would empty a group. */
   clear: (target: string, paths: string[], similar: boolean, extras: string) =>
     invoke<T.Cleared>("clear_duplicates", { target, paths, similar, extras }),
+  /** Puts back what a clearing set aside. Its own command, because the folder
+   *  half's needs a policy file and this window scans folders without one. */
+  putBack: (target: string, plan: number) =>
+    invoke<number>("undo_duplicates", { target, plan }),
   /** What the person said should happen to extra copies, if they have said. */
   action: () => invoke<string | null>("duplicate_action"),
   rememberAction: (action: string) => invoke<void>("set_duplicate_action", { action }),
