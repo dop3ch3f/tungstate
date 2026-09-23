@@ -14,6 +14,7 @@
 //!
 //! The watcher is an optimisation. The sweep is the truth.
 
+use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -194,12 +195,20 @@ pub fn watch(
     // journal hit this in slice 8b and it is the same trap.
     let resolved: Vec<(String, &Watched)> = folders
         .iter()
-        .map(|folder| (settled_name(&folder.root), folder))
+        .map(|folder| (spelled_back(&folder.root), folder))
         .collect();
     let roots: Vec<String> = resolved.iter().map(|(root, _)| root.clone()).collect();
     let mut schedule = Schedule::default();
     let mut echoes = Echoes::default();
     let mut next_sweep = Instant::now() + sweep_every;
+
+    // Look once before listening for anything. Files that arrived while this
+    // was not running generated no event anybody heard, so without this the
+    // folder is not actually in order until the next sweep, and turning the
+    // switch on appears to do nothing at all.
+    for folder in folders {
+        look(folder, journal, Because::Swept, &mut echoes, told);
+    }
 
     while !stop.asked() {
         let now = Instant::now();
@@ -214,16 +223,25 @@ pub fn watch(
                 Ok(seen) => {
                     let now = Instant::now();
                     for event in seen {
+                        // FSEvents coalesced more than it could report and
+                        // says only "look again under here". Events were lost,
+                        // so nothing narrower than the whole folder will do.
+                        if event.need_rescan() {
+                            stir_all(&event.paths, &resolved, now, &mut schedule);
+                            continue;
+                        }
                         for path in &event.paths {
                             note(path, &roots, &resolved, &echoes, now, &mut schedule);
                         }
                     }
                 }
-                // The platform gave up on some events. The sweep is what
-                // covers that, which is the whole reason it exists.
+                // The platform gave up on some events. Waiting for the hourly
+                // sweep would be correct and an hour late, so look now.
                 Err(errors) => {
+                    let now = Instant::now();
                     for error in errors {
                         tracing::debug!(%error, "watcher complained");
+                        stir_all(&error.paths, &resolved, now, &mut schedule);
                     }
                 }
             }
@@ -270,23 +288,48 @@ fn note(
     let Some(root) = root_of(path, roots) else {
         return;
     };
-    if is_ours(path, root) || echoes.ours(path, now) {
+    // An event about the root itself only says its listing changed, which the
+    // child's own event already said. Heeding it is a loop: every look probes
+    // the filesystem inside the root, which changes the root.
+    if path == Path::new(root) || is_ours(path, root) || echoes.ours(path, now) {
         return;
     }
-    // The cooldown is the folder's own, so two folders with different ideas of
-    // "settled" keep them.
-    let cooldown = resolved
-        .iter()
-        .find(|(at, _)| at == root)
-        .and_then(|(_, folder)| rules_at(&folder.root).ok())
-        .map_or(Duration::from_secs(30), |policy| policy.defaults.cooldown);
-    schedule.stirred(root, now, cooldown);
+    if let Some((_, folder)) = resolved.iter().find(|(at, _)| at == root) {
+        schedule.stirred(root, now, cooldown(folder));
+    }
+}
+
+/// Events were lost under `paths`, or anywhere if there are none: stir every
+/// folder that could have been touched, as if something happened in each.
+fn stir_all(
+    paths: &[PathBuf],
+    resolved: &[(String, &Watched)],
+    now: Instant,
+    schedule: &mut Schedule,
+) {
+    for (root, folder) in resolved {
+        let touched = paths.is_empty()
+            || paths
+                .iter()
+                .any(|path| path.starts_with(root) || Path::new(root).starts_with(path));
+        if touched {
+            schedule.stirred(root, now, cooldown(folder));
+        }
+    }
+}
+
+/// How long this folder waits for a file to stop changing. The folder's own,
+/// so two folders with different ideas of "settled" keep them.
+fn cooldown(folder: &Watched) -> Duration {
+    rules_at(&folder.root).map_or(Duration::from_secs(30), |policy| policy.defaults.cooldown)
 }
 
 /// A root spelled the way the platform will spell it back.
-fn settled_name(root: &Path) -> String {
-    std::fs::canonicalize(root)
-        .unwrap_or_else(|_| root.to_path_buf())
+///
+/// Not bare `canonicalize`: on Windows that answers `\\?\C:\...` while the
+/// watcher reports `C:\...`, and no event would ever match a folder.
+fn spelled_back(root: &Path) -> String {
+    tungstate_journal::resolve_for_lookup(root)
         .to_string_lossy()
         .to_string()
 }
@@ -345,12 +388,40 @@ fn look(
     let root = folder.root.to_string_lossy().to_string();
     match tungstate_execute::apply(&plan, &snapshot, &backend, journal, &root) {
         Ok(applied) => {
+            // What actually moved, not what was planned. A plan that was half
+            // refused would otherwise be reported as a folder tidied, which is
+            // the worst kind of wrong: confident and unattended. A failure
+            // only costs a file if it was a file's op: a refused `MkDir` is
+            // reported by path too, and moved nothing to begin with.
+            let sources: BTreeSet<&str> = plan.ops.iter().filter_map(|op| op.source()).collect();
+            let unmoved = applied.skipped.len()
+                + applied
+                    .failed
+                    .iter()
+                    .filter(|one| sources.contains(one.path.as_str()))
+                    .count();
+            let moved = files.saturating_sub(unmoved);
+            if !applied.failed.is_empty() {
+                told(&Noticed::Trouble {
+                    folder: folder.name.clone(),
+                    why: format!(
+                        "{} file(s) could not be moved: {}",
+                        applied.failed.len(),
+                        applied
+                            .failed
+                            .iter()
+                            .map(|one| one.why.clone())
+                            .collect::<Vec<_>>()
+                            .join("; ")
+                    ),
+                });
+            }
             // Every path it wrote comes back as an event about a file that just
             // changed. Expecting them is what stops each action costing a
             // second survey of the whole folder.
             // Both ends of every move: the source vanished and the target
             // appeared, and the platform reports both.
-            let here = PathBuf::from(settled_name(&folder.root));
+            let here = PathBuf::from(spelled_back(&folder.root));
             echoes.expect(
                 plan.ops
                     .iter()
@@ -359,11 +430,13 @@ fn look(
                     .map(|path| here.join(path).to_string_lossy().to_string()),
                 Instant::now() + ECHO_FOR,
             );
-            told(&Noticed::Tidied {
-                folder: folder.name.clone(),
-                files,
-                plan: applied.plan.0,
-            });
+            if moved > 0 {
+                told(&Noticed::Tidied {
+                    folder: folder.name.clone(),
+                    files: moved,
+                    plan: applied.plan.0,
+                });
+            }
         }
         Err(error) => told(&Noticed::Trouble {
             folder: folder.name.clone(),

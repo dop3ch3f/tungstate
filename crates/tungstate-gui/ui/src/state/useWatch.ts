@@ -26,12 +26,15 @@ export async function attachWatchStream() {
   try {
     unlisten.push(
       await watchEvents.noticed((notice) => {
-        // Newest first, and the "nothing to do" of an hourly sweep is state
-        // rather than news: putting it on screen would bury the two lines
-        // that matter under one per folder per hour.
+        // The "nothing to do" of an hourly sweep is state rather than news:
+        // on screen it would bury the two lines that matter under one per
+        // folder per hour.
         if (notice.kind === "settled") return;
-        recent.value = [notice, ...recent.value].slice(0, SHOWN);
         running.value = true;
+        // Read the list back rather than pushing onto it. Which notices
+        // replace which is a rule, and a rule kept in two places is a rule
+        // that drifts; the engine owns it.
+        void load();
       }),
     );
   } catch {

@@ -61,20 +61,20 @@ pub fn watch(asked: &Asked) -> ExitCode {
         Err(error) => return crate::fail(&error),
     };
 
+    // Both sides resolved the journal's way: `/tmp/x` finds `/private/tmp/x`,
+    // and Windows paths lose the `\\?\` prefix bare `canonicalize` adds.
     let wanted: Vec<PathBuf> = asked
         .only
         .iter()
-        .map(|path| std::fs::canonicalize(path).unwrap_or_else(|_| PathBuf::from(path)))
+        .map(|path| tungstate_journal::resolve_for_lookup(Path::new(path)))
         .collect();
     let folders: Vec<Watched> = known
         .into_iter()
         .filter(|folder| {
             wanted.is_empty()
-                || wanted.iter().any(|path| {
-                    std::fs::canonicalize(&folder.root)
-                        .unwrap_or_else(|_| PathBuf::from(&folder.root))
-                        == *path
-                })
+                || wanted.contains(&tungstate_journal::resolve_for_lookup(Path::new(
+                    &folder.root,
+                )))
         })
         .map(|folder| {
             let root = PathBuf::from(&folder.root);

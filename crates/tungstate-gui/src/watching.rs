@@ -105,8 +105,17 @@ impl Watching {
     }
 
     /// Remember one thing, and keep the list short.
+    ///
+    /// *Waiting* and *trouble* are standing conditions rather than events:
+    /// the same folder still has the same files waiting, or its rules still
+    /// will not load. Each new one replaces the last for that folder, or the
+    /// list fills with one copy of the same sentence per sweep. A *tidied*
+    /// is a real event and stacks, because two of them are two sets of files.
     fn remember(&self, notice: NoticeView) {
         if let Ok(mut held) = self.seen.lock() {
+            if matches!(notice.kind, "waiting" | "trouble") {
+                held.retain(|seen| !(seen.kind == notice.kind && seen.folder == notice.folder));
+            }
             held.push(notice);
             let over = held.len().saturating_sub(KEPT);
             held.drain(..over);

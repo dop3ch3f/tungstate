@@ -7,7 +7,9 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use crate::{Backend, BackendError, Capabilities, Entry, Meta, Result, RootToken, WriteFinish};
 
 /// Prefix for probe files, so a leftover is obviously ours and obviously junk.
-const PROBE_PREFIX: &str = ".tungstate-probe";
+///
+/// Public so a watcher can tell a probe's events from real ones.
+pub const PROBE_PREFIX: &str = ".tungstate-probe";
 
 /// Distinguishes concurrent probes within one process.
 static PROBE_SEQ: AtomicU64 = AtomicU64::new(0);

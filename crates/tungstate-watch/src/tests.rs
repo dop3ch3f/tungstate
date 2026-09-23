@@ -146,6 +146,124 @@ fn events_about_tungstates_own_directories_are_not_news() {
     assert!(!is_ours(Path::new("/f/jpg/a.jpg"), "/f"));
 }
 
+#[test]
+fn the_files_a_survey_probes_with_are_not_news() {
+    // Every look writes these to learn what the filesystem can do. Heeding
+    // them woke the folder once a second, for ever, while it was watched.
+    assert!(is_ours(
+        Path::new("/f/.tungstate-probe-link-70515-0-dst"),
+        "/f"
+    ));
+    assert!(!is_ours(Path::new("/f/tungstate-notes.txt"), "/f"));
+}
+
+#[test]
+fn an_event_about_the_root_itself_is_not_news() {
+    // Its listing changed, which the child's own event already said. Probing
+    // inside the root changes the root, so heeding this is the same loop.
+    let folder = Watched {
+        name: "demo".to_string(),
+        root: "/f".into(),
+        networked: false,
+    };
+    let resolved = vec![("/f".to_string(), &folder)];
+    let roots = vec!["/f".to_string()];
+    let mut schedule = Schedule::default();
+    let now = Instant::now();
+
+    note(
+        Path::new("/f"),
+        &roots,
+        &resolved,
+        &Echoes::default(),
+        now,
+        &mut schedule,
+    );
+    assert!(schedule.is_empty(), "the root's own event stirred it");
+
+    note(
+        Path::new("/f/holiday.jpg"),
+        &roots,
+        &resolved,
+        &Echoes::default(),
+        now,
+        &mut schedule,
+    );
+    assert!(!schedule.is_empty(), "a file arriving should stir it");
+}
+
+// --- when the platform admits it lost events -----------------------------
+
+fn two_folders() -> [Watched; 2] {
+    [
+        Watched {
+            name: "photos".to_string(),
+            root: "/home/me/Photos".into(),
+            networked: false,
+        },
+        Watched {
+            name: "downloads".to_string(),
+            root: "/home/me/Downloads".into(),
+            networked: false,
+        },
+    ]
+}
+
+#[test]
+fn a_rescan_stirs_the_folder_it_names() {
+    // FSEvents coalesced more than it could report and said only "look again
+    // under here". Waiting for the hourly sweep would be right and an hour late.
+    let folders = two_folders();
+    let resolved: Vec<(String, &Watched)> = folders
+        .iter()
+        .map(|folder| (folder.root.to_string_lossy().to_string(), folder))
+        .collect();
+    let mut schedule = Schedule::default();
+    let now = Instant::now();
+
+    stir_all(&["/home/me/Photos".into()], &resolved, now, &mut schedule);
+
+    let later = now + Duration::from_secs(3600);
+    assert_eq!(schedule.ready(later), ["/home/me/Photos"]);
+}
+
+#[test]
+fn a_loss_above_every_folder_stirs_all_of_them() {
+    // A path that contains both roots, or none at all, could have hidden a
+    // change in either.
+    let folders = two_folders();
+    let resolved: Vec<(String, &Watched)> = folders
+        .iter()
+        .map(|folder| (folder.root.to_string_lossy().to_string(), folder))
+        .collect();
+    let now = Instant::now();
+    let later = now + Duration::from_secs(3600);
+
+    for paths in [vec!["/home/me".into()], Vec::new()] {
+        let mut schedule = Schedule::default();
+        stir_all(&paths, &resolved, now, &mut schedule);
+        assert_eq!(
+            schedule.ready(later),
+            ["/home/me/Downloads", "/home/me/Photos"],
+            "{paths:?}"
+        );
+    }
+}
+
+#[test]
+fn a_loss_somewhere_else_stirs_nothing() {
+    let folders = two_folders();
+    let resolved: Vec<(String, &Watched)> = folders
+        .iter()
+        .map(|folder| (folder.root.to_string_lossy().to_string(), folder))
+        .collect();
+    let mut schedule = Schedule::default();
+
+    stir_all(&["/etc".into()], &resolved, Instant::now(), &mut schedule);
+
+    assert!(schedule.is_empty());
+}
+
 // --- what a look at a folder decides -------------------------------------
 
 #[test]
@@ -260,7 +378,11 @@ fn a_file_dropped_into_a_watched_folder_is_filed_without_anybody_asking() {
     // The one test that involves the operating system. Generous timeouts,
     // because FSEvents and inotify are allowed to take their time and a test
     // that fails on a busy machine is worse than no test.
+    //
+    // Two things at once: a file already sitting there when watching starts,
+    // which no event will ever mention, and a file that arrives afterwards.
     let dir = governed("enforce");
+    std::fs::write(dir.path().join("already-here.jpg"), b"a picture").expect("write");
     let journal = Journal::open_in_memory().expect("journal");
     let folders = watched(&dir);
     let stop = Stop::new();
@@ -290,6 +412,17 @@ fn a_file_dropped_into_a_watched_folder_is_filed_without_anybody_asking() {
         matches!(started, Noticed::Started { watching: 1, .. }),
         "{started:?}"
     );
+    // The opening sweep files what was already there, before anything is
+    // dropped. Taking this for the dropped file's filing is the mistake this
+    // test first made: it stopped watching before the event could arrive.
+    let opening = heard
+        .recv_timeout(Duration::from_secs(10))
+        .expect("the opening sweep says what it did");
+    assert!(
+        matches!(opening, Noticed::Tidied { files: 1, .. }),
+        "{opening:?}"
+    );
+    assert!(root.join("jpg/already-here.jpg").exists());
     std::thread::sleep(Duration::from_millis(500));
     std::fs::write(root.join("holiday.jpg"), b"a picture").expect("write");
 

@@ -4,7 +4,7 @@
      interrupted sits above everything, because unfinished work is the one
      thing that should be seen before a choice is made. -->
 <script setup lang="ts">
-import { onMounted, ref, shallowRef } from "vue";
+import { onMounted, ref, shallowRef, watch } from "vue";
 import { useNav } from "../nav";
 import { useFolders } from "../state/useFolders";
 import { useWatch } from "../state/useWatch";
@@ -19,6 +19,17 @@ import TitleBar from "../ui/TitleBar.vue";
 const nav = useNav();
 const f = useFolders();
 const w = useWatch();
+
+// The watcher files things while this screen is open, and a History panel
+// saying nothing has happened underneath a panel saying it filed a file is
+// one screen contradicting itself.
+watch(w.recent, async () => {
+  try {
+    recent.value = await history.recent();
+  } catch {
+    // The panel keeps what it had; the watcher's own list still says so.
+  }
+});
 const governed = shallowRef<FolderView[]>([]);
 const pairs = shallowRef<Link[]>([]);
 const stranded = shallowRef<InterruptedRun[]>([]);

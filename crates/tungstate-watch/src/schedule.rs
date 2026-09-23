@@ -121,7 +121,9 @@ pub fn root_of<'a>(path: &Path, roots: &'a [String]) -> Option<&'a str> {
 ///
 /// Events about the policy file and the set-aside area are not news about the
 /// folder's contents, and treating them as such makes writing a plan into
-/// `.tungstate/` wake the folder that plan is about.
+/// `.tungstate/` wake the folder that plan is about. The same goes for the
+/// files every survey writes to learn what the filesystem can do: heeding
+/// those wakes the folder once a second for as long as it is watched.
 #[must_use]
 pub fn is_ours(path: &Path, root: &str) -> bool {
     let Ok(inside) = path.strip_prefix(root) else {
@@ -130,5 +132,6 @@ pub fn is_ours(path: &Path, root: &str) -> bool {
     inside.components().any(|part| {
         let name = part.as_os_str().to_string_lossy();
         tungstate_core::snapshot::RESERVED.contains(&name.as_ref())
+            || name.starts_with(tungstate_backend::local::PROBE_PREFIX)
     })
 }
