@@ -227,7 +227,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
 .dh-tabs button:hover { color: var(--text-quiet); }
 .dh-tabs .dh-on { color: var(--text); background: var(--surface-raised); }
 
-/* Retro: a tab is a block with an outline, and the one you are in is filled. */
+/* Retro: a tab is a block with an outline, and the one you are in is white and bold, like the section in the rail. */
 :global([data-theme="retro"] .dh-tabs) {
   background: none;
   padding: 0;
@@ -243,8 +243,9 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
   box-shadow: 2px 0 0 var(--edge);
 }
 :global([data-theme="retro"] .dh-tabs .dh-on) {
-  background: var(--text);
-  color: var(--field);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 700;
 }
 .dh-badge { color: var(--accent); font-size: 9px; vertical-align: 2px; }
 .dh-unfinished { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: baseline; }

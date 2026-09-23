@@ -129,12 +129,12 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 }
 .h-r { text-align: right; }
 :global([data-theme="retro"] .h-head) {
-  background: var(--text);
-  color: var(--field);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 700;
   font-family: var(--font-mono);
   padding: 5px var(--s2);
   margin: 0 calc(var(--s2) * -1);
-  border-bottom: none;
 }
 .h-row {
   display: grid;

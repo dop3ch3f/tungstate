@@ -298,7 +298,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .views { padding: 3px; background: var(--rail); border-radius: var(--radius); align-self: flex-start; margin-left: 0; }
 .views button { border-radius: var(--radius); padding: var(--s1) var(--s3); }
 
-/* Retro: a tab is a block with an outline, and the one you are in is filled. */
+/* Retro: a tab is a block with an outline, and the one you are in is white and bold, like the section in the rail. */
 :global([data-theme="retro"] .views) {
   background: none;
   padding: 0;
@@ -314,8 +314,9 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   box-shadow: 2px 0 0 var(--edge);
 }
 :global([data-theme="retro"] .views .von) {
-  background: var(--text);
-  color: var(--field);
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 700;
 }
 .howmany { font-variant-numeric: tabular-nums; opacity: 0.7; margin-left: 2px; }
 

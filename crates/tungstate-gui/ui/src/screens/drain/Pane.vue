@@ -218,10 +218,10 @@ const KIND: Record<string, string> = {
   padding: 0 var(--s2);
 }
 :global([data-theme="retro"] .cols) {
-  background: var(--text);
-  color: var(--field);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 700;
   font-family: var(--font-mono);
-  border-bottom: none;
 }
 :global([data-theme="retro"] .line) { border-bottom: var(--bw) solid var(--edge); }
 .cols {

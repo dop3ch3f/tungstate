@@ -166,12 +166,13 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   letter-spacing: 0.04em;
   text-transform: uppercase;
 }
-/* Retro: the header is a filled band, and rows are ruled, not hairlined. */
+/* Retro: the header is a band, and rows are ruled, not hairlined. */
 :global([data-theme="retro"] .key) {
-  background: var(--text);
-  color: var(--field);
+  background: var(--surface-raised);
+  color: var(--text);
+  font-weight: 700;
   padding: 5px var(--s3);
-  border-bottom: none;
+  border-bottom: var(--bw) solid var(--edge);
   text-transform: none;
   letter-spacing: 0;
   font-family: var(--font-mono);

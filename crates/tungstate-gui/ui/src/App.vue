@@ -141,8 +141,14 @@ const WHERE = {
 }
 .dest:hover { color: var(--text); background: var(--surface-hover); }
 .dest.here { color: var(--text); background: var(--surface-hover); }
-/* Retro: the section you are in is a raised, outlined button. */
-:global([data-theme="retro"] .dest.here) { background: var(--text); color: var(--field); box-shadow: var(--lift); }
+/* Retro: the section you are in is a raised, outlined button. The outline is
+   an inset shadow so the row does not grow by two borders when chosen. */
+:global([data-theme="retro"] .dest.here) {
+  background: var(--panel);
+  color: var(--text);
+  font-weight: 700;
+  box-shadow: inset 0 0 0 var(--bw) var(--edge), var(--lift);
+}
 .gap { flex: 1; }
 .live { color: var(--accent); font-size: 9px; padding: var(--s2); }
 
