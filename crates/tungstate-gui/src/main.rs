@@ -1035,11 +1035,33 @@ fn pane_state_path() -> Option<PathBuf> {
 }
 
 #[tauri::command]
-fn last_panes() -> PaneState {
-    pane_state_path()
+fn last_panes(state: State<'_, App>) -> PaneState {
+    let saved: PaneState = pane_state_path()
         .and_then(|p| std::fs::read_to_string(p).ok())
         .and_then(|raw| serde_json::from_str(&raw).ok())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    PaneState {
+        left: saved.left.and_then(|at| still_open(&at, &state.journal)),
+        right: saved.right.and_then(|at| still_open(&at, &state.journal)),
+    }
+}
+
+/// Where a remembered pane can still open, if anywhere.
+///
+/// The file outlives what it names: a folder gets deleted, or the journal is
+/// swapped for one without that connection, and the window used to open on a
+/// raw error. A local folder falls back to its nearest parent that exists. A
+/// connection is kept only if the journal knows it; whether its folder is
+/// still there is not asked, because that is a network call at launch.
+fn still_open(at: &str, journal: &Journal) -> Option<String> {
+    let end = ends::parse_end(at, None, journal).ok()?;
+    if end.connection.is_some() {
+        return Some(at.to_string());
+    }
+    end.path
+        .ancestors()
+        .find(|dir| dir.is_dir())
+        .map(|dir| dir.display().to_string())
 }
 
 #[tauri::command]
@@ -1086,9 +1108,13 @@ fn places(state: State<'_, App>) -> Vec<Place> {
         let mut mounted: Vec<_> = volumes
             .flatten()
             .filter(|e| e.path().is_dir())
+            // `.timemachine` and its like are the system's own mounts, hidden
+            // in Finder, and the first of them became the default pane.
+            .filter(|e| !e.file_name().to_string_lossy().starts_with('.'))
             // The boot volume is already reachable as /; listing it as a
             // "volume" only invites someone to drain their own system disk.
-            .filter(|e| !std::path::Path::new("/").join(e.file_name()).exists())
+            // It is a link to / from /Volumes, so ask where it leads.
+            .filter(|e| std::fs::canonicalize(e.path()).map_or(true, |real| real != Path::new("/")))
             .map(|e| Place {
                 label: e.file_name().to_string_lossy().into_owned(),
                 path: e.path().display().to_string(),
@@ -2497,6 +2523,32 @@ mod tests {
             home.path().join("a.mp4").display().to_string()
         );
         assert!(listing.parent.is_some(), "a temp dir has a parent");
+    }
+
+    #[test]
+    fn a_remembered_folder_that_was_deleted_opens_at_its_parent() {
+        // The pane used to open on "No such file or directory".
+        let home = tempfile::tempdir().unwrap();
+        let gone = home.path().join("ChatExport").join("video_files");
+        let journal = Journal::open_in_memory().unwrap();
+
+        assert_eq!(
+            still_open(&gone.display().to_string(), &journal),
+            Some(home.path().display().to_string())
+        );
+        assert_eq!(
+            still_open(&home.path().display().to_string(), &journal),
+            Some(home.path().display().to_string()),
+            "a folder that is still there is left alone"
+        );
+    }
+
+    #[test]
+    fn a_remembered_connection_this_journal_does_not_have_is_dropped() {
+        // Another journal's connection, or one since removed. Dropped, so the
+        // pane opens on its ordinary default rather than on an error.
+        let journal = Journal::open_in_memory().unwrap();
+        assert_eq!(still_open("Area51:media", &journal), None);
     }
 
     #[test]

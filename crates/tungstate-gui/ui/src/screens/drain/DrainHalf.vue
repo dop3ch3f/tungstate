@@ -24,6 +24,9 @@ const t = useTransfer();
 const places = shallowRef<Place[]>([]);
 const leftStart = ref("/");
 const rightStart = ref("/");
+// The panes wait for the remembered folders. Opening them at "/" meanwhile got
+// "/" remembered in their place whenever a remembered folder failed to open.
+const ready = ref(false);
 const problem = ref<string | null>(null);
 
 const left = useTemplateRef<InstanceType<typeof Pane>>("left");
@@ -88,9 +91,12 @@ onMounted(async () => {
     const last = await transfers.lastPanes();
     leftStart.value = last.left ?? places.value.find((p) => p.label === "Movies")?.path ?? home;
     rightStart.value = last.right ?? places.value.find((p) => p.path.startsWith("/Volumes"))?.path ?? home;
+    ready.value = true;
     await t.refreshStranded();
   } catch (e) {
     problem.value = String(e);
+  } finally {
+    ready.value = true;
   }
 });
 
@@ -137,7 +143,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
     </Notice>
 
     <div class="dh-body" v-if="where === 'files'">
-      <div class="dh-panes">
+      <div class="dh-panes" v-if="ready">
         <Pane
           ref="left" :start="leftStart" :places="places" :active="active === 'left'"
           @focus="active = 'left'" @located="leftPath = $event"
