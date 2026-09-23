@@ -1,0 +1,27 @@
+[package]
+name = "tungstate-watch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Noticing that a folder changed, and coming back to it once it has stopped
+# changing. The deciding is tungstate-core's and the moving is
+# tungstate-execute's; this only says when.
+[dependencies]
+thiserror = { workspace = true }
+notify = { workspace = true }
+notify-debouncer-full = { workspace = true }
+tungstate-core = { path = "../tungstate-core" }
+tungstate-backend = { path = "../tungstate-backend" }
+tungstate-attrs = { path = "../tungstate-attrs" }
+tungstate-execute = { path = "../tungstate-execute" }
+tungstate-journal = { path = "../tungstate-journal" }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

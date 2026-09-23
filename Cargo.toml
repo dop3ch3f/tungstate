@@ -54,6 +54,11 @@ infer = "0.19"
 # platform rather than whatever the host happens to have installed.
 jiff = { version = "0.2", features = ["serde"] }
 kamadak-exif = "0.6"
+# Watching folders. Sync-native, which is why slices 0-9 need no runtime:
+# events arrive on a standard channel and one thread owns the loop.
+notify = "8"
+# Coalesces the burst a single save produces, and pairs a rename's two halves.
+notify-debouncer-full = "0.5"
 # Decoding pictures, so two renditions of one photo can be recognised as one
 # photo. Default features minus the formats nothing here will meet.
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "tiff", "bmp", "ico"] }
