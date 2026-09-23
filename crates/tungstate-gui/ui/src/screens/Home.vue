@@ -7,6 +7,7 @@
 import { onMounted, ref, shallowRef } from "vue";
 import { useNav } from "../nav";
 import { useFolders } from "../state/useFolders";
+import { useWatch } from "../state/useWatch";
 import { folders, links, transfers, history } from "../engine/commands";
 import { shortPath, when } from "../lib/format";
 import { toneOfStatus } from "../lib/tone";
@@ -17,6 +18,7 @@ import TitleBar from "../ui/TitleBar.vue";
 
 const nav = useNav();
 const f = useFolders();
+const w = useWatch();
 const governed = shallowRef<FolderView[]>([]);
 const pairs = shallowRef<Link[]>([]);
 const stranded = shallowRef<InterruptedRun[]>([]);
@@ -52,6 +54,12 @@ function pointAtFolder() {
 const leaf = (path: string | null) => (path ?? "").split("/").pop() ?? "";
 // A lookup, because the CSS checker cannot follow a computed class name.
 const DOT = { plain: "o-plain", live: "o-live", ok: "o-ok", hold: "o-hold", bad: "o-bad" } as const;
+// A lookup, because the CSS checker cannot follow a computed class name.
+const WATCH_DOT: Record<string, string> = {
+  tidied: "o-ok",
+  waiting: "o-hold",
+  trouble: "o-bad",
+};
 </script>
 
 <template>
@@ -108,6 +116,28 @@ const DOT = { plain: "o-plain", live: "o-live", ok: "o-ok", hold: "o-hold", bad:
           </div>
         </section>
       </div>
+
+      <!-- The first thing in the app that happens without being asked, so it
+           says what it did rather than leaving it to History. -->
+      <section class="panel" v-if="w.recent.value.length">
+        <TitleBar class="pbar" of="folder" title="Kept in order" />
+        <div class="pb">
+          <ul class="rows">
+            <li v-for="notice in w.recent.value" :key="`${notice.at}${notice.folder}`" class="op">
+              <span class="o-dot" :class="WATCH_DOT[notice.kind] ?? 'o-plain'"></span>
+              <span class="o-kind">{{ notice.folder }}</span>
+              <span class="o-leaf" v-if="notice.kind === 'tidied'">
+                filed {{ notice.files }} file(s)
+              </span>
+              <span class="o-leaf" v-else-if="notice.kind === 'waiting'">
+                {{ notice.files }} file(s) arrived, waiting for you
+              </span>
+              <span class="o-leaf" v-else>{{ notice.why }}</span>
+              <span class="o-when">{{ when(notice.at) }}</span>
+            </li>
+          </ul>
+        </div>
+      </section>
 
       <section class="panel">
         <TitleBar class="pbar" of="history" title="History">

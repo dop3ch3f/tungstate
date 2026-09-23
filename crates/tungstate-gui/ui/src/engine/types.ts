@@ -242,6 +242,30 @@ export interface Cleared {
   failed: string[];
 }
 
+/** One thing the watcher did or saw. `kind` is `tidied`, `waiting`,
+ *  `trouble` or `settled`. */
+export interface Notice {
+  kind: string;
+  folder: string;
+  files: number;
+  /** The plan, so it can be undone. Zero when there is nothing to undo. */
+  plan: number;
+  why: string;
+  /** Milliseconds since the epoch. */
+  at: number;
+}
+
+export interface WatchState {
+  on: boolean;
+  running: boolean;
+  /** Folders watched for events. */
+  watching: number;
+  /** Folders only checked on the hour, because they are on a share. */
+  sweeping: number;
+  /** Newest first. */
+  recent: Notice[];
+}
+
 // --- history -------------------------------------------------------------
 
 export interface Op {

@@ -16,6 +16,11 @@ export const dupeEvents = {
   progress: on<T.ScanProgress>("dupes://progress"),
 };
 
+/** The watcher, while the window is open. */
+export const watchEvents = {
+  noticed: on<T.Notice>("watch://noticed"),
+};
+
 export const transferEvents = {
   queued: on<T.Accepted>("transfer://queued"),
   began: on<T.Began>("transfer://began"),

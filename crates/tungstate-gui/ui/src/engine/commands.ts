@@ -53,6 +53,12 @@ export const dupes = {
   rememberAction: (action: string) => invoke<void>("set_duplicate_action", { action }),
 };
 
+export const watcher = {
+  state: () => invoke<T.WatchState>("watch_state"),
+  /** Starts or stops a loop at once, rather than at the next launch. */
+  set: (on: boolean) => invoke<void>("set_watching", { on }),
+};
+
 export const history = {
   recent: () => invoke<T.Op[]>("recent"),
   ofPath: (path: string) => invoke<T.Op[]>("history", { path }),

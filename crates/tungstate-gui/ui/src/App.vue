@@ -8,6 +8,7 @@ import { onMounted, onUnmounted, ref } from "vue";
 import { useNav } from "./nav";
 import { attachTransferStream, detachTransferStream, useTransfer } from "./state/useTransfer";
 import { attachDupeStream, detachDupeStream } from "./state/useDupes";
+import { attachWatchStream, detachWatchStream, useWatch } from "./state/useWatch";
 import Home from "./screens/Home.vue";
 import FolderHalf from "./screens/folder/FolderHalf.vue";
 import DrainHalf from "./screens/drain/DrainHalf.vue";
@@ -31,10 +32,15 @@ onMounted(() => {
   // ever with nothing on screen to say why.
   void attachTransferStream();
   void attachDupeStream();
+  void attachWatchStream();
+  // What the watcher did before this screen existed: the loop starts when the
+  // window does, so by the time anybody looks there may already be a record.
+  void useWatch().load();
 });
 onUnmounted(() => {
   detachTransferStream();
   detachDupeStream();
+  detachWatchStream();
 });
 
 const WHERE = {

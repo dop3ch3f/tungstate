@@ -5,6 +5,7 @@
 <script setup lang="ts">
 import { onMounted, ref, shallowRef } from "vue";
 import { storage } from "../engine/commands";
+import { useWatch } from "../state/useWatch";
 import type { ArchiveView } from "../engine/types";
 import { bytes } from "../lib/format";
 import { ask } from "../ui/useDialog";
@@ -17,6 +18,7 @@ const archives = shallowRef<ArchiveView[]>([]);
 const problem = ref<string | null>(null);
 const said = ref<string | null>(null);
 const busy = ref(false);
+const w = useWatch();
 
 async function load() {
   try {
@@ -25,7 +27,10 @@ async function load() {
     problem.value = String(e);
   }
 }
-onMounted(load);
+onMounted(() => {
+  void load();
+  void w.load();
+});
 
 /** Every action here reports one sentence or one error, and never both. */
 async function act(work: () => Promise<string | null>) {
@@ -105,6 +110,34 @@ const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
       <div class="head"><Tile of="settings" :size="26" /><h1>Settings</h1></div>
 
       <section class="st-sec">
+        <h2>Keeping folders in order</h2>
+        <label class="st-switch">
+          <input
+            type="checkbox"
+            :checked="w.on.value"
+            @change="w.set(($event.target as HTMLInputElement).checked)"
+          />
+          <span>
+            Keep folders in order while Tungstate is open
+            <em>
+              Folders you have set to enforce are tidied on their own as files
+              arrive and settle. The rest are only ever told about. There is no
+              background service yet, so this stops when you close the window.
+            </em>
+          </span>
+        </label>
+        <p class="st-why" v-if="w.on.value && w.running.value">
+          Watching {{ w.watching.value }} folder{{ w.watching.value === 1 ? "" : "s" }}<template
+            v-if="w.sweeping.value"
+          >, and checking {{ w.sweeping.value }} on a share every hour instead, because a
+          share says nothing about a change another machine made</template>.
+        </p>
+        <p class="st-why" v-else-if="w.on.value">
+          Nothing to watch yet. Add a folder under Organize.
+        </p>
+      </section>
+
+      <section class="st-sec">
         <h2>What Tungstate remembers</h2>
         <p class="st-why">
           Your connections, saved pairs, and the record of every file it has moved.
@@ -150,6 +183,8 @@ const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .st-sec { margin-top: var(--s6); display: flex; flex-direction: column; gap: var(--s3); }
 .st-sec h2 { font-size: var(--body); font-weight: 600; margin: 0; }
+.st-switch { display: flex; align-items: flex-start; gap: var(--s2); font-size: var(--small); max-width: 66ch; }
+.st-switch em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.5; margin-top: 3px; }
 .st-why { font-size: var(--small); color: var(--text-quiet); margin: 0; max-width: 70ch; line-height: 1.5; }
 .st-do { display: flex; gap: var(--s2); }
 .st-row {

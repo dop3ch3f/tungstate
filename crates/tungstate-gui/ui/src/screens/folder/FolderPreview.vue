@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from "vue";
 import { useFolders } from "../../state/useFolders";
+import { useWatch } from "../../state/useWatch";
 import { folders } from "../../engine/commands";
 import { bytes, duration } from "../../lib/format";
 import { wouldMove, outOf, moved, skipped, failed, putBack, files, dirsCounted } from "../../lib/counts";
@@ -14,6 +15,8 @@ import Notice from "../../ui/Notice.vue";
 import Working from "../../ui/Working.vue";
 
 const f = useFolders();
+const w = useWatch();
+
 type View = "trees" | "moves" | "alone" | "ruletext";
 const view = ref<View>("trees");
 const rules = ref<string | null>(null);
@@ -23,6 +26,17 @@ const p = computed(() => f.preview.value);
  *  declares. A folder called `messy-downloads` under the `downloads` layout
  *  was rendering as "downloads", on the page and in the question. */
 const name = computed(() => f.current.value?.name ?? f.root.value?.split("/").pop() ?? "");
+/** What the watcher has noticed arriving in this folder and not filed.
+ *
+ *  Only for folders that do not file things on their own: in enforce the
+ *  watcher has already dealt with it, and saying "4 files arrived" about files
+ *  that are no longer there would be a lie with a timestamp on it. */
+const arrived = computed(() => {
+  const here = name.value;
+  return w.recent.value.find(
+    (notice) => notice.kind === "waiting" && notice.folder === here,
+  );
+});
 
 /** `PreviewView` has no `created`/`removed`, but both trees mark their
  *  directories, so the two numbers are a comparison rather than a missing
@@ -127,6 +141,10 @@ async function confirmPutBack() {
             {{ files(failed(f.tidied.value)) }} could not be moved.
           </template>
         </template>
+      </Notice>
+      <Notice tone="hold" v-if="arrived">
+        {{ arrived.files }} file{{ arrived.files === 1 ? "" : "s" }} arrived while you
+        were away. Tidy up files {{ arrived.files === 1 ? "it" : "them" }}.
       </Notice>
       <Notice tone="plain" v-if="f.putBackCount.value !== null">
         Put {{ f.putBackCount.value }} file{{ f.putBackCount.value === 1 ? "" : "s" }} back.

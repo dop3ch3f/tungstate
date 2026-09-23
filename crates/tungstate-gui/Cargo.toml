@@ -21,6 +21,7 @@ tungstate-journal = { path = "../tungstate-journal" }
 tungstate-likeness = { path = "../tungstate-likeness" }
 tungstate-transfer = { path = "../tungstate-transfer" }
 tungstate-execute = { path = "../tungstate-execute" }
+tungstate-watch = { path = "../tungstate-watch" }
 tungstate-attrs = { path = "../tungstate-attrs" }
 tungstate-core = { path = "../tungstate-core" }
 directories = { workspace = true }

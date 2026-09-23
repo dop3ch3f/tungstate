@@ -15,6 +15,7 @@
 
 mod bridge;
 mod dupes;
+mod watching;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
@@ -51,6 +52,8 @@ struct App {
     /// exists to reach it. Shared rather than moved into the worker, which is
     /// the whole of what lets a transfer be added to one already in flight.
     queue: RunQueue<Link>,
+    /// The folder watcher, and what it has done since the window opened.
+    watcher: Arc<watching::Watching>,
     /// Where small pictures of what a scan found are kept.
     ///
     /// `None` when the cache directory could not be made, which costs pictures
@@ -505,6 +508,55 @@ fn find_duplicates(
 #[tauri::command(async)]
 fn undo_duplicates(target: String, plan: i64, state: State<'_, App>) -> Result<usize, String> {
     dupes::put_back(&target, plan, &state.journal)
+}
+
+/// Whether folders are being kept in order, and what has happened.
+#[tauri::command]
+fn watch_state(state: State<'_, App>) -> Result<watching::WatchView, String> {
+    let on = watching::wanted(&state.journal)?;
+    Ok(state.watcher.view(on))
+}
+
+/// Turn watching on or off, and remember which.
+///
+/// Turning it on starts a loop at once rather than waiting for the next
+/// launch: a switch that does nothing until you restart is a switch people
+/// stop believing.
+#[tauri::command]
+fn set_watching(on: bool, app: AppHandle, state: State<'_, App>) -> Result<(), String> {
+    watching::remember(&state.journal, on)?;
+    if on {
+        begin_watching(&app, &state.watcher);
+    } else {
+        state.watcher.halt();
+    }
+    Ok(())
+}
+
+/// Start the watcher when the window opens, unless it has been turned off.
+///
+/// Here rather than lazily from a screen: the folder is meant to be kept in
+/// order whether or not anybody is looking at the page that says so.
+fn begin_watching_if_wanted(app: &AppHandle, watcher: &Arc<watching::Watching>) {
+    let wanted = open_journal()
+        .ok()
+        .and_then(|journal| watching::wanted(&journal).ok());
+    if wanted == Some(true) {
+        begin_watching(app, watcher);
+    }
+}
+
+/// Start the watcher, with the window as its audience.
+fn begin_watching(app: &AppHandle, watcher: &Arc<watching::Watching>) {
+    let Ok(journal) = open_journal() else {
+        return;
+    };
+    let reporter = app.clone();
+    watching::start(watcher, journal, move |notice| {
+        // Dropped rather than raised: a window that cannot hear the watcher is
+        // not a reason to stop keeping folders in order.
+        let _ = reporter.emit("watch://noticed", notice);
+    });
 }
 
 /// The places scanned before, newest first.
@@ -2093,6 +2145,8 @@ fn main() {
 
     let thumbs = cache_dir().and_then(|dir| Thumbs::at(&dir.join("thumbnails")).ok());
     let serving = thumbs.clone();
+    let watcher: Arc<watching::Watching> = Arc::default();
+    let starting = Arc::clone(&watcher);
 
     tauri::Builder::default()
         // Small pictures reach the window over their own scheme rather than
@@ -2114,9 +2168,14 @@ fn main() {
             conflicts: ConflictChannel::default(),
             cancel: Arc::new(Stop::new()),
             scan: dupes::Scan::default(),
+            watcher: Arc::clone(&watcher),
             thumbs,
             queue: RunQueue::new(),
             at_once_ceiling: AtomicUsize::new(0),
+        })
+        .setup(move |app| {
+            begin_watching_if_wanted(&app.handle().clone(), &starting);
+            Ok(())
         })
         .invoke_handler(tauri::generate_handler![
             governed,
@@ -2135,6 +2194,8 @@ fn main() {
             stop_finding_duplicates,
             recent_scans,
             undo_duplicates,
+            watch_state,
+            set_watching,
             clear_duplicates,
             duplicate_action,
             set_duplicate_action,

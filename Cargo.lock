@@ -5964,6 +5964,7 @@ dependencies = [
  "tungstate-likeness",
  "tungstate-secret",
  "tungstate-transfer",
+ "tungstate-watch",
 ]
 
 [[package]]
