@@ -166,6 +166,52 @@ The grouping, the choice of leader and the plan live in
 produce a `Found` with one more field. Everything downstream of it, the
 confirm, the plan, the executor, the journal and `Put it back`, is untouched.
 
+## The window, which this slice rebuilds around a picture
+
+**Asked for on 2026-09-23**, with a screenshot of Gemini by MacPaw: the point
+of that window is that a person can *see* the file before agreeing it is a
+duplicate. A list of paths cannot be checked by a human being, and a fuzzy
+match that cannot be checked by a human being has no business existing.
+
+So the results screen from 8c is replaced, for both passes at once, by three
+panes:
+
+**Left, what kind of thing.** *Exact duplicates* over *Similar files*, each
+split by kind with the space each one holds: pictures, video, sound, documents,
+archives, applications, folders, everything else. This is the first screen in
+the app that answers "where did my disk go" before it answers "what should I
+delete". Kinds come from the mime `tungstate-attrs` already reads, plus two
+special cases macOS needs: a `.app` is an application rather than a folder, and
+a folder group is its own kind.
+
+**Middle, the groups.** One row per group: a small picture of the copy being
+kept, its name, its size, and how many of its copies are ticked out of how many
+exist. The row opens to show every copy with its own checkbox, its full path
+and its date.
+
+**Right, the file.** The highlighted copy, as large as the pane allows. A
+picture for a picture, the sampled frame for a video, and for everything else
+its name, size, date and where it lives. The header says how many copies are
+ticked and how many were found.
+
+**The foot.** What was found in total, what is ticked, and the one action
+button, which already says which action it will take.
+
+Below about 1000 points of width the preview folds into a toggle rather than
+squeezing three panes into 860, which is the same rule the transfer panes use.
+
+### The selection model changes with it
+
+8c ticked a whole group and let you nominate which copy survived it. That
+cannot express what this window shows, where four copies each have a checkbox
+and you may keep two of them.
+
+So the seam takes **paths, not groups**: the window sends the copies it wants
+dealt with, and the engine refuses any request that would leave a group with
+nothing, rather than trusting the window to have counted. The property that
+every group keeps one copy moves from being something the UI arranges into
+something the engine will not let the UI get wrong.
+
 ## What the window must never do
 
 1. **Never tick a resemblance for you.** The exact pass ticks everything
