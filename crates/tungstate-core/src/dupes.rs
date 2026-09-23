@@ -60,6 +60,14 @@ pub struct Wants {
     pub settled: BTreeSet<String>,
     /// Skip the directory-level grouping.
     pub files_only: bool,
+    /// Group on samples rather than reading every byte.
+    ///
+    /// For a network volume, where reading a file in full pulls it across the
+    /// network: four 64 KiB samples and the exact size cost about a five
+    /// thousandth of a 400 MB video. A group found this way is marked
+    /// [`Group::sure`] `= false`, and **nothing may be moved on the strength
+    /// of it** until it has been confirmed in full.
+    pub sampled: bool,
 }
 
 /// One copy of some content.
@@ -102,6 +110,12 @@ pub struct Group {
     pub why: Kept,
     /// The copies that would be dealt with. Never empty.
     pub extras: Vec<Copy>,
+    /// Whether every byte was compared.
+    ///
+    /// False when the group came from samples, which is almost certainly the
+    /// same file and is not proof. The window says so, and anything about to
+    /// act confirms first.
+    pub sure: bool,
 }
 
 impl Group {
@@ -125,6 +139,8 @@ pub struct FolderGroup {
     pub files: usize,
     /// What one of them weighs.
     pub bytes: u64,
+    /// Whether every byte was compared, as [`Group::sure`].
+    pub sure: bool,
 }
 
 impl FolderGroup {
@@ -198,6 +214,13 @@ impl Found {
     #[must_use]
     pub fn linked_names(&self) -> usize {
         self.linked.iter().map(|one| one.names.len() - 1).sum()
+    }
+
+    /// Groups that were matched on samples and have not been confirmed.
+    #[must_use]
+    pub fn unsure(&self) -> usize {
+        self.groups.iter().filter(|group| !group.sure).count()
+            + self.folders.iter().filter(|group| !group.sure).count()
     }
 
     /// True when there is nothing to do.
@@ -300,9 +323,15 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
             by_partial.entry(mark).or_default().push(file);
         }
 
-        // 3. Every byte, and only now are two files called the same.
-        for (_, same_ends) in by_partial.iter().filter(|(_, same)| same.len() > 1) {
+        // 3. Every byte, and only now are two files called the same. Skipped
+        //    on a network volume, where that means pulling both files across
+        //    it; the samples stand in, and the group says it is unconfirmed.
+        for (sampled, same_ends) in by_partial.iter().filter(|(_, same)| same.len() > 1) {
             for file in same_ends {
+                if wants.sampled {
+                    by_hash.entry(sampled.clone()).or_default().push(file);
+                    continue;
+                }
                 let path = file.relative_path();
                 let whole = digest.whole(&path).map_err(|why| Trouble::Unreadable {
                     path: path.clone(),
@@ -314,11 +343,11 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
         }
     }
 
-    let groups = groups_of(&by_hash, wants)?;
+    let groups = groups_of(&by_hash, wants, !wants.sampled)?;
     let (folders, covered) = if wants.files_only {
         (Vec::new(), BTreeSet::new())
     } else {
-        folders_of(snapshot, &by_hash, &groups, wants)
+        folders_of(snapshot, &by_hash, &groups, wants, !wants.sampled)
     };
 
     // A file inside a copied directory is dealt with by the directory, so it
@@ -356,6 +385,7 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
 fn groups_of(
     by_hash: &BTreeMap<String, Vec<&Attributes>>,
     wants: &Wants,
+    sure: bool,
 ) -> Result<Vec<Group>, Trouble> {
     let mut groups = Vec::new();
     for (hash, copies) in by_hash.iter().filter(|(_, copies)| copies.len() > 1) {
@@ -387,6 +417,7 @@ fn groups_of(
             keep,
             why,
             extras,
+            sure,
         });
     }
     Ok(groups)
@@ -453,6 +484,7 @@ fn folders_of(
     by_hash: &BTreeMap<String, Vec<&Attributes>>,
     groups: &[Group],
     wants: &Wants,
+    sure: bool,
 ) -> (Vec<FolderGroup>, BTreeSet<String>) {
     // Only a directory whose every file has a twin somewhere can be a copy.
     let twinned: BTreeMap<String, String> = by_hash
@@ -548,6 +580,7 @@ fn folders_of(
             extras,
             files,
             bytes,
+            sure,
         });
     }
     (folders, covered)
@@ -696,4 +729,109 @@ fn free_name(wanted: &str, snapshot: &Snapshot, taken: &BTreeSet<String>) -> Str
         .map(|nth| format!("{stem}-{nth}{extension}"))
         .find(|candidate| !taken.contains(&snapshot.key(candidate)))
         .unwrap_or_else(|| format!("{stem}-{}{extension}", uuid_ish(wanted)))
+}
+
+/// Confirm a sampled group by comparing every byte, and say what survived.
+///
+/// Samples make a group worth showing; they never make it worth acting on.
+/// Anything about to move files calls this first, and it reads only the group
+/// being acted on rather than the folder.
+///
+/// # Errors
+/// [`Trouble::Unreadable`] if a file cannot be read.
+pub fn confirm(group: &Group, digest: &mut dyn Digest) -> Result<Option<Group>, Trouble> {
+    if group.sure {
+        return Ok(Some(group.clone()));
+    }
+    let read = |digest: &mut dyn Digest, path: &str| {
+        digest.whole(path).map_err(|why| Trouble::Unreadable {
+            path: path.to_string(),
+            why,
+        })
+    };
+
+    let keep = read(digest, &group.keep)?;
+    let mut extras = Vec::new();
+    for copy in &group.extras {
+        if read(digest, &copy.path)? == keep {
+            extras.push(copy.clone());
+        }
+    }
+    if extras.is_empty() {
+        // The samples agreed and the files do not. Nothing to do here, and
+        // the caller says so rather than quietly moving on.
+        return Ok(None);
+    }
+    Ok(Some(Group {
+        id: keep,
+        sure: true,
+        extras,
+        ..group.clone()
+    }))
+}
+
+/// Confirm a sampled folder group by comparing every file in it.
+///
+/// A copied folder is its files, so confirming it is confirming each pair. A
+/// directory whose files do not all match is dropped from the group rather
+/// than the whole group being thrown away: one of three copies being
+/// different is a fact about that one.
+///
+/// # Errors
+/// [`Trouble::Unreadable`] if a file cannot be read.
+pub fn confirm_folder(
+    group: &FolderGroup,
+    snapshot: &Snapshot,
+    digest: &mut dyn Digest,
+) -> Result<Option<FolderGroup>, Trouble> {
+    if group.sure {
+        return Ok(Some(group.clone()));
+    }
+    let read = |digest: &mut dyn Digest, path: &str| {
+        digest.whole(path).map_err(|why| Trouble::Unreadable {
+            path: path.to_string(),
+            why,
+        })
+    };
+
+    let inside: Vec<String> = snapshot
+        .entries
+        .iter()
+        .filter(|entry| !entry.is_dir)
+        .filter_map(|entry| {
+            entry
+                .relative_path()
+                .strip_prefix(&format!("{}/", group.keep))
+                .map(ToString::to_string)
+        })
+        .collect();
+
+    let mut wanted = BTreeMap::new();
+    for relative in &inside {
+        let path = format!("{}/{relative}", group.keep);
+        wanted.insert(relative.clone(), read(digest, &path)?);
+    }
+
+    let mut extras = Vec::new();
+    for extra in &group.extras {
+        let mut matches = true;
+        for (relative, expected) in &wanted {
+            let path = format!("{extra}/{relative}");
+            if read(digest, &path)? != *expected {
+                matches = false;
+                break;
+            }
+        }
+        if matches {
+            extras.push(extra.clone());
+        }
+    }
+    if extras.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(FolderGroup {
+        extras,
+        sure: true,
+        ..group.clone()
+    }))
 }

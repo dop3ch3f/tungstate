@@ -118,6 +118,10 @@ pub struct Entry {
 /// case-sensitive volume on macOS and a FAT stick on Linux both defy the
 /// obvious guess, so implementations should discover these rather than assume.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+/// Four answers about one storage location, each a yes or a no. They are
+/// independent facts rather than a state, so a struct of flags is what they
+/// are; grouping them into enums would only hide that.
+#[allow(clippy::struct_excessive_bools)]
 pub struct Capabilities {
     /// Rename is atomic, so a commit cannot be observed half-done.
     pub atomic_rename: bool,
@@ -125,6 +129,13 @@ pub struct Capabilities {
     pub hard_links: bool,
     /// Paths differing only in case refer to different files.
     pub case_sensitive: bool,
+    /// The bytes live on another machine, reached over a network.
+    ///
+    /// True for a mounted NAS as well as for a connection: a share mounted in
+    /// Finder looks like an ordinary folder path, and reading a file on it
+    /// still pulls every byte across the network. The duplicate pass samples
+    /// rather than reads in full when this is set.
+    pub networked: bool,
 }
 
 /// A cheap identifier for a backend's root.

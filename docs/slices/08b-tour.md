@@ -221,6 +221,51 @@ by `undo --last` and is refused by name by `undo --plan`.
 `cargo fmt`, `clippy -D warnings`, 488 tests, CI green on Linux, macOS and
 Windows.
 
+## 10b. Finding duplicates over a network without reading the network dry
+
+Reading a file to hash it means pulling every byte of it across the network
+when the folder is a share. A NAS folder of 200 GB of video would mean 200 GB
+of transfer to answer a question that moves nothing. Four changes, in order of
+how much they save:
+
+**The journal already knows.** Every verified transfer records the BLAKE3 of
+what it wrote, so for anything tungstate put somewhere the digest is already
+in the ops table and costs no reading at all. `Journal::hash_at` returns it
+when the size still matches and the op finished at or after the file's own
+mtime, which is what makes it a fact about the bytes that are there now.
+
+It is matched on the path in SQL and on the root **in Rust**, because a link
+writes the root it was given and `folder add` canonicalises one, so on macOS
+one row says `/tmp` and the other `/private/tmp`. SQLite cannot follow a
+symlink; `resolve_for_lookup` can. Without that the lookup silently never
+matched, which is exactly how this looked when it was first written.
+
+**Four samples instead of two.** The cheap tier now digests the first and last
+64 KiB *and* two interior points at a third and two thirds, mixed with the
+exact size. Two files that share a header and a trailer are the ordinary case
+for anything out of one camera or one encoder; two that share all four
+samples and the byte count are not. Over FTP each sample is a `REST` then a
+`RETR`, so a 400 MB video costs 256 KiB.
+
+**Samples group, they never decide.** On a networked backend the pass stops
+there: the group is reported with `sure: false` and the report says *almost
+certainly the same; confirmed before anything moves*. `Capabilities.networked`
+is what decides, and it is a real answer rather than a guess: `statfs` names
+the filesystem on macOS (`smbfs`, `afpfs`, `nfs`, `webdav`) and numbers it on
+Linux, and every OpenDAL connection but the local-filesystem one is remote by
+construction. `rustix` wraps the syscall, because the workspace forbids
+`unsafe` and one small dependency is a better answer than an exception.
+
+**The expensive read happens once, for what you act on.** `dupes::confirm` and
+`confirm_folder` read every byte of the groups about to be dealt with, drop
+any copy the samples got wrong, and say how many. A folder group is its files,
+so confirming one is confirming each pair. Past a gigabyte of confirming over
+a network it asks first, and `--yes` skips the question.
+
+The safety property is unchanged and now enforced in two places: **nothing is
+moved on the strength of a sample.** `a_group_the_samples_got_wrong_is_dropped_entirely`
+is the test that says so.
+
 ## 11. What is not in this slice
 
 - **The window.** Slice 8c: its own Duplicates section, groups with every copy
@@ -234,12 +279,14 @@ Windows.
 
 ## What is still not verified
 
-- **Only run on local folders.** The pass goes through `Backend`, so a
-  connection should work, but full hashing over FTP has not been tried and
-  would read every byte across the network. The brief's "warn before hashing a
-  lot over a network" is **not implemented**: it needs a size threshold nobody
-  has picked yet, and `LocalBackend` cannot currently tell a mounted NAS from
-  the boot disk, which is the other half of the question.
+- **The sampling path has not been run against a real share.** It is tested in
+  the core pass and the decision point is `Capabilities.networked`, which is
+  answered by `statfs`, but nothing has yet pointed `dedupe` at a mounted NAS
+  or an FTP connection. The CLI also still only accepts a local path: a
+  `connection:folder` target is the window's slice.
+- **Windows treats every volume as local**, so a mapped network drive there
+  will be read in full rather than sampled. `GetDriveType` answers it and
+  needs an API crate the workspace does not carry.
 - **Hard links are not detected on Windows** (§9). A hard-linked pair there is
   still reported as a duplicate, and setting one name aside reclaims nothing.
 - **Scale.** The largest folder tried was a few hundred files. A drive with

@@ -320,6 +320,7 @@ fn store_anchored(prefix: &str) -> OpendalBackend {
         prefix.to_string(),
         Anchor::Store,
         "scratch".to_string(),
+        false,
     )
 }
 

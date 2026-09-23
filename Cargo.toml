@@ -18,6 +18,9 @@ rusqlite = { version = "0.40", features = ["bundled"] }
 directories = "6"
 blake3 = "1.8"
 trash = "5.2"
+# A safe wrapper for one syscall, `statfs`: the workspace forbids `unsafe`,
+# and asking whether a folder is on a share is worth one small dependency.
+rustix = { version = "1", features = ["fs"] }
 # Only the services this slice registers. `fs` is how the adapter is exercised
 # on all three platforms with no server; FTP arrives in 4c as one more flag.
 opendal = { version = "0.59", default-features = false, features = ["executors-tokio", "services-fs", "services-memory"] }

@@ -128,11 +128,15 @@ pub fn open(
         path: endpoint.path.clone(),
         source,
     })?;
+    // A folder reached through the local-filesystem adapter is on this
+    // machine; everything else is a network away.
+    let networked = !matches!(connection.scheme, Scheme::Fs);
     Ok(Box::new(OpendalBackend::new(
         operator,
         prefix,
         anchor,
         connection.name,
+        networked,
     )))
 }
 

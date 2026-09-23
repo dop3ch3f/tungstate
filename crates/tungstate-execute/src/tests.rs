@@ -801,3 +801,45 @@ fn a_digest_is_read_once_and_remembered() {
     );
     assert!(again.hits() > 0);
 }
+
+#[test]
+fn a_hash_a_transfer_already_recorded_costs_no_reading() {
+    let fixture = Fixture::new(inert(), &[("clip.mp4", "the same bytes")]);
+    let backend = fixture.backend();
+    let root = fixture.root();
+    let snapshot = fixture.survey();
+    let file = snapshot
+        .entries
+        .iter()
+        .find(|entry| entry.relative_path() == "clip.mp4")
+        .expect("the file is there");
+
+    // What a verified transfer writes: the content hash of what it put there.
+    let op = fixture
+        .journal
+        .begin(&tungstate_journal::NewOp {
+            kind: tungstate_journal::OpKind::Move,
+            source: None,
+            destination: Some(tungstate_journal::Location::new(root.clone(), "clip.mp4")),
+            size: Some(file.size),
+            link: None,
+            link_id: None,
+        })
+        .expect("recorded");
+    fixture
+        .journal
+        .finish(
+            op,
+            &tungstate_journal::Outcome::Committed {
+                hash: Some("a-recorded-digest".to_string()),
+            },
+        )
+        .expect("committed");
+
+    let mut digest = crate::digest::Cached::new(&backend, &fixture.journal, &root);
+    let found = tungstate_core::dupes::Digest::whole(&mut digest, "clip.mp4").expect("a digest");
+
+    assert_eq!(found, "a-recorded-digest");
+    assert_eq!(digest.recorded(), 1);
+    assert_eq!(digest.reads(), 0, "the file was never opened");
+}

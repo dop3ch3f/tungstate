@@ -1030,3 +1030,68 @@ impl Journal {
         Ok(())
     }
 }
+
+impl Journal {
+    /// A content hash this journal already knows for a file, if it can be
+    /// trusted for the file as it is now.
+    ///
+    /// Every verified transfer records the BLAKE3 of what it wrote, so for
+    /// anything tungstate put somewhere the digest is already here and costs
+    /// no reading at all. Trusted only when the size still matches and the
+    /// file has not been written since we recorded it: `unchanged_since` is
+    /// the file's own mtime, and an op that finished after that describes the
+    /// bytes that are there now.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn hash_at(
+        &self,
+        root: &str,
+        path: &str,
+        size: u64,
+        unchanged_since: Option<i64>,
+    ) -> Result<Option<String>> {
+        // Matched on the path and the size in SQL, then on the root in Rust,
+        // because the two spellings of one folder cannot be compared without
+        // resolving them and SQLite cannot follow a symlink. A link writes the
+        // root it was given and `folder add` canonicalises, so on macOS one
+        // side says `/tmp` and the other `/private/tmp`.
+        let here = resolve_for_lookup(Path::new(root));
+        let conn = self.lock();
+        let mut statement = conn
+            .prepare(
+                "SELECT dst_root, hash, finished_at FROM ops
+                 WHERE dst_path = ?1 AND size = ?2
+                   AND hash IS NOT NULL AND status = 'committed'
+                   AND finished_at IS NOT NULL
+                 ORDER BY id DESC LIMIT 32",
+            )
+            .map_err(query("reading a recorded hash"))?;
+        let rows = statement
+            .query_map(
+                rusqlite::params![path, i64::try_from(size).unwrap_or(i64::MAX)],
+                |row| {
+                    Ok((
+                        row.get::<_, String>("dst_root")?,
+                        row.get::<_, String>("hash")?,
+                        row.get::<_, i64>("finished_at")?,
+                    ))
+                },
+            )
+            .map_err(query("reading a recorded hash"))?;
+
+        for row in rows {
+            let (stored, hash, finished) = row.map_err(query("reading a recorded hash"))?;
+            if resolve_for_lookup(Path::new(&stored)) != here {
+                continue;
+            }
+            // Written at or after the file's own mtime, so the digest
+            // describes the bytes that are there now rather than bytes that
+            // have since been overwritten.
+            if unchanged_since.is_none_or(|since| finished >= since) {
+                return Ok(Some(hash));
+            }
+        }
+        Ok(None)
+    }
+}

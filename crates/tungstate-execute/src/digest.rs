@@ -17,8 +17,14 @@ use tungstate_backend::Backend;
 use tungstate_core::dupes::Digest;
 use tungstate_journal::{Journal, Remembered};
 
-/// How much of each end a partial digest reads. DESIGN §5.
-const ENDS: u64 = 64 * 1024;
+/// How much each sample reads. DESIGN §5 asks for the two ends; the interior
+/// ones are what make a sampled match worth reporting on a network volume.
+const SAMPLE: u64 = 64 * 1024;
+
+/// Where the samples are taken, as fractions of the file. The ends catch a
+/// header and a trailer; the interior two catch two files that share both,
+/// which is every re-encode of the same video.
+const AT: [f64; 2] = [0.33, 0.66];
 
 /// A [`Digest`] that reads through a backend and remembers what it computed.
 pub struct Cached<'a> {
@@ -29,6 +35,10 @@ pub struct Cached<'a> {
     /// journal is consulted.
     hits: usize,
     reads: usize,
+    /// Digests the journal already knew because a transfer computed them.
+    recorded: usize,
+    /// Bytes read from the storage.
+    bytes: u64,
 }
 
 impl<'a> Cached<'a> {
@@ -41,6 +51,8 @@ impl<'a> Cached<'a> {
             root: root.to_string(),
             hits: 0,
             reads: 0,
+            recorded: 0,
+            bytes: 0,
         }
     }
 
@@ -54,6 +66,19 @@ impl<'a> Cached<'a> {
     #[must_use]
     pub fn reads(&self) -> usize {
         self.reads
+    }
+
+    /// How many whole-file digests came from a transfer's own record, so cost
+    /// no reading at all.
+    #[must_use]
+    pub fn recorded(&self) -> usize {
+        self.recorded
+    }
+
+    /// Bytes pulled from the storage this pass.
+    #[must_use]
+    pub fn bytes(&self) -> u64 {
+        self.bytes
     }
 
     /// Size and mtime as the cache keys them: mtime in whole seconds, because
@@ -84,6 +109,32 @@ impl<'a> Cached<'a> {
         Ok(digest)
     }
 
+    /// `len` bytes from `offset`, as one ranged read where the backend can do
+    /// one. Over FTP that is `REST` then `RETR`, so a sample of a 4 GB video
+    /// costs 64 KiB rather than 4 GB.
+    fn read_at(&mut self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
+        let bytes = if offset == 0 {
+            self.backend
+                .read_prefix(Path::new(path), len)
+                .map_err(|error| error.to_string())?
+        } else {
+            let mut reader = self
+                .backend
+                .open_read(Path::new(path))
+                .map_err(|error| error.to_string())?;
+            std::io::copy(&mut (&mut reader).take(offset), &mut std::io::sink())
+                .map_err(|error| error.to_string())?;
+            let mut buffer = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
+            reader
+                .take(len)
+                .read_to_end(&mut buffer)
+                .map_err(|error| error.to_string())?;
+            buffer
+        };
+        self.bytes += bytes.len() as u64;
+        Ok(bytes)
+    }
+
     fn keep(&self, path: &str, digest: &Remembered) -> Result<(), String> {
         let (size, mtime) = self.stamp(path)?;
         self.journal
@@ -99,31 +150,25 @@ impl Digest for Cached<'_> {
         }
         let (size, _) = self.stamp(path)?;
         let mut hasher = blake3::Hasher::new();
-        // The size goes in first, so two different files whose ends match by
-        // chance are still told apart at this tier rather than at the next.
+        // The size goes in first, so two different files whose samples match
+        // by chance are still told apart here rather than at the next tier.
         hasher.update(&size.to_le_bytes());
-        let head = self
-            .backend
-            .read_prefix(Path::new(path), ENDS)
-            .map_err(|error| error.to_string())?;
-        hasher.update(&head);
-        if size > ENDS * 2 {
-            // No ranged read from the end exists on the trait, so the tail is
-            // reached by reading and discarding. Still one pass over the file
-            // at worst, and on a local disk the skipped bytes cost nothing.
-            let mut reader = self
-                .backend
-                .open_read(Path::new(path))
-                .map_err(|error| error.to_string())?;
-            let skip = size - ENDS;
-            std::io::copy(&mut (&mut reader).take(skip), &mut std::io::sink())
-                .map_err(|error| error.to_string())?;
-            let mut tail = Vec::with_capacity(usize::try_from(ENDS).unwrap_or(0));
-            reader
-                .take(ENDS)
-                .read_to_end(&mut tail)
-                .map_err(|error| error.to_string())?;
-            hasher.update(&tail);
+        hasher.update(&self.read_at(path, 0, SAMPLE)?);
+        for fraction in AT {
+            // Interior samples: two files that share a header and a trailer
+            // are the ordinary case for anything from one camera or encoder.
+            #[allow(
+                clippy::cast_precision_loss,
+                clippy::cast_sign_loss,
+                clippy::cast_possible_truncation
+            )]
+            let at = (size as f64 * fraction) as u64;
+            if at > SAMPLE && size > at + SAMPLE {
+                hasher.update(&self.read_at(path, at, SAMPLE)?);
+            }
+        }
+        if size > SAMPLE * 2 {
+            hasher.update(&self.read_at(path, size - SAMPLE, SAMPLE)?);
         }
         self.reads += 1;
         let digest = hasher.finalize().to_hex().to_string();
@@ -141,6 +186,25 @@ impl Digest for Cached<'_> {
         if let Some(found) = self.recall(path, true)? {
             return Ok(found);
         }
+        // A verified transfer wrote this file and recorded what it hashed, so
+        // for anything tungstate put here the answer costs nothing at all.
+        let (size, mtime) = self.stamp(path)?;
+        if let Some(found) = self
+            .journal
+            .hash_at(&self.root, path, size, mtime.map(|seconds| seconds * 1_000))
+            .map_err(|error| error.to_string())?
+        {
+            self.recorded += 1;
+            self.keep(
+                path,
+                &Remembered {
+                    partial: None,
+                    whole: Some(found.clone()),
+                },
+            )?;
+            return Ok(found);
+        }
+
         let mut reader = self
             .backend
             .open_read(Path::new(path))
@@ -154,6 +218,7 @@ impl Digest for Cached<'_> {
             if read == 0 {
                 break;
             }
+            self.bytes += read as u64;
             hasher.update(&buffer[..read]);
         }
         self.reads += 1;

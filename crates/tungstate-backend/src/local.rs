@@ -142,6 +142,7 @@ fn probe(root: &Path) -> Capabilities {
         atomic_rename: true,
         hard_links: probe_hard_links(root),
         case_sensitive: probe_case_sensitive(root),
+        networked: on_a_network_volume(root),
     }
 }
 
@@ -334,6 +335,59 @@ fn identity_of(md: &std::fs::Metadata) -> Option<String> {
         let _ = md;
         None
     }
+}
+
+/// Whether this path's filesystem is somewhere else.
+///
+/// `statfs` names the filesystem on macOS and numbers it on Linux, and both
+/// answers distinguish a share from a disk. Anything unrecognised is treated
+/// as local: guessing "network" would make an ordinary folder answer
+/// duplicate questions with samples instead of certainty.
+#[cfg(target_os = "macos")]
+fn on_a_network_volume(root: &std::path::Path) -> bool {
+    let Some(info) = statfs_of(root) else {
+        return false;
+    };
+    let name: String = info
+        .f_fstypename
+        .iter()
+        .take_while(|byte| **byte != 0)
+        .map(|byte| u8::try_from(*byte).unwrap_or(b'?') as char)
+        .collect();
+    matches!(
+        name.as_str(),
+        "smbfs" | "afpfs" | "nfs" | "webdav" | "ftp" | "cifs"
+    )
+}
+
+#[cfg(target_os = "linux")]
+fn on_a_network_volume(root: &std::path::Path) -> bool {
+    let Some(info) = statfs_of(root) else {
+        return false;
+    };
+    // The magic numbers `statfs(2)` documents: NFS, the two SMB versions, and
+    // FUSE, which is how sshfs and davfs both appear.
+    const REMOTE: [i64; 5] = [0x6969, 0xFF53_4D42, 0xFE53_4D42, 0x0065_7355, 0x6553_5546];
+    REMOTE.contains(&(info.f_type as i64))
+}
+
+#[cfg(all(unix, not(any(target_os = "macos", target_os = "linux"))))]
+fn on_a_network_volume(_root: &std::path::Path) -> bool {
+    false
+}
+
+#[cfg(not(unix))]
+fn on_a_network_volume(_root: &std::path::Path) -> bool {
+    // Windows can answer this with `GetDriveType`, which needs a wide string
+    // and an API crate the workspace does not carry yet. Treated as local,
+    // which costs reading rather than correctness.
+    false
+}
+
+/// `statfs` for a path, or `None` if the call fails.
+#[cfg(any(target_os = "macos", target_os = "linux"))]
+fn statfs_of(root: &std::path::Path) -> Option<rustix::fs::StatFs> {
+    rustix::fs::statfs(root).ok()
 }
 
 #[cfg(test)]

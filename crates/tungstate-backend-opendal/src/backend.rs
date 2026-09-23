@@ -48,6 +48,10 @@ pub struct OpendalBackend {
     /// The connection name as the user typed it, for error messages. Three
     /// connections can all have an `inbox`; the path alone does not identify.
     endpoint: String,
+    /// Whether the bytes are on another machine. Decided by the connection's
+    /// scheme at construction, because `OpenDAL` does not report it back and
+    /// the duplicate pass needs to know what a full read costs.
+    networked: bool,
 }
 
 /// How a backend answers "is the connection still there?".
@@ -78,12 +82,19 @@ impl OpendalBackend {
     ///
     /// `endpoint` is the connection's name, used only in error messages.
     #[must_use]
-    pub fn new(operator: Operator, prefix: String, anchor: Anchor, endpoint: String) -> Self {
+    pub fn new(
+        operator: Operator,
+        prefix: String,
+        anchor: Anchor,
+        endpoint: String,
+        networked: bool,
+    ) -> Self {
         Self {
             operator,
             prefix,
             anchor,
             endpoint,
+            networked,
         }
     }
 
@@ -194,6 +205,11 @@ impl Backend for OpendalBackend {
             // sensitive is what silently overwrites `Holiday.mp4` with
             // `holiday.mp4`.
             case_sensitive: false,
+            // Everything here but the local-filesystem adapter is another
+            // machine: reading a file means pulling its bytes over the
+            // network, which is what decides whether the duplicate pass
+            // samples or reads in full.
+            networked: self.networked,
         }
     }
 

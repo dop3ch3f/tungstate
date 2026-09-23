@@ -9,6 +9,12 @@ rust-version.workspace = true
 [dependencies]
 thiserror = { workspace = true }
 
+# One call, `statfs`, to ask whether a folder is on a network volume. Reading
+# every byte of a file is a very different price over SMB than over SATA, and
+# the duplicate pass has to know which it is paying.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
+
 [dev-dependencies]
 proptest = { workspace = true }
 tempfile = { workspace = true }

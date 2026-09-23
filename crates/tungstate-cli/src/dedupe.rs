@@ -12,6 +12,7 @@ use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+use tungstate_backend::Backend as _;
 use tungstate_backend::local::LocalBackend;
 use tungstate_core::dupes::{self, Extras, Found, Kept, Wants};
 use tungstate_execute::digest::Cached;
@@ -21,6 +22,10 @@ use crate::folder::{load, locate};
 
 /// Where the answer to "set aside or trash?" is kept, so it is asked once.
 const REMEMBERED: &str = "dedupe.extras";
+
+/// Confirming a sampled group reads both copies. Past this much, over a
+/// network, it asks first.
+const ASK_PAST: u64 = 1024 * 1024 * 1024;
 
 /// What was asked for on the command line.
 ///
@@ -77,7 +82,11 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
         .iter()
         .filter_map(tungstate_core::Op::source)
         .collect();
+    // On a share, reading a file in full means pulling it across the network,
+    // so the pass samples instead and says which groups are unconfirmed.
+    let networked = backend.capabilities().networked;
     let wants = Wants {
+        sampled: networked,
         pinned: asked.keep.iter().cloned().collect(),
         settled: snapshot
             .entries
@@ -112,13 +121,25 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
             &found,
             &located.root.display().to_string(),
             digest.reads(),
-            digest.hits()
+            digest.hits(),
+            digest.recorded()
         )
     );
     if found.is_empty() || !asked.apply {
         if !found.is_empty() {
             println!("Nothing has been changed. Add --apply to deal with the extra copies.");
         }
+        return ExitCode::SUCCESS;
+    }
+
+    // Samples are enough to show a group and never enough to move a file, so
+    // the ones about to be acted on are confirmed in full first.
+    let found = match settle(&found, &snapshot, &backend, &journal, &root, asked) {
+        Ok(found) => found,
+        Err(code) => return code,
+    };
+    if found.is_empty() {
+        println!("Nothing left to do: the samples matched and the files did not.");
         return ExitCode::SUCCESS;
     }
 
@@ -137,6 +158,99 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
         &journal,
         &root,
     )
+}
+
+/// Confirm every unconfirmed group, and drop the ones the samples got wrong.
+///
+/// The expensive half of the whole feature, and it happens once, here, for
+/// the groups about to be acted on rather than for the folder.
+fn settle(
+    found: &Found,
+    snapshot: &tungstate_core::Snapshot,
+    backend: &LocalBackend,
+    journal: &Journal,
+    root: &str,
+    asked: &Asked,
+) -> Result<Found, ExitCode> {
+    let unsure = found.unsure();
+    if unsure == 0 {
+        return Ok(found.clone());
+    }
+
+    let to_read: u64 = found
+        .groups
+        .iter()
+        .filter(|group| !group.sure)
+        .map(|group| group.size * (group.extras.len() as u64 + 1))
+        .chain(
+            found
+                .folders
+                .iter()
+                .filter(|group| !group.sure)
+                .map(|group| group.bytes * (group.extras.len() as u64 + 1)),
+        )
+        .sum();
+    if to_read > ASK_PAST && !asked.yes && !agreed(to_read) {
+        eprintln!("Stopped. Nothing has been changed.");
+        return Err(ExitCode::SUCCESS);
+    }
+
+    println!();
+    println!("Confirming {unsure} group(s) in full before anything moves…");
+    let mut digest = Cached::new(backend, journal, root);
+    let mut settled = found.clone();
+    let mut dropped = 0;
+    let mut groups = Vec::new();
+    for group in &found.groups {
+        match dupes::confirm(group, &mut digest) {
+            Ok(Some(confirmed)) => groups.push(confirmed),
+            Ok(None) => dropped += 1,
+            Err(trouble) => {
+                eprintln!("error: {trouble}");
+                return Err(ExitCode::FAILURE);
+            }
+        }
+    }
+    let mut folders = Vec::new();
+    for group in &found.folders {
+        match dupes::confirm_folder(group, snapshot, &mut digest) {
+            Ok(Some(confirmed)) => folders.push(confirmed),
+            Ok(None) => dropped += 1,
+            Err(trouble) => {
+                eprintln!("error: {trouble}");
+                return Err(ExitCode::FAILURE);
+            }
+        }
+    }
+    if dropped > 0 {
+        println!("{dropped} group(s) were not the same after all, and are left alone.");
+    }
+    settled.groups = groups;
+    settled.folders = folders;
+    Ok(settled)
+}
+
+/// Ask before pulling a lot of data across a network.
+fn agreed(to_read: u64) -> bool {
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "error: confirming these would read {} across the network. Re-run with --yes to allow it.",
+            bytes(to_read)
+        );
+        return false;
+    }
+    println!();
+    println!(
+        "Confirming these reads {} across the network, because samples are not proof.",
+        bytes(to_read)
+    );
+    print!("Go ahead? [y/N]: ");
+    let _ = std::io::stdout().flush();
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    matches!(answer.trim(), "y" | "Y" | "yes")
 }
 
 /// What happens to the extra copies: what was asked for, what was answered
@@ -197,7 +311,7 @@ fn carry_out(
 }
 
 /// What was found, in the order somebody clearing space wants it.
-fn report(found: &Found, root: &str, reads: usize, hits: usize) -> String {
+fn report(found: &Found, root: &str, reads: usize, hits: usize, recorded: usize) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
     let _ = writeln!(out, "folder at {root}");
@@ -214,10 +328,15 @@ fn report(found: &Found, root: &str, reads: usize, hits: usize) -> String {
         for group in &found.folders {
             let _ = writeln!(
                 out,
-                "  {} ({} file(s), {})",
+                "  {} ({} file(s), {}){}",
                 group.keep,
                 group.files,
-                bytes(group.bytes)
+                bytes(group.bytes),
+                if group.sure {
+                    ""
+                } else {
+                    "  [almost certainly the same; confirmed before anything moves]"
+                }
             );
             for extra in &group.extras {
                 let _ = writeln!(out, "    also at {extra}");
@@ -230,10 +349,15 @@ fn report(found: &Found, root: &str, reads: usize, hits: usize) -> String {
         for group in &found.groups {
             let _ = writeln!(
                 out,
-                "  {} ({}, kept: {})",
+                "  {} ({}, kept: {}){}",
                 group.keep,
                 bytes(group.size),
-                why(group.why)
+                why(group.why),
+                if group.sure {
+                    ""
+                } else {
+                    "  [almost certainly the same; confirmed before anything moves]"
+                }
             );
             for copy in &group.extras {
                 let _ = writeln!(out, "    also at {}", copy.path);
@@ -267,6 +391,12 @@ fn report(found: &Found, root: &str, reads: usize, hits: usize) -> String {
         out,
         "{reads} file(s) read, {hits} taken from what was remembered last time."
     );
+    if recorded > 0 {
+        let _ = writeln!(
+            out,
+            "{recorded} needed no reading at all: tungstate moved them here and recorded what they hold."
+        );
+    }
     out
 }
 

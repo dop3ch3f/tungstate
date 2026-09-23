@@ -475,6 +475,7 @@ mod tests {
     impl Backend for Doorman {
         fn capabilities(&self) -> Capabilities {
             Capabilities {
+                networked: false,
                 atomic_rename: true,
                 hard_links: false,
                 case_sensitive: true,

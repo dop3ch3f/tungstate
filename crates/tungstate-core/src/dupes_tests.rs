@@ -400,6 +400,81 @@ fn a_set_aside_name_is_numbered_rather_than_taken_twice() {
     );
 }
 
+#[test]
+fn on_a_network_volume_a_group_is_sampled_and_says_so() {
+    let snapshot = folder(&[at("a.mp4", 100, Some(1)), at("far/b.mp4", 100, Some(2))]);
+    // The samples agree; every byte is never read.
+    let mut digest = Table::new(&[("a.mp4", "same"), ("far/b.mp4", "same")]);
+    let wants = Wants {
+        sampled: true,
+        ..Wants::default()
+    };
+
+    let found = dupes::find(&snapshot, &mut digest, &wants).expect("the pass runs");
+
+    assert_eq!(found.groups.len(), 1);
+    assert!(!found.groups[0].sure, "a sampled group is not proof");
+    assert_eq!(found.unsure(), 1);
+    assert_eq!(digest.wholes, 0, "nothing was pulled across the network");
+}
+
+#[test]
+fn confirming_keeps_what_matches_and_drops_what_does_not() {
+    let snapshot = folder(&[
+        at("a.mp4", 100, Some(1)),
+        at("far/same.mp4", 100, Some(2)),
+        at("far/different.mp4", 100, Some(3)),
+    ]);
+    // Three files whose ends agree: the sample cannot tell them apart, and on
+    // a network volume that is all there is to go on until a group is acted on.
+    let mut digest = Table::new(&[
+        ("a.mp4", "ab-tail"),
+        ("far/same.mp4", "ab-tail"),
+        ("far/different.mp4", "ab-XXXX-tail"),
+    ]);
+    let wants = Wants {
+        sampled: true,
+        ..Wants::default()
+    };
+    let found = dupes::find(&snapshot, &mut digest, &wants).expect("the pass runs");
+    assert_eq!(found.groups.len(), 1);
+    assert_eq!(
+        found.groups[0].extras.len(),
+        2,
+        "the sample grouped all three"
+    );
+
+    let confirmed = dupes::confirm(&found.groups[0], &mut digest)
+        .expect("it can be confirmed")
+        .expect("one copy really does match");
+
+    assert!(confirmed.sure);
+    assert_eq!(
+        confirmed.extras.len(),
+        1,
+        "the file that only looked identical is left alone"
+    );
+    assert_eq!(confirmed.extras[0].path, "far/same.mp4");
+}
+
+#[test]
+fn a_group_the_samples_got_wrong_is_dropped_entirely() {
+    let snapshot = folder(&[at("a.mp4", 100, Some(1)), at("far/b.mp4", 100, Some(2))]);
+    let mut digest = Table::new(&[("a.mp4", "ab-tail"), ("far/b.mp4", "ab-XX-tail")]);
+    let wants = Wants {
+        sampled: true,
+        ..Wants::default()
+    };
+    let found = dupes::find(&snapshot, &mut digest, &wants).expect("the pass runs");
+
+    let confirmed = dupes::confirm(&found.groups[0], &mut digest).expect("it can be confirmed");
+
+    assert!(
+        confirmed.is_none(),
+        "nothing may be moved on the strength of a sample"
+    );
+}
+
 proptest! {
     /// The property the whole slice rests on: whatever the folder, every group
     /// keeps exactly one copy where it is, and the copy that stays is never
