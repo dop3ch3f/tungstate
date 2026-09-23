@@ -93,6 +93,13 @@ Small pictures do not travel through a command at all: they are served over a
 `thumb` URI scheme from the app's cache directory, because fifty photographs as
 base64 is most of a megabyte of JSON per redraw.
 
+**Watching** — `watch_state`, `set_watching`, and the `watch://noticed`
+event. The switch is remembered in the journal. `watch_state` returns what the
+watcher has done since the window opened, and the window reads it back on
+every event rather than keeping its own list, because which notice replaces
+which is a rule the engine owns: a folder that is still waiting shows one line,
+not one per sweep (slice 9).
+
 **History and search** — `recent`, `history`, `whereis`, `quarantined`.
 `history` and `whereis` accept a path spelled any way a person might type it
 (slice 7d) and `whereis` also takes a BLAKE3 digest.
