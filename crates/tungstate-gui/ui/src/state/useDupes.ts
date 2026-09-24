@@ -8,6 +8,7 @@ import { computed, ref, shallowRef } from "vue";
 import { dupes } from "../engine/commands";
 import { dupeEvents, type UnlistenFn } from "../engine/events";
 import type { Claim, Cleared, DupeKind, DupeRow, Found, ScanProgress } from "../engine/types";
+import { useTable } from "../lib/table";
 
 export type Phase = "start" | "scanning" | "found" | "clearing" | "done";
 
@@ -91,6 +92,7 @@ async function look(target: string) {
   // "Put 2 files back" sit above a fresh scan that put nothing anywhere.
   putBackCount.value = null;
   found.value = null;
+  table.clear();
   cleared.value = null;
   problem.value = null;
   progress.value = null;
@@ -146,14 +148,28 @@ function open(id: string, on: boolean) {
   opened.value = next;
 }
 
-/** The rows in the open drawer. */
-const shown = computed<DupeRow[]>(() => {
+/** The rows in the open drawer, before any search. */
+const inDrawer = computed<DupeRow[]>(() => {
   const answer = found.value;
   if (!answer) return [];
   return answer.rows.filter(
     (row) => row.claim === drawer.value.claim && (!drawer.value.kind || row.kind === drawer.value.kind),
   );
 });
+
+/** Search and sort over the open drawer. Every rule below acts on `shown`, so
+ *  a rule only ever ticks copies somebody can see: filtering to "IMG" and
+ *  pressing "Tick every extra" must not tick a group the filter is hiding. */
+const table = useTable(inDrawer, {
+  columns: [
+    { key: "reclaim", value: (row) => row.reclaimable },
+    { key: "name", value: (row) => row.copies[0]?.name ?? "" },
+    { key: "copies", value: (row) => row.copies.length },
+  ],
+  text: (row) => row.copies.map((copy) => copy.path).join(" "),
+  sort: { key: "reclaim", dir: -1 },
+});
+const shown = table.shown;
 
 /** How many copies of a row are ticked. */
 function tickedIn(row: DupeRow): number {
@@ -358,6 +374,8 @@ export function useDupes() {
     opened,
     highlighted,
     shown,
+    inDrawer,
+    table,
     showing,
     tallies,
     action,

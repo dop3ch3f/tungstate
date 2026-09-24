@@ -3,6 +3,9 @@
      bind `row.state` to `class` and a new outcome renders with no rule at all. -->
 <script setup lang="ts">
 import { computed } from "vue";
+import { useTable } from "../../lib/table";
+import SortHead from "../../ui/SortHead.vue";
+import TableTools from "../../ui/TableTools.vue";
 import { useTransfer } from "../../state/useTransfer";
 import { bytes } from "../../lib/format";
 import { toneOfOutcome } from "../../lib/tone";
@@ -37,6 +40,18 @@ const DOT = {
   bad: "t-bad",
 } as const;
 const dot = (state: string) => DOT[toneOfOutcome(state)];
+
+// Arrival order until a header is clicked: a live run reads top to bottom.
+const table = useTable(t.rows, {
+  columns: [
+    { key: "path", value: (r) => r.path },
+    { key: "state", value: (r) => word(r.state) },
+    { key: "size", value: (r) => r.size },
+  ],
+  text: (r) => r.path,
+  facets: [{ key: "state", label: "State", of: (r) => word(r.state) }],
+  sort: { key: "", dir: 1 },
+});
 
 /** Bytes that have arrived and been verified. On a move this is also the space
  *  freed on this machine, which is the number the whole product exists for.
@@ -76,8 +91,18 @@ const planned = computed(() => t.rows.value.length);
 
     <Empty v-if="!planned && !t.summary.value" art="no-runs" line="Nothing running. Tick some files in the browser and press Copy or Move." />
 
+    <template v-if="planned">
+      <TableTools :table="table" placeholder="Filter by name" />
+      <div class="run-sorts">
+        <span>Sort by</span>
+        <SortHead :table="table" column="path">name</SortHead>
+        <SortHead :table="table" column="state">state</SortHead>
+        <SortHead :table="table" column="size" numeric>size</SortHead>
+      </div>
+    </template>
     <div class="run-ledger" v-if="planned">
-      <div class="run-line" v-for="row in t.rows.value" :key="row.path">
+      <p class="run-nomatch" v-if="!table.shown.value.length">Nothing here matches that.</p>
+      <div class="run-line" v-for="row in table.shown.value" :key="row.path">
         <span class="run-dot" :class="dot(row.state)"></span>
         <span class="path run-file">{{ row.path }}</span>
         <span class="run-word">{{ word(row.state) }}</span>
@@ -139,6 +164,9 @@ const planned = computed(() => t.rows.value.length);
 .run-spacer { flex: 1; }
 
 .run-ledger { flex: 1; overflow-y: auto; min-height: 0; }
+.run-sorts { display: flex; gap: var(--s3); align-items: baseline; font-size: var(--fine); color: var(--text-faint); margin: 0 0 var(--s2); }
+.run-sorts :deep(button) { width: auto; text-decoration: underline; text-underline-offset: 2px; }
+.run-nomatch { font-size: var(--small); color: var(--text-quiet); }
 .run-line {
   display: grid;
   grid-template-columns: 9px minmax(0, 1fr) 118px 88px;

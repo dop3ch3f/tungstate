@@ -13,6 +13,9 @@ import Button from "../../ui/Button.vue";
 import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 import Working from "../../ui/Working.vue";
+import SortHead from "../../ui/SortHead.vue";
+import TableTools from "../../ui/TableTools.vue";
+import { useTable } from "../../lib/table";
 
 const f = useFolders();
 const w = useWatch();
@@ -22,6 +25,24 @@ const view = ref<View>("trees");
 const rules = ref<string | null>(null);
 
 const p = computed(() => f.preview.value);
+
+const top = (path: string) => (path.includes("/") ? path.slice(0, path.indexOf("/")) : "(top)");
+const moveTable = useTable(computed(() => p.value?.moves ?? []), {
+  columns: [
+    { key: "from", value: (m) => m.from },
+    { key: "to", value: (m) => m.to },
+  ],
+  text: (m) => `${m.from} ${m.to} ${m.why}`,
+  facets: [
+    { key: "into", label: "Into", of: (m) => top(m.to) },
+    { key: "rule", label: "Rule", of: (m) => m.why },
+  ],
+});
+const aloneTable = useTable(computed(() => p.value?.left_alone ?? []), {
+  columns: [{ key: "path", value: (a) => a.path }],
+  text: (a) => `${a.path} ${a.why}`,
+  facets: [{ key: "why", label: "Reason", of: (a) => a.why }],
+});
 /** The folder's own name, not `p.folder`, which is the name the policy file
  *  declares. A folder called `messy-downloads` under the `downloads` layout
  *  was rendering as "downloads", on the page and in the question. */
@@ -210,14 +231,22 @@ async function confirmPutBack() {
           </div>
         </div>
 
-        <ul class="moves" v-else-if="view === 'moves'">
-          <li v-for="m in p.moves" :key="m.from">
+        <div v-else-if="view === 'moves'">
+        <TableTools v-if="p.moves.length" :table="moveTable" placeholder="Filter the moves" />
+        <div class="mhead" v-if="p.moves.length">
+          <SortHead :table="moveTable" column="from">From</SortHead>
+          <SortHead :table="moveTable" column="to">To</SortHead>
+        </div>
+        <p class="hint" v-if="p.moves.length && !moveTable.shown.value.length">Nothing here matches that.</p>
+        <ul class="moves">
+          <li v-for="m in moveTable.shown.value" :key="m.from">
             <span class="path">{{ m.from }}</span>
             <span class="becomes">becomes</span>
             <span class="path to">{{ m.to }}</span>
             <span class="reason">{{ m.why }}</span>
           </li>
         </ul>
+        </div>
 
         <!-- Property 4. The engine flattens eight reasons into one sentence
              before they cross the seam, so the window shows the sentence it
@@ -227,8 +256,10 @@ async function confirmPutBack() {
           <p class="hint" v-if="p.left_alone.length">
             Each of these was left for a different reason.
           </p>
+          <TableTools v-if="p.left_alone.length" :table="aloneTable" placeholder="Filter what stays put" />
+          <p class="hint" v-if="p.left_alone.length && !aloneTable.shown.value.length">Nothing here matches that.</p>
           <ul>
-            <li v-for="a in p.left_alone" :key="a.path">
+            <li v-for="a in aloneTable.shown.value" :key="a.path">
               <span class="path">{{ a.path }}</span>
               <span class="reason">{{ a.why }}</span>
             </li>
@@ -373,6 +404,8 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   border-bottom: var(--bw) solid var(--edge);
 }
 .becomes { font-size: var(--fine); color: var(--text-faint); }
+.mhead { display: flex; gap: var(--s5); font-size: var(--fine); color: var(--text-faint); padding: 4px 0; border-bottom: var(--bw) solid var(--edge); }
+:global([data-theme="retro"] .mhead) { background: var(--surface-raised); color: var(--text); font-weight: 700; font-family: var(--font-mono); padding: 5px var(--s2); }
 .to { color: var(--text); }
 .reason { color: var(--text-faint); margin-left: auto; }
 .hint { font-size: var(--small); color: var(--text-quiet); margin: 0 0 var(--s2); }

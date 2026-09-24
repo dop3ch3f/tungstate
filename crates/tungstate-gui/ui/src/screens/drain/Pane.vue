@@ -7,6 +7,7 @@ import { transfers } from "../../engine/commands";
 import { bytes, kind, shortPath, when } from "../../lib/format";
 import type { Entry, Place } from "../../engine/types";
 import Notice from "../../ui/Notice.vue";
+import { useTable } from "../../lib/table";
 
 const props = defineProps<{ start: string; active: boolean; places: Place[] }>();
 const emit = defineEmits<{
@@ -14,8 +15,6 @@ const emit = defineEmits<{
   selection: [names: string[], total: number];
   located: [path: string];
 }>();
-
-type Field = "name" | "kind" | "size" | "modified";
 
 const here = ref(props.start);
 const draft = ref(props.start);
@@ -25,27 +24,26 @@ const parent = ref<string | null>(null);
 const ticked = ref<Set<string>>(new Set());
 const problem = ref("");
 const loading = ref(false);
-const sort = ref<{ field: Field; dir: 1 | -1 }>({ field: "name", dir: 1 });
-
 // Folders stay above files whatever the sort, so navigation never has to be
-// hunted for. The chosen field orders within each group.
-const shown = computed(() => {
-  const { field, dir } = sort.value;
-  return [...entries.value].sort((a, b) => {
-    if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
-    let r = 0;
-    if (field === "name") r = a.name.localeCompare(b.name, undefined, { numeric: true });
-    else if (field === "kind") r = kind(a).localeCompare(kind(b)) || a.name.localeCompare(b.name);
-    else if (field === "size") r = a.size - b.size;
-    else r = (a.modified ?? 0) - (b.modified ?? 0);
-    return r * dir;
-  });
+// hunted for. The chosen column orders within each group.
+const table = useTable(entries, {
+  columns: [
+    { key: "name", value: (e) => e.name },
+    { key: "kind", value: (e) => kind(e) },
+    { key: "size", value: (e) => e.size },
+    { key: "modified", value: (e) => e.modified ?? 0 },
+  ],
+  text: (e) => e.name,
+  pinned: (e) => e.is_dir,
 });
+const shown = table.shown;
 
 const weight = computed(() =>
   entries.value.filter((e) => ticked.value.has(e.name)).reduce((n, e) => n + e.size, 0),
 );
-const allTicked = computed(() => entries.value.length > 0 && ticked.value.size === entries.value.length);
+// Over what is showing: with a filter on, "tick everything" means everything
+// you can see, not files the filter is hiding.
+const allTicked = computed(() => shown.value.length > 0 && shown.value.every((e) => ticked.value.has(e.name)));
 const someTicked = computed(() => ticked.value.size > 0 && !allTicked.value);
 
 async function load(to: string) {
@@ -57,6 +55,7 @@ async function load(to: string) {
     here.value = listing.path;
     draft.value = listing.path;
     ticked.value = new Set();
+    table.query.value = "";
     problem.value = "";
     emit("located", listing.path);
     push();
@@ -69,14 +68,9 @@ async function load(to: string) {
 
 const push = () => emit("selection", [...ticked.value], weight.value);
 
-function by(field: Field) {
-  sort.value =
-    sort.value.field === field
-      ? { field, dir: sort.value.dir === 1 ? -1 : 1 }
-      : { field, dir: field === "size" || field === "modified" ? -1 : 1 };
-}
-const arrow = (field: Field) =>
-  sort.value.field !== field ? "" : sort.value.dir === 1 ? "▲" : "▼";
+const by = (field: string) => table.by(field, field === "size" || field === "modified");
+const arrow = (field: string) =>
+  table.sort.value.key !== field ? "" : table.sort.value.dir === 1 ? "▲" : "▼";
 
 const anchor = ref<number | null>(null);
 
@@ -99,7 +93,12 @@ function tick(entry: Entry, index: number, event?: MouseEvent) {
 }
 
 function tickAll() {
-  ticked.value = allTicked.value ? new Set() : new Set(entries.value.map((e) => e.name));
+  const next = new Set(ticked.value);
+  for (const e of shown.value) {
+    if (allTicked.value) next.delete(e.name);
+    else next.add(e.name);
+  }
+  ticked.value = next;
   push();
 }
 
@@ -143,6 +142,10 @@ const KIND: Record<string, string> = {
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
 
     <template v-else>
+      <div class="sift" v-if="entries.length > 1">
+        <input v-model="table.query.value" type="search" placeholder="Filter this folder" aria-label="Filter this folder" />
+        <span class="sift-n" v-if="table.narrowed.value">{{ shown.length }} of {{ entries.length }}</span>
+      </div>
       <div class="cols">
         <input
           type="checkbox"
@@ -160,6 +163,7 @@ const KIND: Record<string, string> = {
       <div class="rolls">
         <p class="nothing" v-if="loading">Reading…</p>
         <p class="nothing" v-else-if="!entries.length">This folder is empty.</p>
+        <p class="nothing" v-else-if="!shown.length">Nothing here matches that.</p>
         <div
           v-for="(entry, index) in shown"
           :key="entry.path"
@@ -194,6 +198,9 @@ const KIND: Record<string, string> = {
 .side.lit { border-color: var(--disabled); }
 
 .locline { display: flex; gap: var(--s2); padding: var(--s2); align-items: center; }
+.sift { display: flex; gap: var(--s2); align-items: center; padding: 0 var(--s2) var(--s2); }
+.sift input { flex: 1; min-width: 0; }
+.sift-n { font-size: var(--fine); color: var(--text-faint); white-space: nowrap; }
 .up {
   font: inherit;
   font-size: var(--small);

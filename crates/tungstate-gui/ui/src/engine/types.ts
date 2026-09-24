@@ -268,6 +268,22 @@ export interface WatchState {
 
 // --- history -------------------------------------------------------------
 
+/** A past tidy or duplicate clean-up, for a section's own history. */
+export interface PastRun {
+  /** What Put back takes. */
+  plan: number;
+  root: string;
+  /** The folder's name on screen. */
+  name: string;
+  applied_at: number;
+  /** Files moved or set aside; never directories or failures. */
+  files: number;
+  bytes: number;
+  undone: boolean;
+  /** False once put back, and for anything sent to the trash. */
+  undoable: boolean;
+}
+
 export interface Op {
   id: number;
   status: string;

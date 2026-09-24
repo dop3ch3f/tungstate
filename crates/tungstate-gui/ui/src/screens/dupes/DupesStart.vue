@@ -3,19 +3,67 @@
 <script setup lang="ts">
 import { onMounted, ref, shallowRef } from "vue";
 import { useDupes } from "../../state/useDupes";
-import { folders, transfers } from "../../engine/commands";
+import { dupes, folders, transfers } from "../../engine/commands";
+import { files, ran } from "../../lib/counts";
 import { shortPath } from "../../lib/format";
-import type { Place } from "../../engine/types";
+import type { PastRun, Place } from "../../engine/types";
+import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
-import Empty from "../../ui/Empty.vue";
+import PastRuns from "../../ui/PastRuns.vue";
+import Steps from "../../ui/Steps.vue";
 
 const d = useDupes();
 const places = shallowRef<Place[]>([]);
 const chosen = ref("");
+const past = shallowRef<PastRun[]>([]);
+const loaded = ref(false);
+const busy = ref<number | null>(null);
+const said = ref<string | null>(null);
+const trouble = ref<string | null>(null);
+
+async function loadPast() {
+  try {
+    past.value = await dupes.past();
+  } catch (e) {
+    trouble.value = String(e);
+  } finally {
+    loaded.value = true;
+  }
+}
+
+async function putBack(run: PastRun) {
+  const answer = await ask({
+    title: `Put back ${files(ran(run))} in ${run.name}?`,
+    why: "Each copy goes back where it was before it was set aside.",
+    choices: [
+      { id: "cancel", label: "Cancel" },
+      { id: "go", label: "Put back", look: "primary" },
+    ],
+  });
+  if (answer.id !== "go") return;
+  busy.value = run.plan;
+  said.value = trouble.value = null;
+  try {
+    const back = await dupes.putBack(run.root, run.plan);
+    said.value = `Put ${back === 1 ? "1 file" : `${back} files`} back in ${run.name}.`;
+  } catch (e) {
+    trouble.value = String(e);
+  } finally {
+    busy.value = null;
+    await loadPast();
+  }
+}
+
+const STEPS = [
+  { art: "folder", title: "Point at a folder", line: "Or somewhere saved, like the NAS. No rules are needed." },
+  { art: "nothing-found", title: "Look at each group", line: "With the picture in view, before anything is ticked." },
+  { art: "dupes", title: "Set the extras aside", line: "They stay inside the folder and can be put back from here." },
+] as const;
 
 onMounted(async () => {
   void d.loadRecent();
+  void loadPast();
   try {
     places.value = await transfers.places();
   } catch {
@@ -46,6 +94,8 @@ async function point() {
       </span>
     </label>
 
+    <Steps v-if="loaded && !past.length" :steps="[...STEPS]" />
+
     <div class="dz-pick">
       <Button look="primary" @click="point()">Point at a folder…</Button>
       <label class="dz-go">
@@ -72,10 +122,18 @@ async function point() {
     </section>
 
     <Notice tone="bad" v-if="d.problem.value">{{ d.problem.value }}</Notice>
-    <Empty
-      v-if="!d.recent.value.length"
-      art="no-folders"
-      line="A whole drive is allowed and will take a while. Downloads and Movies are where the copies usually are."
+    <Notice v-if="said">{{ said }}</Notice>
+    <Notice tone="bad" v-if="trouble">{{ trouble }}</Notice>
+
+    <PastRuns
+      v-if="loaded"
+      of="dupes"
+      title="Recent clean-ups"
+      verb="Set aside"
+      empty="Clean-ups you run are listed here, and each one can be put back."
+      :runs="past"
+      :busy="busy"
+      @put-back="putBack"
     />
   </div>
 </template>

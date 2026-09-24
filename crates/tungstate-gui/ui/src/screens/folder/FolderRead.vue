@@ -3,6 +3,8 @@
      nothing has been written, and no file has moved. -->
 <script setup lang="ts">
 import { computed } from "vue";
+import { useTable } from "../../lib/table";
+import SortHead from "../../ui/SortHead.vue";
 import { useFolders } from "../../state/useFolders";
 import { bytes } from "../../lib/format";
 import { movedBy, made, emptied } from "../../lib/counts";
@@ -20,6 +22,20 @@ const chosen = defineModel<string | null>("chosen", { required: true });
  *  the list and are said in a sentence instead. */
 const mine = computed(() => f.outcomes.value.find((o) => o.summary === "") ?? null);
 const ways = computed(() => f.outcomes.value.filter((o) => o.summary !== ""));
+
+// A handful of rows, so sorting only: the engine's order until a header is
+// clicked, which puts the layout most like the folder first.
+const wayTable = useTable(ways, {
+  columns: [
+    { key: "name", value: (o) => o.name },
+    { key: "files", value: (o) => o.files },
+    { key: "created", value: (o) => o.created },
+    { key: "removed", value: (o) => o.removed },
+    { key: "bytes", value: (o) => o.bytes },
+  ],
+  text: (o) => o.name,
+  sort: { key: "", dir: 1 },
+});
 
 const pickable = (o: Outcome) => o.loads && o.settles;
 const total = computed(() => ways.value[0]?.of ?? 0);
@@ -72,15 +88,15 @@ const shape = computed(() => {
 
       <div class="table">
         <div class="key">
-          <span class="kway"></span>
-          <span class="knum">moving</span>
-          <span class="knum">new folders</span>
-          <span class="knum">emptied</span>
-          <span class="knum">size</span>
+          <span class="kway"><SortHead :table="wayTable" column="name">layout</SortHead></span>
+          <span class="knum"><SortHead :table="wayTable" column="files" numeric>moving</SortHead></span>
+          <span class="knum"><SortHead :table="wayTable" column="created" numeric>new folders</SortHead></span>
+          <span class="knum"><SortHead :table="wayTable" column="removed" numeric>emptied</SortHead></span>
+          <span class="knum"><SortHead :table="wayTable" column="bytes" numeric>size</SortHead></span>
         </div>
 
         <button
-          v-for="o in ways"
+          v-for="o in wayTable.shown.value"
           :key="o.name"
           class="way"
           :class="{ on: chosen === o.name }"

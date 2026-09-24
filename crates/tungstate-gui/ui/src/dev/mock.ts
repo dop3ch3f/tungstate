@@ -84,9 +84,24 @@ const byRoot = (root: string) => previews[root.split("/").pop()!] ?? previews["m
  *  are photographed without emptying the demo folders. */
 const bare = new URLSearchParams(location.search).has("bare");
 
+const day = 86_400_000;
+const pastRun = (plan: number, name: string, files: number, bytes: number, ago: number, undone = false, undoable = !undone) => ({
+  plan, root: `${DEMO}/${name}`, name, applied_at: now - ago, files, bytes, undone, undoable,
+});
+const pastTidies = [
+  pastRun(12, "messy-downloads", 28, 1_048_576_000, 2 * 3_600_000),
+  pastRun(9, "real-shape", 4, 125_829_120, day),
+  pastRun(6, "auto", 1, 2_516_582, 2 * day, true),
+  pastRun(3, "messy-downloads", 17, 402_653_184, 6 * day),
+];
+const pastCleanups = [
+  pastRun(11, "Downloads", 12, 3_435_973_836, 5 * 3_600_000),
+  pastRun(8, "Pictures", 3, 42_991_616, 3 * day, false, false),
+];
+
 mockIPC((cmd, args) => {
   const a = (args ?? {}) as Record<string, any>;
-  if (bare && ["governed", "list_links", "list_connections", "recent", "history", "whereis", "archives", "interrupted"].includes(cmd)) {
+  if (bare && ["governed", "list_links", "list_connections", "recent", "history", "whereis", "archives", "interrupted", "past_tidies", "past_cleanups", "recent_scans"].includes(cmd)) {
     return [];
   }
   switch (cmd) {
@@ -102,6 +117,9 @@ mockIPC((cmd, args) => {
     case "folder_preview": return byRoot(a.root);
     case "rules_text": return learned.as_is;
     case "recent": case "history": case "whereis": return ops;
+    case "past_tidies": return pastTidies;
+    case "past_cleanups": return pastCleanups;
+    case "recent_scans": return [`${DEMO}/messy-downloads`, `${DEMO}/real-shape-media`];
     case "list_links": return links;
     case "find_duplicates": return found(a.target ?? `${DEMO}/messy-downloads`);
     case "duplicate_action": return null;

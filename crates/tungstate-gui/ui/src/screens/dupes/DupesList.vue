@@ -6,6 +6,8 @@ import { bytes, shortPath, when } from "../../lib/format";
 import { picture } from "../../engine/pictures";
 import type { DupeCopy, DupeRow } from "../../engine/types";
 import Empty from "../../ui/Empty.vue";
+import SortHead from "../../ui/SortHead.vue";
+import TableTools from "../../ui/TableTools.vue";
 
 const d = useDupes();
 
@@ -38,10 +40,20 @@ function toggle(row: DupeRow) {
 <template>
   <div class="dl">
     <Empty
-      v-if="!d.shown.value.length"
+      v-if="!d.inDrawer.value.length"
       art="no-folders"
       line="Nothing of this kind was found here."
     />
+    <template v-else>
+      <TableTools :table="d.table" placeholder="Filter by name or folder" />
+      <div class="sorts">
+        <span>Sort by</span>
+        <SortHead :table="d.table" column="reclaim" numeric>space</SortHead>
+        <SortHead :table="d.table" column="name">name</SortHead>
+        <SortHead :table="d.table" column="copies" numeric>copies</SortHead>
+      </div>
+      <p class="nomatch" v-if="!d.shown.value.length">Nothing here matches that.</p>
+    </template>
 
     <div v-for="row in d.shown.value" :key="row.id" class="group">
       <button class="head" :aria-expanded="d.opened.value.has(row.id)" @click="toggle(row)">
@@ -92,6 +104,9 @@ function toggle(row: DupeRow) {
 </template>
 
 <style scoped>
+.sorts { display: flex; gap: var(--s3); align-items: baseline; font-size: var(--fine); color: var(--text-faint); margin: 0 0 var(--s2); }
+.sorts :deep(button) { width: auto; text-decoration: underline; text-underline-offset: 2px; }
+.nomatch { font-size: var(--small); color: var(--text-quiet); }
 .dl { overflow-y: auto; padding-right: var(--s2); }
 .group { border-bottom: var(--bw) solid var(--edge); }
 .head {

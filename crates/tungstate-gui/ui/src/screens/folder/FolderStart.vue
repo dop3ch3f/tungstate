@@ -3,15 +3,68 @@
      `compare_folder` take a bare path, so somebody can be shown their own
      files before they have learned a word of this app's vocabulary. -->
 <script setup lang="ts">
-import { onMounted } from "vue";
+import { onMounted, ref, shallowRef } from "vue";
+import { folders } from "../../engine/commands";
+import type { PastRun } from "../../engine/types";
+import { files, putBack as putBackCount, ran } from "../../lib/counts";
 import { useFolders } from "../../state/useFolders";
+import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
 import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
-import Empty from "../../ui/Empty.vue";
+import PastRuns from "../../ui/PastRuns.vue";
+import Steps from "../../ui/Steps.vue";
 
 const f = useFolders();
-onMounted(() => f.listRegistered());
+const past = shallowRef<PastRun[]>([]);
+const loaded = ref(false);
+const busy = ref<number | null>(null);
+const said = ref<string | null>(null);
+const trouble = ref<string | null>(null);
+
+async function loadPast() {
+  try {
+    past.value = await folders.past();
+  } catch (e) {
+    trouble.value = String(e);
+  } finally {
+    loaded.value = true;
+  }
+}
+
+onMounted(() => {
+  void f.listRegistered();
+  void loadPast();
+});
+
+async function putBack(run: PastRun) {
+  const answer = await ask({
+    title: `Put back ${files(ran(run))} in ${run.name}?`,
+    why: "Each file goes back where it was before that tidy. Anything changed since is left alone and said so.",
+    choices: [
+      { id: "cancel", label: "Cancel" },
+      { id: "go", label: "Put back", look: "primary" },
+    ],
+  });
+  if (answer.id !== "go") return;
+  busy.value = run.plan;
+  said.value = trouble.value = null;
+  try {
+    const done = await folders.putBack(run.root, run.plan);
+    said.value = `Put ${files(putBackCount(done))} back in ${run.name}.`;
+  } catch (e) {
+    trouble.value = String(e);
+  } finally {
+    busy.value = null;
+    await loadPast();
+  }
+}
+
+const STEPS = [
+  { art: "folder", title: "Point at a folder", line: "Its own shape is read first, so nothing is assumed about it." },
+  { art: "history", title: "See every move", line: "Before and after side by side, with what stays put and why." },
+  { art: "home", title: "Tidy up, or put it back", line: "Every tidy is listed here and can be undone." },
+] as const;
 </script>
 
 <template>
@@ -23,9 +76,13 @@ onMounted(() => f.listRegistered());
         other way of filing would do to it. Nothing moves until you say so.
       </p>
 
+      <Steps v-if="loaded && !past.length" class="steps" :steps="[...STEPS]" />
+
       <Button look="primary" @click="f.pick()">Point at a folder…</Button>
 
       <Notice tone="bad" v-if="f.problem.value">{{ f.problem.value }}</Notice>
+      <Notice v-if="said">{{ said }}</Notice>
+      <Notice tone="bad" v-if="trouble">{{ trouble }}</Notice>
 
       <section class="known" v-if="f.registered.value.length">
         <h2>Folders you have added</h2>
@@ -42,7 +99,17 @@ onMounted(() => f.listRegistered());
         </button>
       </section>
 
-      <Empty v-else art="no-folders" line="No folders here yet. Downloads is usually the messiest one." />
+      <PastRuns
+        v-if="loaded"
+        class="past"
+        of="folder"
+        title="Recent tidies"
+        verb="Filed"
+        empty="Tidies you run are listed here, and each one can be put back."
+        :runs="past"
+        :busy="busy"
+        @put-back="putBack"
+      />
     </div>
   </div>
 </template>
@@ -62,6 +129,8 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 }
 
 .known { margin-top: 44px; }
+.steps { margin-bottom: var(--s5); }
+.past { margin-top: 44px; }
 .known h2 { font-size: var(--small); font-weight: 600; margin: 0 0 var(--s2); }
 .known-row {
   display: flex;

@@ -12,6 +12,9 @@ import Button from "../ui/Button.vue";
 import Tile from "../ui/Tile.vue";
 import Notice from "../ui/Notice.vue";
 import Empty from "../ui/Empty.vue";
+import SortHead from "../ui/SortHead.vue";
+import TableTools from "../ui/TableTools.vue";
+import { useTable } from "../lib/table";
 
 const ops = shallowRef<Op[]>([]);
 const asked = ref("");
@@ -58,6 +61,25 @@ const VERDICT: Record<string, string> = {
 };
 
 const leaf = (path: string | null) => (path ?? "").split("/").pop() ?? "";
+const verdict = (op: Op) => VERDICT[op.status] ?? op.status;
+
+// Narrows the rows already here. Finding a file's whole history is the form
+// above, which asks the journal; this never does.
+const table = useTable(ops, {
+  columns: [
+    { key: "kind", value: (op) => op.kind },
+    { key: "file", value: (op) => leaf(op.destination ?? op.source) },
+    { key: "outcome", value: verdict },
+    { key: "size", value: (op) => op.size },
+    { key: "when", value: (op) => op.started_at },
+  ],
+  text: (op) => `${op.source ?? ""} ${op.destination ?? ""} ${op.link ?? ""}`,
+  facets: [
+    { key: "kind", label: "Kind", of: (op) => op.kind },
+    { key: "outcome", label: "Outcome", of: verdict },
+  ],
+  sort: { key: "when", dir: -1 },
+});
 const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastIndexOf("/"));
 </script>
 
@@ -65,8 +87,10 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
   <div class="h-wrap">
     <div class="h-column">
       <div class="head"><Tile of="history" :size="26" /><h1>What has happened</h1></div>
+      <label class="h-label" for="h-in">Find where a file went, by its path or its fingerprint</label>
       <form class="h-find" @submit.prevent="look()">
         <input
+          id="h-in"
           v-model="asked"
           class="h-in"
           placeholder="a path, or a file's fingerprint"
@@ -83,22 +107,24 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
       <Empty v-if="!ops.length && searched" art="nothing-found" line="Nothing here matches that." />
       <Empty v-else-if="!ops.length" art="no-history" line="Nothing has happened yet." />
 
+      <TableTools v-if="ops.length" :table="table" placeholder="Filter these rows" />
       <div class="h-head" v-if="ops.length">
         <span></span>
-        <span>kind</span>
-        <span>file</span>
-        <span class="h-r">outcome</span>
-        <span class="h-r">size</span>
-        <span class="h-r">when</span>
+        <SortHead :table="table" column="kind">kind</SortHead>
+        <SortHead :table="table" column="file">file</SortHead>
+        <SortHead :table="table" column="outcome" numeric>outcome</SortHead>
+        <SortHead :table="table" column="size" numeric>size</SortHead>
+        <SortHead :table="table" column="when" numeric>when</SortHead>
       </div>
-      <div class="h-row" v-for="op in ops" :key="op.id" :class="{ 'h-row-bad': dot(op.status) === 'h-bad' }">
+      <p class="h-nomatch" v-if="ops.length && !table.shown.value.length">Nothing here matches that.</p>
+      <div class="h-row" v-for="op in table.shown.value" :key="op.id" :class="{ 'h-row-bad': dot(op.status) === 'h-bad' }">
         <span class="h-dot" :class="dot(op.status)"></span>
         <span class="h-kind">{{ op.kind }}</span>
         <span class="h-what">
           <span class="h-leaf">{{ leaf(op.destination ?? op.source) }}</span>
           <span class="path h-dir"><bdi>{{ shortPath(dir(op.destination ?? op.source)) }}</bdi></span>
         </span>
-        <span class="h-said" :class="{ 'h-said-bad': dot(op.status) === 'h-bad' }">{{ VERDICT[op.status] ?? op.status }}</span>
+        <span class="h-said" :class="{ 'h-said-bad': dot(op.status) === 'h-bad' }">{{ verdict(op) }}</span>
         <span class="num h-size">{{ op.size === null ? "" : bytes(op.size) }}</span>
         <span class="h-when">{{ when(op.started_at) }}</span>
       </div>
@@ -116,6 +142,8 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .h-find { display: flex; gap: var(--s2); align-items: center; }
 .h-in { min-width: 320px; }
 .h-find { margin-bottom: var(--s5); }
+.h-label { display: block; font-size: var(--fine); color: var(--text-faint); margin-bottom: var(--s2); }
+.h-nomatch { font-size: var(--small); color: var(--text-quiet); }
 .h-mode { font-size: var(--fine); color: var(--text-faint); margin: var(--s2) 0 0; }
 
 .h-head, .h-row { display: grid; }
@@ -127,7 +155,6 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   color: var(--text-faint);
   border-bottom: var(--bw) solid var(--edge);
 }
-.h-r { text-align: right; }
 :global([data-theme="retro"] .h-head) {
   background: var(--surface-raised);
   color: var(--text);

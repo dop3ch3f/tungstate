@@ -25,10 +25,12 @@ export const folders = {
   compare: (root: string) => invoke<T.Outcome[]>("compare_folder", { root }),
   preview: (root: string) => invoke<T.PreviewView>("folder_preview", { root }),
   tidy: (root: string) => invoke<T.TidyDone>("tidy_folder", { root }),
-  /** Takes any plan id, though nothing in the seam enumerates them; see
-   *  `docs/SEAM.md` §2. In practice the window offers `PreviewView.undoable`. */
+  /** Takes any plan id: `PreviewView.undoable` for the latest, `past()` for
+   *  older ones. See `docs/SEAM.md`, safety property 2. */
   putBack: (root: string, plan: number) => invoke<T.PutBackDone>("put_back", { root, plan }),
   pick: () => invoke<string | null>("pick_folder"),
+  /** Past tidies, newest first. Each one's `plan` is what `putBack` takes. */
+  past: () => invoke<T.PastRun[]>("past_tidies"),
 };
 
 export const dupes = {
@@ -51,6 +53,8 @@ export const dupes = {
   /** What the person said should happen to extra copies, if they have said. */
   action: () => invoke<string | null>("duplicate_action"),
   rememberAction: (action: string) => invoke<void>("set_duplicate_action", { action }),
+  /** Past clean-ups, newest first. Each one's `plan` is what `putBack` takes. */
+  past: () => invoke<T.PastRun[]>("past_cleanups"),
 };
 
 export const watcher = {

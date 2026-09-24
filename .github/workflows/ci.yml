@@ -43,6 +43,7 @@ jobs:
         run: |
           npm ci
           npm run build
+          npm test
 
       # Components come from rust-toolchain.toml, so none are listed here.
       - uses: dtolnay/rust-toolchain@stable
