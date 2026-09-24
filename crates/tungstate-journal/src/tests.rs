@@ -2042,3 +2042,175 @@ fn an_undo_is_not_listed_but_the_plan_it_undid_says_so() {
     assert_eq!(tidies.len(), 1, "{tidies:?}");
     assert!(tidies[0].plan.is_undone());
 }
+
+// --- syncs ------------------------------------------------------------------
+
+fn a_sync(journal: &Journal, anchor: Option<&str>) -> crate::SyncId {
+    use crate::{FirstCheck, NewMember, NewSync, OnRemove, SyncDirection};
+    journal
+        .create_sync(
+            &NewSync {
+                name: "capcut".into(),
+                direction: if anchor.is_some() {
+                    SyncDirection::Push
+                } else {
+                    SyncDirection::All
+                },
+                exact: false,
+                anchor: anchor.map(str::to_string),
+                on_conflict: ConflictAction::Quarantine,
+                on_remove: OnRemove::SetAside,
+                verify: VerifyLevel::Hash,
+                cooldown: std::time::Duration::from_secs(30),
+                first_check: FirstCheck::Sampled,
+            },
+            &[
+                NewMember {
+                    name: "laptop".into(),
+                    connection: None,
+                    path: "/Users/me/CapCut".into(),
+                },
+                NewMember {
+                    name: "nas".into(),
+                    connection: None,
+                    path: "/Volumes/nas/capcut".into(),
+                },
+                NewMember {
+                    name: "spare".into(),
+                    connection: None,
+                    path: "/Volumes/spare".into(),
+                },
+            ],
+        )
+        .expect("sync")
+}
+
+fn reading(member: crate::MemberId, path: &str, size: u64) -> crate::Reading {
+    crate::Reading {
+        member,
+        path: path.into(),
+        present: true,
+        size,
+        mtime: Some(1),
+        hash: None,
+    }
+}
+
+#[test]
+fn a_sync_reads_back_as_it_was_made_with_its_members_in_order() {
+    let journal = Journal::open_in_memory().unwrap();
+    a_sync(&journal, Some("laptop"));
+
+    let sync = journal.sync_by_name("capcut").unwrap();
+
+    let names: Vec<&str> = sync.members.iter().map(|m| m.name.as_str()).collect();
+    assert_eq!(names, ["laptop", "nas", "spare"]);
+    assert_eq!(sync.anchor, Some(sync.members[0].id));
+    assert_eq!(sync.first_check, crate::FirstCheck::Sampled);
+    assert!(matches!(
+        journal.sync_by_name("nope"),
+        Err(JournalError::UnknownSync(_))
+    ));
+}
+
+#[test]
+fn an_anchor_that_is_not_a_member_is_refused() {
+    use crate::{FirstCheck, NewMember, NewSync, OnRemove, SyncDirection};
+    let journal = Journal::open_in_memory().unwrap();
+    let refused = journal.create_sync(
+        &NewSync {
+            name: "x".into(),
+            direction: SyncDirection::Push,
+            exact: false,
+            anchor: Some("elsewhere".into()),
+            on_conflict: ConflictAction::Quarantine,
+            on_remove: OnRemove::SetAside,
+            verify: VerifyLevel::Hash,
+            cooldown: std::time::Duration::ZERO,
+            first_check: FirstCheck::Full,
+        },
+        &[NewMember {
+            name: "a".into(),
+            connection: None,
+            path: "/a".into(),
+        }],
+    );
+    assert!(
+        matches!(refused, Err(JournalError::BadSync(_))),
+        "{refused:?}"
+    );
+    assert!(
+        journal.syncs().unwrap().is_empty(),
+        "nothing half-made is left behind"
+    );
+}
+
+#[test]
+fn the_baseline_is_the_latest_reading_and_an_undo_brings_back_the_one_before() {
+    // Append-only is what makes this free: undoing the second run retires its
+    // rows by marking its plan, and the first run's rows are current again.
+    let journal = Journal::open_in_memory().unwrap();
+    let sync = a_sync(&journal, None);
+    let laptop = journal.sync_by_id(sync).unwrap().members[0].id;
+
+    let first = journal
+        .begin_plan_for("sync:capcut", "-", None, true, Some(crate::Purpose::Sync))
+        .unwrap();
+    journal
+        .record_baseline(&[reading(laptop, "a.mp4", 10)], first)
+        .unwrap();
+    let second = journal
+        .begin_plan_for("sync:capcut", "-", None, true, Some(crate::Purpose::Sync))
+        .unwrap();
+    journal
+        .record_baseline(&[reading(laptop, "a.mp4", 20)], second)
+        .unwrap();
+
+    assert_eq!(journal.baseline_for(sync).unwrap()[0].size, 20);
+    journal.mark_undone(second).unwrap();
+    assert_eq!(journal.baseline_for(sync).unwrap()[0].size, 10);
+}
+
+#[test]
+fn nothing_is_remembered_under_a_plan_that_was_undone() {
+    let journal = Journal::open_in_memory().unwrap();
+    let sync = a_sync(&journal, None);
+    let laptop = journal.sync_by_id(sync).unwrap().members[0].id;
+    let plan = journal.begin_plan("sync:capcut", "-", None).unwrap();
+    journal.mark_undone(plan).unwrap();
+
+    let refused = journal.record_baseline(&[reading(laptop, "a.mp4", 10)], plan);
+
+    assert!(matches!(refused, Err(JournalError::PlanAlreadyUndone(_))));
+}
+
+#[test]
+fn a_member_can_leave_but_not_the_anchor_and_not_down_to_one() {
+    let journal = Journal::open_in_memory().unwrap();
+    let sync = a_sync(&journal, Some("laptop"));
+
+    assert!(matches!(
+        journal.remove_member(sync, "laptop"),
+        Err(JournalError::BadSync(_))
+    ));
+    journal.remove_member(sync, "spare").unwrap();
+    assert!(matches!(
+        journal.remove_member(sync, "nas"),
+        Err(JournalError::BadSync(_))
+    ));
+    assert_eq!(journal.sync_by_id(sync).unwrap().members.len(), 2);
+}
+
+#[test]
+fn a_leg_is_a_link_the_saved_pairs_never_show() {
+    let journal = Journal::open_in_memory().unwrap();
+    let sync = a_sync(&journal, None);
+    let mut leg = a_link();
+    leg.name = "sync:1:1>2".into();
+    leg.saved = false;
+
+    let id = journal.create_leg(sync, &leg).unwrap();
+
+    assert_eq!(journal.link_by_name("sync:1:1>2").unwrap().id, id);
+    assert!(journal.links().unwrap().is_empty());
+}

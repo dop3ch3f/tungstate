@@ -1,0 +1,75 @@
+---
+source: crates/tungstate-cli/tests/cli.rs
+expression: help
+---
+Keep two or more folders in step.
+
+Say which way things move: --push (the anchor sends to every other member), --pull (the anchor receives from every other member) or --all (every member ends up with everything). Nothing is ever removed until --exact arrives in slice 9c.
+
+Usage: tungstate sync add [OPTIONS] <NAME> <FOLDER> <FOLDER>...
+
+Arguments:
+  <NAME>
+          What this sync is called
+
+  <FOLDER> <FOLDER>...
+          Two or more folders: a path, or `connection:path`
+
+Options:
+      --push
+          The anchor sends; every other member ends up with what it holds
+
+      --pull
+          The anchor receives; it ends up with what every other member holds
+
+      --all
+          Every member ends up with everything
+
+      --anchor <ANCHOR>
+          Which member is the anchor for --push or --pull. Defaults to the first
+
+      --as <NAME>
+          A name per member, in the order the folders were given
+
+      --exact
+          Also carry deletions, so every member is exactly the same. Slice 9c
+
+      --on-conflict <ON_CONFLICT>
+          What an unattended run does when members changed a file differently
+          
+          [default: quarantine]
+
+      --on-remove <ON_REMOVE>
+          What removing a copy means: set-aside, or delete (slice 9c)
+          
+          [default: set-aside]
+
+      --verify <VERIFY>
+          How thoroughly each copy is checked
+          
+          [default: hash]
+
+      --cooldown <COOLDOWN>
+          Seconds a file must have been untouched before it moves
+          
+          [default: 30]
+
+      --first-check <FIRST_CHECK>
+          How hard to check two copies that meet for the first time, most
+          thorough first:
+          
+          full: reads both copies. Exact, but a first run over a large archive
+          on a network takes as long as reading it.
+          
+          sampled: reads the start, middle and end. Minutes rather than hours;
+          two copies differing only between the samples are taken to match.
+          
+          size: reads nothing. Fastest; an edit that kept the size is missed.
+          
+          Only ever the first meeting: after that each member is compared with
+          its own last reading, which costs no reading at all.
+          
+          [default: full]
+
+  -h, --help
+          Print help (see a summary with '-h')

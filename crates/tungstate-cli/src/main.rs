@@ -7,6 +7,7 @@ mod explain;
 mod folder;
 mod folders;
 mod plan;
+mod sync;
 mod watch;
 
 use std::path::{Path, PathBuf};
@@ -63,6 +64,11 @@ enum Command {
     Link {
         #[command(subcommand)]
         action: LinkAction,
+    },
+    /// Keep a set of folders in step, on this machine or elsewhere.
+    Sync {
+        #[command(subcommand)]
+        action: sync::SyncAction,
     },
     /// Manage connections to places other than this machine.
     Connection {
@@ -386,6 +392,10 @@ fn main() -> std::process::ExitCode {
         },
         Command::Init { path, template } => folders::init(path.as_deref(), template.as_deref()),
         Command::Link { action } => link(action),
+        Command::Sync { action } => match open_journal() {
+            Ok(journal) => sync::run(action, &journal, secret_store().as_ref()),
+            Err(error) => fail(&error),
+        },
         Command::Connection { action } => match open_journal() {
             Ok(journal) => connection::run(action, &journal, secret_store().as_ref()),
             Err(error) => fail(&error),

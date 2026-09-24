@@ -262,6 +262,20 @@ impl Backend for LocalBackend {
         std::fs::rename(&from_full, &to_full).map_err(io_at(&from_full))
     }
 
+    fn set_modified(&self, path: &Path, at: std::time::SystemTime) -> Result<bool> {
+        // MustNotBeLink: setting a time through a link would touch its target,
+        // which may be anywhere.
+        let full = self.guarded(path, Tail::MustNotBeLink)?;
+        // Opened for writing because Windows refuses to set times on a handle
+        // opened read-only; the file is not written to.
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&full)
+            .and_then(|file| file.set_modified(at))
+            .map_err(io_at(&full))?;
+        Ok(true)
+    }
+
     fn remove_file(&self, path: &Path) -> Result<()> {
         // MayBeLink: deleting a link deletes the link, so cleaning them up works.
         let full = self.guarded(path, Tail::MayBeLink)?;
@@ -674,5 +688,18 @@ mod tests {
             read.is_err() || leaked != "password",
             "open_read followed a symlink out of the root and leaked `{leaked}`"
         );
+    }
+
+    #[test]
+    fn a_modification_time_can_be_carried_across() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("clip.mp4"), b"x").unwrap();
+        let backend = LocalBackend::new(dir.path().to_path_buf());
+        let then = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+
+        assert!(backend.set_modified(Path::new("clip.mp4"), then).unwrap());
+
+        let meta = std::fs::metadata(dir.path().join("clip.mp4")).unwrap();
+        assert_eq!(meta.modified().unwrap(), then);
     }
 }

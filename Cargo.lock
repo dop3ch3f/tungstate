@@ -5901,6 +5901,7 @@ dependencies = [
  "tungstate-execute",
  "tungstate-journal",
  "tungstate-secret",
+ "tungstate-sync",
  "tungstate-transfer",
  "tungstate-watch",
 ]
@@ -5995,6 +5996,22 @@ version = "0.1.0-alpha.2"
 dependencies = [
  "keyring",
  "thiserror 2.0.20",
+]
+
+[[package]]
+name = "tungstate-sync"
+version = "0.1.0-alpha.2"
+dependencies = [
+ "tempfile",
+ "thiserror 2.0.20",
+ "tungstate-attrs",
+ "tungstate-backend",
+ "tungstate-backend-opendal",
+ "tungstate-core",
+ "tungstate-execute",
+ "tungstate-journal",
+ "tungstate-secret",
+ "tungstate-transfer",
 ]
 
 [[package]]

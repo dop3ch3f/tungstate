@@ -18,6 +18,8 @@ pub enum Purpose {
     Tidy,
     /// Extra copies set aside or trashed.
     Duplicates,
+    /// A run of a sync, which may copy to several members.
+    Sync,
 }
 
 impl Purpose {
@@ -25,6 +27,7 @@ impl Purpose {
         match self {
             Self::Tidy => "tidy",
             Self::Duplicates => "duplicates",
+            Self::Sync => "sync",
         }
     }
 
@@ -32,6 +35,7 @@ impl Purpose {
         match raw {
             "tidy" => Some(Self::Tidy),
             "duplicates" => Some(Self::Duplicates),
+            "sync" => Some(Self::Sync),
             _ => None,
         }
     }

@@ -235,6 +235,20 @@ pub trait Backend: Send + Sync {
         Ok(bytes)
     }
 
+    /// Set a file's modification time, where the storage allows it.
+    ///
+    /// `Ok(false)` means "cannot here", which is not a failure: a sync carries
+    /// a member's time across where it can and says so where it cannot, and
+    /// never depends on it, since each member is only compared with itself.
+    /// Defaulted, as `read_prefix` is, so every backend keeps compiling.
+    ///
+    /// # Errors
+    /// [`BackendError::Io`] if the storage allows it and it still failed.
+    fn set_modified(&self, path: &Path, at: std::time::SystemTime) -> Result<bool> {
+        let _ = (path, at);
+        Ok(false)
+    }
+
     /// Create or truncate `path` and open it for streaming writes.
     ///
     /// The caller must call [`WriteFinish::finish`]; dropping the writer without

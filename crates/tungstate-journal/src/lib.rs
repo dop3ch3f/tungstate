@@ -20,6 +20,7 @@ pub mod folders;
 pub mod plans;
 mod schema;
 mod storage;
+pub mod syncs;
 
 pub use connections::{
     Connection, ConnectionId, ConnectionSettings, Endpoint, NewConnection, Scheme,
@@ -33,6 +34,10 @@ pub use links::{
 };
 pub use plans::{AppliedPlan, PastPlan, PlanId, Purpose};
 pub use storage::{Archive, ArchiveSummary};
+pub use syncs::{
+    FirstCheck, Member, MemberId, NewMember, NewSync, OnRemove, Reading, Sync, SyncDirection,
+    SyncId,
+};
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -102,6 +107,15 @@ pub enum JournalError {
     /// A caller referred to a reorganisation that is not in the journal.
     #[error("no plan with id {0}")]
     UnknownPlan(i64),
+    /// No sync by that name.
+    #[error("no sync named `{0}`; `tungstate sync list` shows them")]
+    UnknownSync(String),
+    /// A sync by that name already exists.
+    #[error("a sync named `{0}` already exists")]
+    SyncExists(String),
+    /// A sync was asked to be something it cannot be.
+    #[error("{0}")]
+    BadSync(String),
 
     /// The reorganisation has already been reversed.
     ///

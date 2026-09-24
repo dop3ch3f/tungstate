@@ -196,6 +196,50 @@ const MIGRATIONS: &[&str] = &[
     // op by op, like a duplicate pass. Nullable: older rows are worked out
     // from what they did, in `Journal::past_plans`.
     "ALTER TABLE plans ADD COLUMN purpose TEXT;",
+    // v12: syncs, slice 9b. A set of folders kept in step, the members, and
+    // what each member held after the last run.
+    //
+    // `anchor` names a member but carries no REFERENCES: members point back at
+    // their sync, and a cycle of foreign keys cannot be imported one table at
+    // a time. `sync_state` is append-only; see `syncs.rs` for why that is
+    // what makes a run undoable.
+    "CREATE TABLE syncs (
+         id            INTEGER PRIMARY KEY,
+         name          TEXT    NOT NULL,
+         direction     TEXT    NOT NULL,
+         exact         INTEGER NOT NULL DEFAULT 0,
+         anchor        INTEGER,
+         on_conflict   TEXT    NOT NULL,
+         on_remove     TEXT    NOT NULL,
+         verify        TEXT    NOT NULL,
+         cooldown_secs INTEGER NOT NULL,
+         first_check   TEXT    NOT NULL DEFAULT 'full',
+         on_launch     INTEGER NOT NULL DEFAULT 0,
+         continuous    INTEGER NOT NULL DEFAULT 0,
+         created_at    INTEGER NOT NULL,
+         deleted_at    INTEGER
+     );
+     CREATE TABLE sync_members (
+         id         INTEGER PRIMARY KEY,
+         sync_id    INTEGER NOT NULL REFERENCES syncs (id),
+         ordinal    INTEGER NOT NULL,
+         name       TEXT    NOT NULL,
+         connection INTEGER REFERENCES connections (id),
+         path       TEXT    NOT NULL
+     );
+     ALTER TABLE links ADD COLUMN sync_id INTEGER REFERENCES syncs (id);
+     CREATE TABLE sync_state (
+         id          INTEGER PRIMARY KEY,
+         member_id   INTEGER NOT NULL REFERENCES sync_members (id),
+         path        TEXT    NOT NULL,
+         present     INTEGER NOT NULL,
+         size        INTEGER NOT NULL,
+         mtime       INTEGER,
+         hash        TEXT,
+         plan_id     INTEGER NOT NULL REFERENCES plans (id),
+         recorded_at INTEGER NOT NULL
+     );
+     CREATE INDEX sync_state_current ON sync_state (member_id, path, id);",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

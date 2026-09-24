@@ -23,6 +23,7 @@ pub mod plan;
 pub mod policy;
 pub mod similar;
 pub mod snapshot;
+pub mod sync;
 pub mod template;
 pub mod templates;
 pub mod vars;
@@ -41,5 +42,7 @@ mod dupes_tests;
 mod plan_tests;
 #[cfg(test)]
 mod similar_tests;
+#[cfg(test)]
+mod sync_tests;
 #[cfg(test)]
 mod tests;

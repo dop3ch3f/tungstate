@@ -1,0 +1,28 @@
+[package]
+name = "tungstate-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Running a sync: open every member, ask tungstate-core what should move, read
+# whatever it asks to read, and carry each leg through tungstate-transfer. The
+# deciding is core's and the moving is transfer's; this is the one function
+# the command line, the window and (in 9e) the watcher all call.
+[dependencies]
+thiserror = { workspace = true }
+tungstate-core = { path = "../tungstate-core" }
+tungstate-journal = { path = "../tungstate-journal" }
+tungstate-backend = { path = "../tungstate-backend" }
+tungstate-backend-opendal = { path = "../tungstate-backend-opendal" }
+tungstate-attrs = { path = "../tungstate-attrs" }
+tungstate-execute = { path = "../tungstate-execute" }
+tungstate-transfer = { path = "../tungstate-transfer" }
+tungstate-secret = { path = "../tungstate-secret" }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

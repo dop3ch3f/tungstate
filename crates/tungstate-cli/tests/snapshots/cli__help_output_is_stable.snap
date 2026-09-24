@@ -10,6 +10,7 @@ Commands:
   folder      Manage governed folders
   init        Give a folder a starting set of rules
   link        Manage transfer links between folders
+  sync        Keep a set of folders in step, on this machine or elsewhere
   connection  Manage connections to places other than this machine
   log         Show everything that ever happened to a path
   whereis     Show where a file ended up

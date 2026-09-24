@@ -1844,3 +1844,114 @@ fn a_sweep_interval_that_is_not_a_time_is_refused() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+// --- sync ------------------------------------------------------------------
+
+#[test]
+fn sync_help_is_stable() {
+    for args in [vec!["sync", "--help"], vec!["sync", "add", "--help"]] {
+        let output = tungstate().args(&args).output().expect("help should run");
+        let help = String::from_utf8(output.stdout).expect("utf-8");
+        insta::assert_snapshot!(args.join("_"), help);
+    }
+}
+
+#[test]
+fn three_folders_are_synced_through_the_binary_and_a_second_run_does_nothing() {
+    let home = sandbox();
+    let members: Vec<std::path::PathBuf> = ["laptop", "nas", "spare"]
+        .iter()
+        .map(|name| home.path().join(name))
+        .collect();
+    for member in &members {
+        std::fs::create_dir_all(member).unwrap();
+    }
+    std::fs::write(members[0].join("export.mp4"), b"from the laptop").unwrap();
+    std::fs::create_dir_all(members[1].join("2019")).unwrap();
+    std::fs::write(members[1].join("2019/old.mp4"), b"from the archive").unwrap();
+
+    let mut add = sandboxed(&home);
+    add.args(["sync", "add", "capcut"]);
+    for member in &members {
+        add.arg(member);
+    }
+    add.args(["--all", "--cooldown", "0"]).assert().success();
+
+    sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success();
+    for member in &members {
+        assert_eq!(
+            std::fs::read(member.join("export.mp4")).unwrap(),
+            b"from the laptop"
+        );
+        assert_eq!(
+            std::fs::read(member.join("2019/old.mp4")).unwrap(),
+            b"from the archive"
+        );
+    }
+
+    sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("nothing to do"));
+}
+
+#[test]
+fn a_sync_preview_is_data_with_json() {
+    let home = sandbox();
+    let (a, b) = (home.path().join("a"), home.path().join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+    std::fs::write(a.join("x.mp4"), b"12345").unwrap();
+    sandboxed(&home)
+        .args(["sync", "add", "pair"])
+        .args([&a, &b])
+        .args(["--push", "--cooldown", "0"])
+        .assert()
+        .success();
+
+    let output = sandboxed(&home)
+        .args(["sync", "preview", "pair", "--json"])
+        .output()
+        .unwrap();
+    let document: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+
+    assert_eq!(document["direction"], "push");
+    assert_eq!(document["members"][1]["arriving"], 1);
+    assert_eq!(document["members"][1]["arriving_bytes"], 5);
+    assert_eq!(document["legs"][0]["from"], "a");
+    assert!(!b.join("x.mp4").exists(), "a preview changes nothing");
+}
+
+#[test]
+fn a_sync_says_which_way_and_refuses_what_9c_brings() {
+    let home = sandbox();
+    let (a, b) = (home.path().join("a"), home.path().join("b"));
+    std::fs::create_dir_all(&a).unwrap();
+    std::fs::create_dir_all(&b).unwrap();
+
+    sandboxed(&home)
+        .args(["sync", "add", "x"])
+        .args([&a, &b])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("--push, --pull or --all"));
+    sandboxed(&home)
+        .args(["sync", "add", "x"])
+        .args([&a, &b])
+        .args(["--all", "--exact"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("9c"));
+    std::fs::create_dir_all(a.join("inside")).unwrap();
+    sandboxed(&home)
+        .args(["sync", "add", "x"])
+        .args([&a, &a.join("inside")])
+        .arg("--all")
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("overlap"));
+}
