@@ -4,6 +4,7 @@
 <script setup lang="ts">
 import { useDupes } from "../../state/useDupes";
 import { bytes, shortPath } from "../../lib/format";
+import { files, opened, reached } from "../../lib/counts";
 import Button from "../../ui/Button.vue";
 
 const d = useDupes();
@@ -21,11 +22,11 @@ const d = useDupes();
       Looking at what things are, not just what they are made of.
     </p>
     <p class="dz-counts num" v-if="d.progress.value?.stage === 'alike'">
-      {{ d.progress.value.looked }} file(s) looked at, {{ d.progress.value.read }} opened,
+      {{ files(reached(d.progress.value)) }} looked at, {{ opened(d.progress.value) }} opened,
       {{ d.progress.value.recalled }} remembered from last time.
     </p>
     <p class="dz-counts num" v-else-if="d.progress.value">
-      {{ d.progress.value.looked }} file(s) checked, {{ d.progress.value.read }} read,
+      {{ files(reached(d.progress.value)) }} checked, {{ opened(d.progress.value) }} read,
       {{ d.progress.value.recalled }} already known, {{ bytes(d.progress.value.bytes) }} read.
     </p>
     <p class="dz-counts" v-else>Walking the folder…</p>

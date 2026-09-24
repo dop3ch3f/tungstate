@@ -8,6 +8,7 @@
 import { computed, onMounted, onUnmounted, ref } from "vue";
 import { useDupes } from "../../state/useDupes";
 import { bytes } from "../../lib/format";
+import { extraIn, files, lookedAt } from "../../lib/counts";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
@@ -64,7 +65,7 @@ async function go() {
 
   const action = doing.value === "trash" ? "Send to the Trash" : "Set aside";
   const detail = [
-    `${d.chosenFiles.value} file(s), ${bytes(d.chosenBytes.value)}.`,
+    `${files(d.chosenFiles.value)}, ${bytes(d.chosenBytes.value)}.`,
     doing.value === "trash"
       ? "Only the Finder can bring these back."
       : "They stay inside the folder, and Put it back undoes this.",
@@ -83,7 +84,7 @@ async function go() {
     );
   }
   const confirmed = await ask({
-    title: `${action} ${d.chosenFiles.value} file(s)?`,
+    title: `${action} ${files(d.chosenFiles.value)}?`,
     why: "One copy of each stays exactly where it is.",
     detail,
     choices: [
@@ -106,7 +107,7 @@ async function go() {
     <div class="none" v-if="!found.rows.length">
       <p>
         Nothing here is a copy of anything else here.
-        {{ found.files }} file(s) looked at.
+        {{ files(lookedAt(found)) }} looked at.
       </p>
       <Button @click="d.again()">Look somewhere else</Button>
     </div>
@@ -136,7 +137,7 @@ async function go() {
       <footer class="foot">
         <p class="foot-sum">
           <b>{{ bytes(found.reclaimable) }}</b> in
-          {{ found.extra_files }} extra file(s), out of {{ found.files }} looked at.
+          {{ extraIn(found) }} extra {{ extraIn(found) === 1 ? "file" : "files" }}, out of {{ lookedAt(found) }} looked at.
           <span v-if="found.unchecked.length" class="foot-note">
             {{ found.unchecked.length }} could not be looked at.
           </span>
@@ -147,7 +148,7 @@ async function go() {
           @click="go()"
         >
           {{ doing === "trash" ? "Send" : "Set aside" }}
-          {{ d.chosenFiles.value }} file(s)
+          {{ files(d.chosenFiles.value) }}
         </Button>
       </footer>
     </template>

@@ -4,7 +4,7 @@
 import { onMounted, ref, shallowRef } from "vue";
 import { useDupes } from "../../state/useDupes";
 import { dupes, folders, transfers } from "../../engine/commands";
-import { files, ran } from "../../lib/counts";
+import { files, ran, undidDuplicates } from "../../lib/counts";
 import { shortPath } from "../../lib/format";
 import type { PastRun, Place } from "../../engine/types";
 import { ask } from "../../ui/useDialog";
@@ -46,7 +46,7 @@ async function putBack(run: PastRun) {
   said.value = trouble.value = null;
   try {
     const back = await dupes.putBack(run.root, run.plan);
-    said.value = `Put ${back === 1 ? "1 file" : `${back} files`} back in ${run.name}.`;
+    said.value = `Put ${files(undidDuplicates(back))} back in ${run.name}.`;
   } catch (e) {
     trouble.value = String(e);
   } finally {

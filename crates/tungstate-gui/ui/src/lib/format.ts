@@ -3,16 +3,22 @@
 
 /** Sizes read as mass here: this is a tool about reclaiming weight from a disk. */
 export function bytes(n: number): string {
-  if (n < 1024) return `${n} B`;
+  if (n < 1000) return `${n} B`;
   const units = ["KB", "MB", "GB", "TB"];
   let value = n / 1024;
   let i = 0;
-  while (value >= 1024 && i < units.length - 1) {
+  // Step up at 1000, not 1024, so a size never shows four digits: 1,000 MiB
+  // reads "1.0 GB" rather than "1000 MB".
+  while (value >= 1000 && i < units.length - 1) {
     value /= 1024;
     i += 1;
   }
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
 }
+
+/** `1 group`, `3 groups`: for counts that are not files. Files go through
+ *  `counts.ts`, which checks where the number came from. */
+export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
 /**
  * Shorten a path from the left, keeping the part that identifies it.

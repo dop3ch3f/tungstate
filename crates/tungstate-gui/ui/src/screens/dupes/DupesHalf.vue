@@ -2,7 +2,8 @@
 <script setup lang="ts">
 import { onMounted } from "vue";
 import { useDupes } from "../../state/useDupes";
-import { bytes } from "../../lib/format";
+import { bytes, plural } from "../../lib/format";
+import { cleared, files, undidDuplicates } from "../../lib/counts";
 import DupesStart from "./DupesStart.vue";
 import DupesScanning from "./DupesScanning.vue";
 import DupesFound from "./DupesFound.vue";
@@ -31,7 +32,7 @@ onMounted(() => d.loadAction());
       </div>
 
       <Notice v-if="d.putBackCount.value !== null">
-        Put {{ d.putBackCount.value }} file(s) back where they were.
+        Put {{ files(undidDuplicates(d.putBackCount.value)) }} back where they were.
       </Notice>
       <DupesStart v-if="d.phase.value === 'start'" />
       <DupesScanning v-else-if="d.phase.value === 'scanning'" />
@@ -48,12 +49,12 @@ onMounted(() => d.loadAction());
              nothing and says nothing, which is what Put it back did here. -->
         <Notice tone="bad" v-if="d.problem.value">{{ d.problem.value }}</Notice>
         <Notice>
-          {{ d.cleared.value.files }} file(s)
+          {{ files(cleared(d.cleared.value)) }}
           {{ d.cleared.value.reversible ? "set aside" : "sent to the Trash" }}.
           {{ bytes(d.cleared.value.bytes) }} reclaimed.
         </Notice>
         <Notice tone="hold" v-if="d.cleared.value.dropped">
-          {{ d.cleared.value.dropped }} group(s) were not identical after all, and were left alone.
+          {{ plural(d.cleared.value.dropped, "group") }} {{ d.cleared.value.dropped === 1 ? "was" : "were" }} not identical after all, and {{ d.cleared.value.dropped === 1 ? "was" : "were" }} left alone.
         </Notice>
         <Notice tone="bad" v-for="failure in d.cleared.value.failed" :key="failure">
           {{ failure }}

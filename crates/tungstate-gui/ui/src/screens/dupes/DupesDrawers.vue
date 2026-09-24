@@ -4,6 +4,7 @@
 import { computed } from "vue";
 import { useDupes } from "../../state/useDupes";
 import { bytes } from "../../lib/format";
+import { files } from "../../lib/counts";
 import type { Claim, DupeKind } from "../../engine/types";
 
 const d = useDupes();
@@ -87,7 +88,7 @@ function isOpen(claim: Claim, kind: DupeKind | null): boolean {
     <section class="chosen">
       <h2>Ticked</h2>
       <p class="tick-total">{{ bytes(d.chosenBytes.value) }}</p>
-      <p class="tick-count">in {{ d.chosenFiles.value }} file(s)</p>
+      <p class="tick-count">in {{ files(d.chosenFiles.value) }}</p>
     </section>
   </nav>
 </template>

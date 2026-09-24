@@ -9,6 +9,7 @@ import { dupes } from "../engine/commands";
 import { dupeEvents, type UnlistenFn } from "../engine/events";
 import type { Claim, Cleared, DupeKind, DupeRow, Found, ScanProgress } from "../engine/types";
 import { useTable } from "../lib/table";
+import { tickedAcross } from "../lib/counts";
 
 export type Phase = "start" | "scanning" | "found" | "clearing" | "done";
 
@@ -247,16 +248,7 @@ function keepIn(directory: string) {
  *
  *  A count of files, never of operations: a plan also removes the directories
  *  it empties, and slice 7b shipped "moved 9 file(s)" for five moved files. */
-const chosenFiles = computed(() => {
-  const answer = found.value;
-  if (!answer) return 0;
-  let total = 0;
-  for (const row of answer.rows) {
-    const count = tickedIn(row);
-    total += row.folder ? count * row.files : count;
-  }
-  return total;
-});
+const chosenFiles = computed(() => tickedAcross(found.value?.rows ?? [], tickedIn));
 
 const chosenBytes = computed(() => {
   const answer = found.value;

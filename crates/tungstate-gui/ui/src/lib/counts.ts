@@ -15,7 +15,7 @@
 // `moves.length` or `ops.length` where a `FileCount` is wanted and `vue-tsc`
 // refuses it, on every platform CI runs on.
 
-import type { Notice, Outcome, PastRun, PreviewView, PutBackDone, TidyDone } from "../engine/types";
+import type { Cleared, DupeRow, Found, Notice, Outcome, PastRun, PreviewView, PutBackDone, ScanProgress, TidyDone } from "../engine/types";
 
 declare const isFileCount: unique symbol;
 
@@ -47,6 +47,36 @@ export const noticed = (notice: Notice): FileCount => seal(notice.files);
 /** Files a past tidy or clean-up moved. The journal counts committed file
  *  ops only, never directories or failures. */
 export const ran = (run: PastRun): FileCount => seal(run.files);
+
+/** Files a duplicate scan looked at. */
+export const lookedAt = (found: Found): FileCount => seal(found.files);
+
+/** Extra copies a scan found: files, and for a folder group every file in it. */
+export const extraIn = (found: Found): FileCount => seal(found.extra_files);
+
+/** Files a running scan has reached, and how many of those it opened. */
+export const reached = (progress: ScanProgress): FileCount => seal(progress.looked);
+export const opened = (progress: ScanProgress): FileCount => seal(progress.read);
+
+/** Files a clean-up set aside or trashed. */
+export const cleared = (done: Cleared): FileCount => seal(done.files);
+
+/** Files each copy of a folder group holds. */
+export const eachHolds = (row: DupeRow): FileCount => seal(row.files);
+
+/** What `undo_duplicates` returns, which counts files put back. */
+export const undidDuplicates = (files: number): FileCount => seal(files);
+
+/** Files the ticks would deal with: a ticked file is one, a ticked folder is
+ *  every file in it. Summed from engine counts, so still a count of files. */
+export function tickedAcross(rows: DupeRow[], tickedIn: (row: DupeRow) => number): FileCount {
+  let total = 0;
+  for (const row of rows) {
+    const count = tickedIn(row);
+    total += row.folder ? count * row.files : count;
+  }
+  return seal(total);
+}
 
 /** Files a preview looked at. */
 export const outOf = (view: PreviewView): FileCount => seal(view.of);

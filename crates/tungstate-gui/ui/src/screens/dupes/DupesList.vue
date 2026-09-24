@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import { useDupes } from "../../state/useDupes";
 import { bytes, shortPath, when } from "../../lib/format";
+import { eachHolds, files } from "../../lib/counts";
 import { picture } from "../../engine/pictures";
 import type { DupeCopy, DupeRow } from "../../engine/types";
 import Empty from "../../ui/Empty.vue";
@@ -69,7 +70,7 @@ function toggle(row: DupeRow) {
           <span class="name">{{ lead(row).name }}</span>
           <span class="note">
             {{ bytes(row.reclaimable) }} to reclaim
-            <template v-if="row.folder">· {{ row.files }} file(s) each</template>
+            <template v-if="row.folder">· {{ files(eachHolds(row)) }} each</template>
             <template v-if="!row.sure">· matched on samples</template>
           </span>
         </span>
