@@ -1892,3 +1892,153 @@ fn a_plan_that_cannot_be_reversed_says_so() {
         "`undo --last` must not offer a plan it cannot carry out"
     );
 }
+
+// --- past reorganisations, by what they were for --------------------------
+
+/// A plan with one committed op per `(kind, to)` pair, each of `size` bytes.
+fn plan_with(
+    journal: &Journal,
+    purpose: Option<crate::Purpose>,
+    ops: &[(OpKind, &str, OpStatus)],
+) -> PlanId {
+    let plan = journal
+        .begin_plan_for("/f", "snap", None, true, purpose)
+        .expect("plan");
+    for (index, (kind, to, status)) in ops.iter().enumerate() {
+        let op = journal
+            .begin(&NewOp {
+                kind: *kind,
+                source: Some(Location::new("/f", format!("file-{index}"))),
+                destination: Some(Location::new("/f", to)),
+                size: Some(10),
+                link: None,
+                link_id: None,
+            })
+            .expect("op");
+        journal.attach_to_plan(op, plan).expect("attach");
+        let outcome = match status {
+            OpStatus::Failed => Outcome::Failed { error: "no".into() },
+            _ => Outcome::Committed { hash: None },
+        };
+        journal.finish(op, &outcome).expect("finish");
+    }
+    plan
+}
+
+#[test]
+fn a_plan_is_listed_under_what_it_was_for_and_nothing_else() {
+    // A tidy whose rules set a duplicate aside looks, op by op, like a
+    // duplicate pass. What it was for is written down so it cannot be misfiled.
+    use crate::Purpose;
+    let journal = Journal::open_in_memory().unwrap();
+    let tidy = plan_with(
+        &journal,
+        Some(Purpose::Tidy),
+        &[(
+            OpKind::Rename,
+            ".tungstate-quarantine/a",
+            OpStatus::Committed,
+        )],
+    );
+    let cleanup = plan_with(
+        &journal,
+        Some(Purpose::Duplicates),
+        &[(
+            OpKind::Rename,
+            ".tungstate-quarantine/b",
+            OpStatus::Committed,
+        )],
+    );
+
+    let tidies = journal.past_plans(Purpose::Tidy, 10).unwrap();
+    let cleanups = journal.past_plans(Purpose::Duplicates, 10).unwrap();
+    assert_eq!(tidies.iter().map(|p| p.plan.id).collect::<Vec<_>>(), [tidy]);
+    assert_eq!(
+        cleanups.iter().map(|p| p.plan.id).collect::<Vec<_>>(),
+        [cleanup]
+    );
+}
+
+#[test]
+fn a_plan_from_before_purposes_is_judged_by_what_it_did() {
+    use crate::Purpose;
+    let journal = Journal::open_in_memory().unwrap();
+    let all_aside = plan_with(
+        &journal,
+        None,
+        &[
+            (
+                OpKind::Rename,
+                ".tungstate-quarantine/a",
+                OpStatus::Committed,
+            ),
+            (OpKind::Remove, "", OpStatus::Committed),
+        ],
+    );
+    let filed = plan_with(
+        &journal,
+        None,
+        &[
+            (OpKind::Rename, "Pictures/a.jpg", OpStatus::Committed),
+            (
+                OpKind::Rename,
+                ".tungstate-quarantine/b",
+                OpStatus::Committed,
+            ),
+        ],
+    );
+
+    let cleanups = journal.past_plans(Purpose::Duplicates, 10).unwrap();
+    let tidies = journal.past_plans(Purpose::Tidy, 10).unwrap();
+    assert_eq!(
+        cleanups.iter().map(|p| p.plan.id).collect::<Vec<_>>(),
+        [all_aside]
+    );
+    assert_eq!(
+        tidies.iter().map(|p| p.plan.id).collect::<Vec<_>>(),
+        [filed]
+    );
+}
+
+#[test]
+fn a_past_plan_counts_files_that_moved_not_steps() {
+    // Directories and failures are steps, not files. Slice 7b's "moved 9
+    // file(s)" for five was exactly this mistake.
+    use crate::Purpose;
+    let journal = Journal::open_in_memory().unwrap();
+    plan_with(
+        &journal,
+        Some(Purpose::Tidy),
+        &[
+            (OpKind::MkDir, "Pictures", OpStatus::Committed),
+            (OpKind::Rename, "Pictures/a.jpg", OpStatus::Committed),
+            (OpKind::Rename, "Pictures/b.jpg", OpStatus::Committed),
+            (OpKind::Rename, "Pictures/c.jpg", OpStatus::Failed),
+        ],
+    );
+
+    let past = journal.past_plans(Purpose::Tidy, 10).unwrap();
+    let [past] = past.as_slice() else {
+        panic!("one plan: {past:?}");
+    };
+    assert_eq!((past.files, past.bytes), (2, 20));
+}
+
+#[test]
+fn an_undo_is_not_listed_but_the_plan_it_undid_says_so() {
+    use crate::Purpose;
+    let journal = Journal::open_in_memory().unwrap();
+    let original = plan_with(
+        &journal,
+        Some(Purpose::Tidy),
+        &[(OpKind::Rename, "Pictures/a.jpg", OpStatus::Committed)],
+    );
+    journal
+        .begin_plan("/f", "undo of 1", Some(original))
+        .unwrap();
+    journal.mark_undone(original).unwrap();
+
+    let tidies = journal.past_plans(Purpose::Tidy, 10).unwrap();
+    assert_eq!(tidies.len(), 1, "{tidies:?}");
+    assert!(tidies[0].plan.is_undone());
+}

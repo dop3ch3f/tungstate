@@ -31,7 +31,7 @@ pub use folders::{Folder, FolderId};
 pub use links::{
     ConflictAction, Link, LinkId, NewLink, Order, Removal, SourcePolicy, VerifyLevel, temp_name,
 };
-pub use plans::{AppliedPlan, PlanId};
+pub use plans::{AppliedPlan, PastPlan, PlanId, Purpose};
 pub use storage::{Archive, ArchiveSummary};
 
 use std::path::{Path, PathBuf};

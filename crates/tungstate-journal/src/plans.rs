@@ -11,6 +11,44 @@ use crate::{Journal, JournalError, OpId, Result, now_millis, query};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct PlanId(pub i64);
 
+/// What a reorganisation was for, which is which window lists it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Purpose {
+    /// A folder filed by its rules.
+    Tidy,
+    /// Extra copies set aside or trashed.
+    Duplicates,
+}
+
+impl Purpose {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Tidy => "tidy",
+            Self::Duplicates => "duplicates",
+        }
+    }
+
+    fn parse(raw: &str) -> Option<Self> {
+        match raw {
+            "tidy" => Some(Self::Tidy),
+            "duplicates" => Some(Self::Duplicates),
+            _ => None,
+        }
+    }
+}
+
+/// A past reorganisation with what it amounted to, for a history list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PastPlan {
+    /// The plan itself.
+    pub plan: AppliedPlan,
+    /// Files it moved, set aside or trashed. Not directories, and not ops
+    /// that failed or were skipped.
+    pub files: u64,
+    /// Bytes in those files.
+    pub bytes: u64,
+}
+
 /// One reorganisation as recorded.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppliedPlan {
@@ -30,6 +68,8 @@ pub struct AppliedPlan {
     /// are the operating system's to restore, and a half-working undo would be
     /// worse than a refusal.
     pub reversible: bool,
+    /// What it was for. `None` for a plan written before v11, or an undo.
+    pub purpose: Option<Purpose>,
     /// The reorganisation this one reverses, if it is an undo.
     ///
     /// An undo is itself a plan, because its operations have to show up in
@@ -87,16 +127,32 @@ impl Journal {
         undoes: Option<PlanId>,
         reversible: bool,
     ) -> Result<PlanId> {
+        self.begin_plan_for(folder, snapshot, undoes, reversible, None)
+    }
+
+    /// Record a reorganisation, saying what it is for.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the row cannot be written.
+    pub fn begin_plan_for(
+        &self,
+        folder: &str,
+        snapshot: &str,
+        undoes: Option<PlanId>,
+        reversible: bool,
+        purpose: Option<Purpose>,
+    ) -> Result<PlanId> {
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO plans (folder, snapshot, applied_at, undoes, reversible)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+            "INSERT INTO plans (folder, snapshot, applied_at, undoes, reversible, purpose)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
                 folder,
                 snapshot,
                 now_millis(),
                 undoes.map(|p| p.0),
-                i64::from(reversible)
+                i64::from(reversible),
+                purpose.map(Purpose::as_str)
             ],
         )
         .map_err(query("recording a plan"))?;
@@ -134,7 +190,7 @@ impl Journal {
     pub fn plan_by_id(&self, id: PlanId) -> Result<AppliedPlan> {
         let conn = self.lock();
         conn.query_row(
-            "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible
+            "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
              FROM plans WHERE id = ?1",
             rusqlite::params![id.0],
             row_to_plan,
@@ -160,7 +216,7 @@ impl Journal {
         let conn = self.lock();
         let mut statement = conn
             .prepare(
-                "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible
+                "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
                  FROM plans ORDER BY id DESC LIMIT ?1",
             )
             .map_err(query("listing recent plans"))?;
@@ -172,6 +228,54 @@ impl Journal {
             .map_err(query("listing recent plans"))?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(query("listing recent plans"))
+    }
+
+    /// Past reorganisations for one purpose, newest first, with what each
+    /// amounted to. Undos are left out: they show as the plan they undid,
+    /// marked put back.
+    ///
+    /// A plan from before v11 has no purpose written down, so it is judged by
+    /// what it did: every file it touched went to the set-aside area or the
+    /// trash means duplicates, anything else a tidy. One aggregate query, so a
+    /// long history costs one pass over the plan's ops through `ops_plan`.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn past_plans(&self, purpose: Purpose, limit: usize) -> Result<Vec<PastPlan>> {
+        let conn = self.lock();
+        let mut statement = conn
+            .prepare(
+                "SELECT p.id, p.folder, p.snapshot, p.applied_at, p.undone_at, p.undoes,
+                        p.reversible, p.purpose,
+                        COUNT(o.id) AS files,
+                        COALESCE(SUM(o.size), 0) AS bytes,
+                        COALESCE(SUM(o.kind = 'remove'
+                                     OR instr(o.dst_path, '.tungstate-quarantine') > 0), 0) AS aside
+                 FROM plans p
+                 LEFT JOIN ops o ON o.plan_id = p.id
+                      AND o.kind IN ('rename', 'remove') AND o.status = 'committed'
+                 WHERE p.undoes IS NULL
+                 GROUP BY p.id
+                 HAVING COALESCE(p.purpose,
+                          CASE WHEN COUNT(o.id) > 0 AND aside = COUNT(o.id)
+                               THEN 'duplicates' ELSE 'tidy' END) = ?1
+                 ORDER BY p.id DESC LIMIT ?2",
+            )
+            .map_err(query("listing past plans"))?;
+        let rows = statement
+            .query_map(
+                rusqlite::params![purpose.as_str(), i64::try_from(limit).unwrap_or(i64::MAX)],
+                |row| {
+                    Ok(PastPlan {
+                        plan: row_to_plan(row)?,
+                        files: u64::try_from(row.get::<_, i64>("files")?).unwrap_or(0),
+                        bytes: u64::try_from(row.get::<_, i64>("bytes")?).unwrap_or(0),
+                    })
+                },
+            )
+            .map_err(query("listing past plans"))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(query("listing past plans"))
     }
 
     /// Everything one reorganisation did, oldest first.
@@ -220,5 +324,9 @@ fn row_to_plan(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppliedPlan> {
         undone_at: row.get("undone_at")?,
         undoes: row.get::<_, Option<i64>>("undoes")?.map(PlanId),
         reversible: row.get::<_, i64>("reversible")? != 0,
+        purpose: row
+            .get::<_, Option<String>>("purpose")?
+            .as_deref()
+            .and_then(Purpose::parse),
     })
 }

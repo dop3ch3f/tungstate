@@ -30,7 +30,7 @@ use tungstate_backend::{Backend, BackendError, RootToken};
 use tungstate_core::plan::{Op, Plan};
 use tungstate_core::snapshot;
 use tungstate_journal::plans::PlanId;
-use tungstate_journal::{Journal, JournalError, Location, NewOp, OpKind, Outcome};
+use tungstate_journal::{Journal, JournalError, Location, NewOp, OpKind, Outcome, Purpose};
 
 pub use recover::{Resolution, resolve_interrupted};
 pub use undo::{Undone, invert, undo};
@@ -154,6 +154,24 @@ pub fn apply(
     journal: &Journal,
     root: &str,
 ) -> Result<Applied> {
+    apply_for(Purpose::Tidy, plan, fresh, backend, journal, root)
+}
+
+/// [`apply`], recording what the plan was for so each window can list its own.
+///
+/// A parallel entry point rather than a new argument on `apply`, whose four
+/// callers are all tidies: only the duplicate passes need to say otherwise.
+///
+/// # Errors
+/// As [`apply`].
+pub fn apply_for(
+    purpose: Purpose,
+    plan: &Plan,
+    fresh: &tungstate_core::Snapshot,
+    backend: &dyn Backend,
+    journal: &Journal,
+    root: &str,
+) -> Result<Applied> {
     let planned = tungstate_core::plan::fingerprint(fresh);
     if planned != plan.snapshot {
         return Err(ExecuteError::Stale {
@@ -175,7 +193,7 @@ pub fn apply(
     // back, and the flag has to be written before the first op: a crash
     // half-way through must not leave a record that claims to be reversible.
     let reversible = !plan.ops.iter().any(|op| matches!(op, Op::Trash { .. }));
-    let id = journal.begin_plan_that(root, &plan.snapshot, None, reversible)?;
+    let id = journal.begin_plan_for(root, &plan.snapshot, None, reversible, Some(purpose))?;
     let mut applied = Applied {
         plan: id,
         done: 0,

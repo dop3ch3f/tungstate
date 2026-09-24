@@ -666,7 +666,8 @@ pub fn clear(
     let bytes = bytes_in(&dealings, &snapshot);
     let name = label_for(&place.root);
     let plan = dupes::plan_dealings(&snapshot, &dealings, extras, &name, Mode::Observe);
-    let applied = tungstate_execute::apply(
+    let applied = tungstate_execute::apply_for(
+        tungstate_journal::Purpose::Duplicates,
         &plan,
         &snapshot,
         place.backend.as_ref(),
@@ -877,6 +878,19 @@ mod tests {
         assert!(cleared.reversible);
         assert!(dir.path().join("keep.bin").exists(), "one copy stays");
         assert!(!dir.path().join("copies/other-name.bin").exists());
+
+        // Listed where Duplicates will look for it, and not among tidies.
+        let past = journal
+            .past_plans(tungstate_journal::Purpose::Duplicates, 10)
+            .expect("past");
+        assert_eq!(past.len(), 1, "{past:?}");
+        assert_eq!(past[0].files, 1);
+        assert!(
+            journal
+                .past_plans(tungstate_journal::Purpose::Tidy, 10)
+                .expect("past")
+                .is_empty()
+        );
     }
 
     #[test]

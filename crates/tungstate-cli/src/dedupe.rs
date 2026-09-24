@@ -283,7 +283,14 @@ fn carry_out(
         &policy.folder.name,
         policy.folder.mode,
     );
-    match tungstate_execute::apply(&plan, snapshot, backend, journal, root) {
+    match tungstate_execute::apply_for(
+        tungstate_journal::Purpose::Duplicates,
+        &plan,
+        snapshot,
+        backend,
+        journal,
+        root,
+    ) {
         Ok(applied) => {
             println!();
             println!(

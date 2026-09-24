@@ -31,7 +31,7 @@ use tauri::{AppHandle, Emitter, Manager, State};
 use tungstate_execute::thumbs::Thumbs;
 use tungstate_journal::{
     ConflictAction, Connection, ConnectionSettings, Endpoint, Journal, JournalError, Link, Locator,
-    NewConnection, NewLink, Op, OpStatus, Order, Scheme, SourcePolicy, VerifyLevel, ends,
+    NewConnection, NewLink, Op, OpStatus, Order, Purpose, Scheme, SourcePolicy, VerifyLevel, ends,
 };
 use tungstate_secret::{EnvOverride, KeyringStore, SecretStore, connection_key};
 use tungstate_transfer::{IdenticalAction, Stop, Summary, Transfer};
@@ -557,6 +557,73 @@ fn begin_watching(app: &AppHandle, watcher: &Arc<watching::Watching>) {
         // not a reason to stop keeping folders in order.
         let _ = reporter.emit("watch://noticed", notice);
     });
+}
+
+/// One past tidy or duplicate clean-up, as a history row draws it.
+#[derive(Debug, Clone, Serialize)]
+struct PastView {
+    /// What `put_back` and `undo_duplicates` take.
+    plan: i64,
+    /// The folder's root.
+    root: String,
+    /// The folder's name on screen: its governed name, or else its last part.
+    name: String,
+    /// Milliseconds since the epoch.
+    applied_at: i64,
+    /// Files moved or set aside. Not directories, not failures.
+    files: u64,
+    bytes: u64,
+    /// Already put back.
+    undone: bool,
+    /// Can still be put back. False once undone, or for anything trashed.
+    undoable: bool,
+}
+
+/// How many past runs a section lists. A screen, not an archive: History has
+/// the rest.
+const PAST_SHOWN: usize = 50;
+
+/// The body of [`past_tidies`] and [`past_cleanups`], without `State`.
+fn past_for(journal: &Journal, purpose: Purpose) -> Result<Vec<PastView>, String> {
+    let names: std::collections::HashMap<String, String> = journal
+        .folders()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|folder| (folder.root, folder.name))
+        .collect();
+    let past = journal
+        .past_plans(purpose, PAST_SHOWN)
+        .map_err(|error| error.to_string())?;
+    Ok(past
+        .into_iter()
+        .map(|one| PastView {
+            plan: one.plan.id.0,
+            name: names.get(&one.plan.folder).cloned().unwrap_or_else(|| {
+                Path::new(&one.plan.folder).file_name().map_or_else(
+                    || one.plan.folder.clone(),
+                    |n| n.to_string_lossy().to_string(),
+                )
+            }),
+            undoable: one.plan.is_undoable(),
+            undone: one.plan.is_undone(),
+            root: one.plan.folder,
+            applied_at: one.plan.applied_at,
+            files: one.files,
+            bytes: one.bytes,
+        })
+        .collect())
+}
+
+/// Tidies, newest first, for Organize's own history.
+#[tauri::command]
+fn past_tidies(state: State<'_, App>) -> Result<Vec<PastView>, String> {
+    past_for(&state.journal, Purpose::Tidy)
+}
+
+/// Duplicate clean-ups, newest first, for Duplicates' own history.
+#[tauri::command]
+fn past_cleanups(state: State<'_, App>) -> Result<Vec<PastView>, String> {
+    past_for(&state.journal, Purpose::Duplicates)
 }
 
 /// The places scanned before, newest first.
@@ -2219,6 +2286,8 @@ fn main() {
             find_duplicates,
             stop_finding_duplicates,
             recent_scans,
+            past_tidies,
+            past_cleanups,
             undo_duplicates,
             watch_state,
             set_watching,
@@ -2523,6 +2592,28 @@ mod tests {
             home.path().join("a.mp4").display().to_string()
         );
         assert!(listing.parent.is_some(), "a temp dir has a parent");
+    }
+
+    #[test]
+    fn a_past_run_is_named_the_way_its_folder_is_named_on_screen() {
+        // A governed folder keeps the name it was given; a folder only ever
+        // scanned for duplicates has none, so it is called by its last part.
+        let journal = Journal::open_in_memory().unwrap();
+        journal.add_folder("/home/me/dl", "Downloads").unwrap();
+        journal
+            .begin_plan_for("/home/me/dl", "s", None, true, Some(Purpose::Tidy))
+            .unwrap();
+        journal
+            .begin_plan_for("/home/me/Pictures", "s", None, true, Some(Purpose::Tidy))
+            .unwrap();
+
+        let names: Vec<String> = past_for(&journal, Purpose::Tidy)
+            .unwrap()
+            .into_iter()
+            .map(|past| past.name)
+            .collect();
+        assert_eq!(names, ["Pictures", "Downloads"], "newest first");
+        assert!(past_for(&journal, Purpose::Duplicates).unwrap().is_empty());
     }
 
     #[test]

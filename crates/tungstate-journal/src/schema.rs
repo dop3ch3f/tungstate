@@ -191,6 +191,11 @@ const MIGRATIONS: &[&str] = &[
     // version of the arithmetic simply fails to match and is recomputed. That
     // is the migration for a change to the arithmetic, and it costs nothing.
     "ALTER TABLE hashes ADD COLUMN print TEXT;",
+    // v11: what a reorganisation was for. Organize and Duplicates each list
+    // their own past runs, and a tidy whose rules set duplicates aside looks,
+    // op by op, like a duplicate pass. Nullable: older rows are worked out
+    // from what they did, in `Journal::past_plans`.
+    "ALTER TABLE plans ADD COLUMN purpose TEXT;",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.
