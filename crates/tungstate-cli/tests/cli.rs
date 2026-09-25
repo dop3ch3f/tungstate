@@ -2228,13 +2228,26 @@ fn a_sync_preview_reads_as_a_list_per_member() {
         .output()
         .unwrap();
     // The members' folders are wherever this test's temporary directory is,
-    // spelled as the sync stored it: resolved, so `/private/var` on macOS.
-    let resolved = std::fs::canonicalize(home.path()).unwrap();
-    let preview = String::from_utf8(output.stdout)
+    // and that is spelled differently on every platform (`/private/var` on
+    // macOS, a short `RUNNER~1` or a `\\?\` prefix on Windows). Its own
+    // name is the same in every spelling, so everything up to it goes.
+    let name = home
+        .path()
+        .file_name()
         .unwrap()
-        .replace(&resolved.to_string_lossy().to_string(), "[home]")
-        .replace(&home.path().to_string_lossy().to_string(), "[home]")
-        .replace('\\', "/");
+        .to_string_lossy()
+        .to_string();
+    let preview: String = String::from_utf8(output.stdout)
+        .unwrap()
+        .replace('\\', "/")
+        .lines()
+        .map(|line| match (line.find("at "), line.find(&name)) {
+            (Some(at), Some(end)) if at < end => {
+                format!("{}at [home]{}\n", &line[..at], &line[end + name.len()..])
+            }
+            _ => format!("{line}\n"),
+        })
+        .collect();
 
     insta::assert_snapshot!(preview);
 }
