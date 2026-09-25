@@ -315,6 +315,13 @@ impl Backend for OpendalBackend {
                 Err(error) if error.kind() == ErrorKind::RangeNotSatisfied => {
                     operator.read(&owned).await
                 }
+                // FTP says the same thing as a short read ("reader got too
+                // little data"). Asked about only once a read has failed, so a
+                // file longer than the prefix costs no extra round trip.
+                Err(error) => match operator.stat(&owned).await {
+                    Ok(meta) if meta.content_length() < len => operator.read(&owned).await,
+                    _ => Err(error),
+                },
                 other => other,
             }
         })
