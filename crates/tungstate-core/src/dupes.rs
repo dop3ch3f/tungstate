@@ -909,19 +909,31 @@ fn uuid_ish(seed: &str) -> String {
 /// Numbered before the extension, the way the planner numbers a name two
 /// files both asked for, so `clip.mp4` becomes `clip-2.mp4`.
 fn free_name(wanted: &str, snapshot: &Snapshot, taken: &BTreeSet<String>) -> String {
-    if !taken.contains(&snapshot.key(wanted)) {
+    free_name_by(wanted, |candidate| taken.contains(&snapshot.key(candidate)))
+}
+
+/// [`free_name`] against any notion of taken, so a sync can ask it of
+/// several members at once.
+pub fn free_name_by(wanted: &str, taken: impl Fn(&str) -> bool) -> String {
+    if !taken(wanted) {
         return wanted.to_string();
     }
-    let (stem, extension) = match wanted.rsplit_once('.') {
-        Some((stem, extension)) if !stem.ends_with('/') => (stem, format!(".{extension}")),
-        _ => (wanted, String::new()),
-    };
+    let (stem, extension) = stem_and_extension(wanted);
     // Bounded: a thousand files under one name in one folder is not a real
     // folder, and an unbounded search here would be an unbounded loop.
     (2_u32..1_000)
         .map(|nth| format!("{stem}-{nth}{extension}"))
-        .find(|candidate| !taken.contains(&snapshot.key(candidate)))
+        .find(|candidate| !taken(candidate))
         .unwrap_or_else(|| format!("{stem}-{}{extension}", uuid_ish(wanted)))
+}
+
+/// `clips/a.mp4` as `clips/a` and `.mp4`: where a number goes to tell two
+/// names apart.
+pub(crate) fn stem_and_extension(name: &str) -> (&str, String) {
+    match name.rsplit_once('.') {
+        Some((stem, extension)) if !stem.ends_with('/') => (stem, format!(".{extension}")),
+        _ => (name, String::new()),
+    }
 }
 
 /// Confirm a sampled group by comparing every byte, and say what survived.

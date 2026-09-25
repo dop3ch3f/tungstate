@@ -60,6 +60,57 @@ pub fn invert(ops: &[JournalOp]) -> Vec<Op> {
         .collect()
 }
 
+/// One step of taking a sync run back, on whichever member it happened.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Reversal {
+    /// A copy the run delivered: taken off again, but only if it still holds
+    /// what was delivered.
+    Unsend {
+        at: Location,
+        hash: Option<String>,
+        size: Option<u64>,
+    },
+    /// A rename the run made, set-asides included: moved back.
+    Unrename { now_at: Location, back_to: Location },
+}
+
+/// A sync run that deleted files outright, which nothing can put back.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Irreversible {
+    pub deleted: usize,
+}
+
+/// The steps that would take a sync run back, in the order they must run.
+///
+/// Beside [`invert`] rather than inside it: a reorganisation happens in one
+/// folder and reverses to the planner's own operations, while a sync run
+/// spans every member and reverses copies as well as renames.
+///
+/// # Errors
+/// [`Irreversible`] if the run deleted anything outright.
+pub fn invert_sync(ops: &[JournalOp]) -> std::result::Result<Vec<Reversal>, Irreversible> {
+    let committed = || ops.iter().filter(|op| op.status == OpStatus::Committed);
+    let deleted = committed().filter(|op| op.kind == OpKind::Remove).count();
+    if deleted > 0 {
+        return Err(Irreversible { deleted });
+    }
+    Ok(committed()
+        .rev()
+        .filter_map(|op| match (op.kind, &op.source, &op.destination) {
+            (OpKind::Copy, _, Some(at)) => Some(Reversal::Unsend {
+                at: at.clone(),
+                hash: op.hash.clone(),
+                size: op.size,
+            }),
+            (OpKind::Rename | OpKind::Move, Some(from), Some(to)) => Some(Reversal::Unrename {
+                now_at: to.clone(),
+                back_to: from.clone(),
+            }),
+            _ => None,
+        })
+        .collect())
+}
+
 fn path_of(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }

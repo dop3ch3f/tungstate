@@ -102,7 +102,23 @@ pub struct Sync {
     pub first_check: FirstCheck,
     pub on_launch: bool,
     pub continuous: bool,
+    /// Milliseconds since the epoch. A sync removed and made again under the
+    /// same name is a different sync, and its runs start here.
+    pub created_at: i64,
     pub members: Vec<Member>,
+}
+
+/// The settings of a sync that can change after it is made. The members and
+/// the direction cannot: changing either would make the baseline describe a
+/// different sync.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SyncSettings {
+    pub exact: bool,
+    pub on_conflict: ConflictAction,
+    pub on_remove: OnRemove,
+    pub verify: VerifyLevel,
+    pub cooldown: Duration,
+    pub first_check: FirstCheck,
 }
 
 /// What a member held at a path, as recorded after a run.
@@ -424,6 +440,78 @@ impl Journal {
         Ok(())
     }
 
+    /// Change how a sync behaves from its next run on.
+    ///
+    /// # Errors
+    /// [`JournalError::UnknownSync`] if it does not exist, or
+    /// [`JournalError::Query`] if the row cannot be written.
+    pub fn update_sync(&self, sync: SyncId, settings: &SyncSettings) -> Result<()> {
+        let changed = self
+            .lock()
+            .execute(
+                "UPDATE syncs SET exact = ?1, on_conflict = ?2, on_remove = ?3, verify = ?4,
+                                  cooldown_secs = ?5, first_check = ?6
+                 WHERE id = ?7 AND deleted_at IS NULL",
+                rusqlite::params![
+                    i64::from(settings.exact),
+                    settings.on_conflict.as_str(),
+                    settings.on_remove.as_str(),
+                    settings.verify.as_str(),
+                    i64::try_from(settings.cooldown.as_secs()).unwrap_or(i64::MAX),
+                    settings.first_check.as_str(),
+                    sync.0,
+                ],
+            )
+            .map_err(query("changing a sync"))?;
+        if changed == 0 {
+            return Err(JournalError::UnknownSync(sync.0.to_string()));
+        }
+        Ok(())
+    }
+
+    /// A sync's runs, newest first, undone ones included and undos left out.
+    ///
+    /// Only runs since it was made: a sync removed and made again under the
+    /// same name must not be able to undo its predecessor's work.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn sync_runs(&self, sync: &Sync, limit: usize) -> Result<Vec<crate::AppliedPlan>> {
+        Ok(self
+            .recent_plans_for(&format!("sync:{}", sync.name), limit)?
+            .into_iter()
+            .filter(|plan| plan.applied_at >= sync.created_at && !plan.is_an_undo())
+            .collect())
+    }
+
+    /// Every reading a run remembered, oldest first.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn readings_for_plan(&self, plan: PlanId) -> Result<Vec<Reading>> {
+        let conn = self.lock();
+        let mut statement = conn
+            .prepare(
+                "SELECT member_id, path, present, size, mtime, hash FROM sync_state
+                 WHERE plan_id = ?1 ORDER BY id",
+            )
+            .map_err(query("reading a run's readings"))?;
+        statement
+            .query_map([plan.0], |row| {
+                Ok(Reading {
+                    member: MemberId(row.get(0)?),
+                    path: row.get(1)?,
+                    present: row.get::<_, i64>(2)? != 0,
+                    size: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                    mtime: row.get(4)?,
+                    hash: row.get(5)?,
+                })
+            })
+            .map_err(query("reading a run's readings"))?
+            .collect::<std::result::Result<_, _>>()
+            .map_err(query("reading a run's readings"))
+    }
+
     /// The files a leg committed since `since`, which is how a run learns what
     /// landed and so what to remember about the member it landed on.
     ///
@@ -491,6 +579,7 @@ fn row_to_sync(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sync> {
             .ok_or_else(|| bad("first check")(first_check.clone()))?,
         on_launch: row.get::<_, i64>("on_launch")? != 0,
         continuous: row.get::<_, i64>("continuous")? != 0,
+        created_at: row.get("created_at")?,
         members: Vec::new(),
     })
 }

@@ -26,6 +26,7 @@ pub use conflict::{
 pub use governor::{Governor, Limits};
 pub use stop::{Halt, Stop};
 
+use std::collections::BTreeMap;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -474,6 +475,8 @@ pub struct Transfer<'a> {
     /// An explicit ceiling, when the user has one in mind. Raises the limit a
     /// run will climb to; never removes the handshake gate or the back-off.
     parallel: Option<usize>,
+    /// Source paths that land under another name. Empty for every drain.
+    landing: BTreeMap<PathBuf, PathBuf>,
 }
 
 /// A poisoned lock means another worker panicked. The data behind it is still
@@ -508,6 +511,7 @@ impl<'a> Transfer<'a> {
             window: None,
             moved: AtomicU64::new(0),
             parallel: None,
+            landing: BTreeMap::new(),
         }
     }
 
@@ -533,6 +537,26 @@ impl<'a> Transfer<'a> {
     pub fn parallel(mut self, files_at_once: usize) -> Self {
         self.parallel = Some(files_at_once);
         self
+    }
+
+    /// Land these source paths under other names; anything not named lands
+    /// at its own path.
+    ///
+    /// For a sync parking a conflicting version as `clip (nas).mp4` in the
+    /// set-aside area. It has to be written there under that name, because
+    /// the member it lands on may be one that cannot rename afterwards.
+    #[must_use]
+    pub fn landing(mut self, names: BTreeMap<PathBuf, PathBuf>) -> Self {
+        self.landing = names;
+        self
+    }
+
+    /// Where a source path lands.
+    fn landing_of(&self, path: &Path) -> PathBuf {
+        self.landing
+            .get(path)
+            .cloned()
+            .unwrap_or_else(|| path.to_path_buf())
     }
 
     /// One worker: take a file, deal with it, fold the result in, repeat.
@@ -739,7 +763,7 @@ impl<'a> Transfer<'a> {
         {
             let mut claimed = lock(&self.claimed);
             for file in &files {
-                claimed.insert(file.path.clone());
+                claimed.insert(self.landing_of(&file.path));
             }
         }
 
@@ -850,9 +874,8 @@ impl<'a> Transfer<'a> {
             return Ok(FileOutcome::Skipped(SkipReason::RecentlyModified));
         }
 
-        // Mirror the source tree. There is no policy engine until slice 5, so
-        // inventing a layout here would be a guess we would have to undo.
-        let destination = file.path.clone();
+        // Mirror the source tree, unless the caller named somewhere else.
+        let destination = self.landing_of(&file.path);
 
         match self.classify(file, &destination)? {
             Placement::Fresh => self

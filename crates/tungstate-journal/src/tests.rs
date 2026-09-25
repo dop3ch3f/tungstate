@@ -2172,6 +2172,87 @@ fn the_baseline_is_the_latest_reading_and_an_undo_brings_back_the_one_before() {
 }
 
 #[test]
+fn a_sync_made_again_under_the_same_name_does_not_inherit_its_runs() {
+    // Otherwise `sync undo` on the new one would try to take back what the
+    // old one did.
+    let journal = Journal::open_in_memory().unwrap();
+    let old = a_sync(&journal, None);
+    let run = journal
+        .begin_plan_for("sync:capcut", "-", None, true, Some(crate::Purpose::Sync))
+        .unwrap();
+    assert_eq!(
+        journal
+            .sync_runs(&journal.sync_by_id(old).unwrap(), 10)
+            .unwrap()[0]
+            .id,
+        run
+    );
+    journal.remove_sync(old).unwrap();
+    std::thread::sleep(std::time::Duration::from_millis(5));
+
+    let new = a_sync(&journal, None);
+
+    assert!(
+        journal
+            .sync_runs(&journal.sync_by_id(new).unwrap(), 10)
+            .unwrap()
+            .is_empty()
+    );
+}
+
+#[test]
+fn a_syncs_settings_change_and_its_members_do_not() {
+    let journal = Journal::open_in_memory().unwrap();
+    let sync = a_sync(&journal, None);
+
+    journal
+        .update_sync(
+            sync,
+            &crate::SyncSettings {
+                exact: true,
+                on_conflict: ConflictAction::Skip,
+                on_remove: crate::OnRemove::Delete,
+                verify: VerifyLevel::Size,
+                cooldown: std::time::Duration::from_secs(5),
+                first_check: crate::FirstCheck::Size,
+            },
+        )
+        .unwrap();
+
+    let changed = journal.sync_by_id(sync).unwrap();
+    assert!(changed.exact);
+    assert_eq!(changed.on_conflict, ConflictAction::Skip);
+    assert_eq!(changed.on_remove, crate::OnRemove::Delete);
+    assert_eq!(changed.cooldown, std::time::Duration::from_secs(5));
+    assert_eq!(changed.members.len(), 3);
+}
+
+#[test]
+fn a_runs_readings_come_back_in_the_order_they_were_written() {
+    let journal = Journal::open_in_memory().unwrap();
+    let sync = a_sync(&journal, None);
+    let laptop = journal.sync_by_id(sync).unwrap().members[0].id;
+    let plan = journal
+        .begin_plan_for("sync:capcut", "-", None, true, Some(crate::Purpose::Sync))
+        .unwrap();
+    journal
+        .record_baseline(
+            &[reading(laptop, "b.mp4", 2), reading(laptop, "a.mp4", 1)],
+            plan,
+        )
+        .unwrap();
+
+    let read: Vec<String> = journal
+        .readings_for_plan(plan)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.path)
+        .collect();
+
+    assert_eq!(read, ["b.mp4", "a.mp4"]);
+}
+
+#[test]
 fn nothing_is_remembered_under_a_plan_that_was_undone() {
     let journal = Journal::open_in_memory().unwrap();
     let sync = a_sync(&journal, None);

@@ -1,0 +1,26 @@
+---
+source: crates/tungstate-cli/tests/cli.rs
+expression: help
+---
+Take a file or folder off every member, for good.
+
+The one deletion that sticks: without --exact a file deleted by hand is copied back, and this is how to say it was meant.
+
+Usage: tungstate sync forget [OPTIONS] <NAME> <PATH>
+
+Arguments:
+  <NAME>
+          The sync
+
+  <PATH>
+          A file or folder, as the preview lists it
+
+Options:
+      --yes
+          Do not stop to confirm
+
+      --json
+          
+
+  -h, --help
+          Print help (see a summary with '-h')

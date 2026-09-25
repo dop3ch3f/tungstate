@@ -13,6 +13,10 @@ Commands:
   preview  Show what a run would do, per member, changing nothing
   run      Run a sync
   remove   Remove a sync. Every member's files stay where they are
+  resolve  Settle a conflict: one member's version everywhere, or every version everywhere, each named after its member
+  forget   Take a file or folder off every member, for good
+  undo     Put back what a run did, on every member
+  set      Change how a sync behaves from its next run on
   help     Print this message or the help of the given subcommand(s)
 
 Options:

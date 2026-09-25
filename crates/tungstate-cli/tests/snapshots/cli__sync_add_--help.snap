@@ -4,7 +4,7 @@ expression: help
 ---
 Keep two or more folders in step.
 
-Say which way things move: --push (the anchor sends to every other member), --pull (the anchor receives from every other member) or --all (every member ends up with everything). Nothing is ever removed until --exact arrives in slice 9c.
+Say which way things move: --push (the anchor sends to every other member), --pull (the anchor receives from every other member) or --all (every member ends up with everything). Without --exact nothing is removed, and a file deleted by hand comes back; with it, deletions are carried too.
 
 Usage: tungstate sync add [OPTIONS] <NAME> <FOLDER> <FOLDER>...
 
@@ -32,15 +32,15 @@ Options:
           A name per member, in the order the folders were given
 
       --exact
-          Also carry deletions, so every member is exactly the same. Slice 9c
+          Also carry deletions, so every member is exactly the same
 
       --on-conflict <ON_CONFLICT>
-          What an unattended run does when members changed a file differently
+          When members changed a file differently: quarantine keeps each member's own and parks the others' beside it, rename keeps every version under a name saying whose, skip leaves it for `tungstate sync resolve`
           
           [default: quarantine]
 
       --on-remove <ON_REMOVE>
-          What removing a copy means: set-aside, or delete (slice 9c)
+          What removing a copy means: set-aside, which `sync undo` can put back, or delete, which nothing can. Delete needs --exact
           
           [default: set-aside]
 

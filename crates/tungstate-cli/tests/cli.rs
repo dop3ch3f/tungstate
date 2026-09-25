@@ -1849,7 +1849,14 @@ fn a_sweep_interval_that_is_not_a_time_is_refused() {
 
 #[test]
 fn sync_help_is_stable() {
-    for args in [vec!["sync", "--help"], vec!["sync", "add", "--help"]] {
+    for args in [
+        vec!["sync", "--help"],
+        vec!["sync", "add", "--help"],
+        vec!["sync", "resolve", "--help"],
+        vec!["sync", "forget", "--help"],
+        vec!["sync", "undo", "--help"],
+        vec!["sync", "set", "--help"],
+    ] {
         let output = tungstate().args(&args).output().expect("help should run");
         let help = String::from_utf8(output.stdout).expect("utf-8");
         insta::assert_snapshot!(args.join("_"), help);
@@ -1927,7 +1934,7 @@ fn a_sync_preview_is_data_with_json() {
 }
 
 #[test]
-fn a_sync_says_which_way_and_refuses_what_9c_brings() {
+fn a_sync_says_which_way_and_refuses_what_makes_no_sense() {
     let home = sandbox();
     let (a, b) = (home.path().join("a"), home.path().join("b"));
     std::fs::create_dir_all(&a).unwrap();
@@ -1942,10 +1949,10 @@ fn a_sync_says_which_way_and_refuses_what_9c_brings() {
     sandboxed(&home)
         .args(["sync", "add", "x"])
         .args([&a, &b])
-        .args(["--all", "--exact"])
+        .args(["--all", "--on-remove", "delete"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("9c"));
+        .stderr(predicates::str::contains("needs --exact"));
     std::fs::create_dir_all(a.join("inside")).unwrap();
     sandboxed(&home)
         .args(["sync", "add", "x"])
@@ -1954,4 +1961,280 @@ fn a_sync_says_which_way_and_refuses_what_9c_brings() {
         .assert()
         .failure()
         .stderr(predicates::str::contains("overlap"));
+}
+
+/// Two local members, `laptop` and `nas`, holding the same files after one
+/// run of an exact sync.
+fn exact_sync(
+    home: &tempfile::TempDir,
+    extra: &[&str],
+) -> (std::path::PathBuf, std::path::PathBuf) {
+    let (laptop, nas) = (home.path().join("laptop"), home.path().join("nas"));
+    std::fs::create_dir_all(laptop.join("project")).unwrap();
+    std::fs::create_dir_all(&nas).unwrap();
+    std::fs::write(laptop.join("project/cut.mp4"), b"a project").unwrap();
+    for n in 0..9 {
+        std::fs::write(laptop.join(format!("{n}.mp4")), format!("export {n}")).unwrap();
+    }
+    sandboxed(home)
+        .args(["sync", "add", "capcut"])
+        .args([&laptop, &nas])
+        .args(["--all", "--exact", "--cooldown", "0"])
+        .args(extra)
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("exact"));
+    sandboxed(home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success();
+    (laptop, nas)
+}
+
+#[test]
+fn an_exact_deletion_is_set_aside_and_undo_puts_every_member_back() {
+    let home = sandbox();
+    let (laptop, nas) = exact_sync(&home, &[]);
+
+    std::fs::remove_dir_all(laptop.join("project")).unwrap();
+    sandboxed(&home)
+        .args(["sync", "preview", "capcut"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("1 file removed (set aside)"));
+    sandboxed(&home)
+        .args(["sync", "run", "capcut"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("nobody is here to confirm"));
+    sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("sync undo capcut"));
+    assert!(!nas.join("project/cut.mp4").exists());
+    assert_eq!(
+        std::fs::read(nas.join(".tungstate-quarantine/project/cut.mp4")).unwrap(),
+        b"a project"
+    );
+
+    sandboxed(&home)
+        .args(["sync", "undo", "capcut"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "brings `project/cut.mp4` back to laptop",
+        ));
+    assert!(nas.join("project/cut.mp4").exists());
+    sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read(laptop.join("project/cut.mp4")).unwrap(),
+        b"a project"
+    );
+}
+
+#[test]
+fn undo_with_a_plan_id_puts_back_a_sync_run_from_anywhere() {
+    let home = sandbox();
+    let (laptop, nas) = exact_sync(&home, &[]);
+    std::fs::remove_file(laptop.join("0.mp4")).unwrap();
+    let output = sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes", "--json"])
+        .output()
+        .unwrap();
+    let ran: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+    let plan = ran["plan"].as_i64().expect("a plan id").to_string();
+
+    sandboxed(&home)
+        .args(["undo", "--plan", &plan])
+        .current_dir(home.path())
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("is a run of sync `capcut`"));
+    assert!(nas.join("0.mp4").exists());
+}
+
+#[test]
+fn a_run_that_deletes_says_it_cannot_be_undone() {
+    let home = sandbox();
+    let (laptop, nas) = exact_sync(&home, &["--on-remove", "delete"]);
+    std::fs::remove_file(laptop.join("0.mp4")).unwrap();
+
+    sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("cannot be undone"));
+    assert!(!nas.join("0.mp4").exists());
+    assert!(!nas.join(".tungstate-quarantine").exists());
+    sandboxed(&home)
+        .args(["sync", "undo", "capcut"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("deleted files outright"));
+}
+
+#[test]
+fn an_empty_member_and_a_large_removal_are_refused_and_named() {
+    let home = sandbox();
+    let (laptop, nas) = exact_sync(&home, &[]);
+
+    // The share unmounted, and an empty folder where it was.
+    let unplugged = home.path().join("unplugged");
+    std::fs::rename(&nas, &unplugged).unwrap();
+    std::fs::create_dir_all(&nas).unwrap();
+    let refused = sandboxed(&home)
+        .args(["sync", "run", "capcut"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8(refused.stderr).unwrap();
+    assert!(!refused.status.success());
+    assert!(said.contains("`nas` lists no files"), "{said}");
+    assert!(laptop.join("1.mp4").exists(), "nothing was carried");
+    std::fs::remove_dir(&nas).unwrap();
+    std::fs::rename(&unplugged, &nas).unwrap();
+
+    for n in 0..5 {
+        std::fs::remove_file(laptop.join(format!("{n}.mp4"))).unwrap();
+    }
+    let refused = sandboxed(&home)
+        .args(["sync", "run", "capcut"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8(refused.stderr).unwrap();
+    assert!(!refused.status.success());
+    assert!(said.contains("5 of 10 files off `nas`"), "{said}");
+    assert!(said.contains("500-file / 20% limit"), "{said}");
+    assert!(nas.join("0.mp4").exists(), "nothing was taken off");
+}
+
+#[test]
+fn a_conflict_is_parked_named_after_the_member_and_resolved_by_hand() {
+    let home = sandbox();
+    let (laptop, nas) = exact_sync(&home, &[]);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(laptop.join("1.mp4"), b"the laptop's cut").unwrap();
+    std::fs::write(nas.join("1.mp4"), b"the nas's cut, longer").unwrap();
+
+    sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("sync resolve capcut"));
+    assert_eq!(
+        std::fs::read(laptop.join(".tungstate-quarantine/1 (nas).mp4")).unwrap(),
+        b"the nas's cut, longer"
+    );
+
+    sandboxed(&home)
+        .args([
+            "sync", "resolve", "capcut", "1.mp4", "--keep", "nas", "--yes",
+        ])
+        .assert()
+        .success();
+    assert_eq!(
+        std::fs::read(laptop.join("1.mp4")).unwrap(),
+        b"the nas's cut, longer"
+    );
+    sandboxed(&home)
+        .args(["sync", "preview", "capcut"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("nothing to do"));
+}
+
+#[test]
+fn a_forgotten_file_does_not_come_back_to_a_sync_that_only_adds() {
+    let home = sandbox();
+    let (laptop, nas) = exact_sync(&home, &[]);
+    sandboxed(&home)
+        .args(["sync", "set", "capcut", "--not-exact"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("copied back"));
+
+    sandboxed(&home)
+        .args(["sync", "forget", "capcut", "project", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("it will not come back"));
+    assert!(!laptop.join("project/cut.mp4").exists());
+    assert!(!nas.join("project/cut.mp4").exists());
+    sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("nothing to do"));
+
+    sandboxed(&home)
+        .args(["sync", "undo", "capcut"])
+        .assert()
+        .success();
+    assert!(laptop.join("project/cut.mp4").exists());
+}
+
+#[test]
+fn a_tidy_on_a_governed_member_is_carried_and_nothing_is_copied_twice() {
+    let home = sandbox();
+    let (laptop, nas) = exact_sync(&home, &[]);
+    std::fs::create_dir_all(laptop.join(".tungstate")).unwrap();
+    std::fs::write(
+        laptop.join(".tungstate/policy.toml"),
+        "[folder]\nname = \"laptop\"\n[defaults]\ncooldown = \"0s\"\n\n\
+         [[rule]]\nname = \"video\"\npath = \"Video\"\nmatch = { ext = \"mp4\" }\n",
+    )
+    .unwrap();
+    sandboxed(&home)
+        .args(["apply", "--yes"])
+        .arg(&laptop)
+        .assert()
+        .success();
+    assert!(laptop.join("Video/1.mp4").exists());
+
+    let output = sandboxed(&home)
+        .args(["sync", "run", "capcut", "--yes", "--json"])
+        .output()
+        .unwrap();
+    let ran: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+
+    assert_eq!(ran["renamed"], 10, "{ran}");
+    assert_eq!(ran["legs"].as_array().unwrap().len(), 0, "nothing copied");
+    assert!(nas.join("Video/1.mp4").exists());
+    assert!(!nas.join("1.mp4").exists());
+    assert!(
+        !nas.join(".tungstate").exists(),
+        "the policy is the laptop's own"
+    );
+}
+
+#[test]
+fn a_sync_preview_reads_as_a_list_per_member() {
+    let home = sandbox();
+    let (laptop, nas) = exact_sync(&home, &[]);
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::remove_file(laptop.join("0.mp4")).unwrap();
+    std::fs::write(nas.join("1.mp4"), b"export 1, recut").unwrap();
+    std::fs::write(laptop.join("2.mp4"), b"the laptop's cut").unwrap();
+    std::fs::write(nas.join("2.mp4"), b"the nas's cut").unwrap();
+    std::fs::create_dir_all(laptop.join("2026")).unwrap();
+    std::fs::rename(laptop.join("3.mp4"), laptop.join("2026/3.mp4")).unwrap();
+    std::fs::write(laptop.join("new.mp4"), b"brand new").unwrap();
+
+    let output = sandboxed(&home)
+        .args(["sync", "preview", "capcut"])
+        .output()
+        .unwrap();
+    // The members' folders are wherever this test's temporary directory is,
+    // spelled as the sync stored it: resolved, so `/private/var` on macOS.
+    let resolved = std::fs::canonicalize(home.path()).unwrap();
+    let preview = String::from_utf8(output.stdout)
+        .unwrap()
+        .replace(&resolved.to_string_lossy().to_string(), "[home]")
+        .replace(&home.path().to_string_lossy().to_string(), "[home]")
+        .replace('\\', "/");
+
+    insta::assert_snapshot!(preview);
 }

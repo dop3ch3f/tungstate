@@ -172,7 +172,7 @@ enum Command {
         once: bool,
     },
 
-    /// Put back what `tungstate apply` did.
+    /// Put back what `tungstate apply` did, or a sync run given by --plan.
     Undo {
         /// The folder, or anything inside it. Defaults to here.
         target: Option<String>,
@@ -458,7 +458,11 @@ fn main() -> std::process::ExitCode {
             )
         }
         Command::Watch { paths, sweep, once } => watch::run(paths, sweep.as_deref(), once),
-        Command::Undo { target, last, plan } => apply::undo(target.as_deref(), last, plan),
+        // A sync run spans every member rather than one folder, so its plan
+        // id is recognised before any folder is looked for.
+        Command::Undo { target, last, plan } => plan
+            .and_then(sync::undo_run)
+            .unwrap_or_else(|| apply::undo(target.as_deref(), last, plan)),
         Command::Policy { action } => match action {
             PolicyAction::Validate { policy } => explain::validate(policy.as_deref()),
         },

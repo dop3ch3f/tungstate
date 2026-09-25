@@ -36,7 +36,7 @@ pub use plans::{AppliedPlan, PastPlan, PlanId, Purpose};
 pub use storage::{Archive, ArchiveSummary};
 pub use syncs::{
     FirstCheck, Member, MemberId, NewMember, NewSync, OnRemove, Reading, Sync, SyncDirection,
-    SyncId,
+    SyncId, SyncSettings,
 };
 
 use std::path::{Path, PathBuf};

@@ -2664,3 +2664,44 @@ fn a_destination_that_cannot_be_reached_says_so_rather_than_reporting_nothing() 
         "an unlistable destination must be an error, not an empty quarantine"
     );
 }
+
+#[test]
+fn a_file_can_be_landed_under_another_name() {
+    // A sync parks a conflicting version under a name that says whose it is,
+    // written there directly because the far side may not rename.
+    let rig = Rig::new(SourcePolicy::Keep);
+    rig.write_source("clip.mp4", b"theirs");
+    rig.write_source("other.mp4", b"as it is");
+    rig.write_dest("clip.mp4", b"mine");
+
+    let mut resolver = FixedResolver(ConflictAction::Skip);
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .landing(BTreeMap::from([(
+        PathBuf::from("clip.mp4"),
+        PathBuf::from(".tungstate-quarantine/clip (nas).mp4"),
+    )]))
+    .run_selection(&[PathBuf::from("clip.mp4"), PathBuf::from("other.mp4")])
+    .unwrap();
+
+    assert_eq!(summary.transferred, 2);
+    assert_eq!(
+        std::fs::read(rig.dest(".tungstate-quarantine/clip (nas).mp4")).unwrap(),
+        b"theirs"
+    );
+    assert_eq!(std::fs::read(rig.dest("clip.mp4")).unwrap(), b"mine");
+    assert_eq!(std::fs::read(rig.dest("other.mp4")).unwrap(), b"as it is");
+    let landed = rig.journal.landed(rig.link.id, 0).unwrap();
+    assert!(
+        landed.iter().any(|op| op.destination.as_ref().unwrap().path
+            == Path::new(".tungstate-quarantine/clip (nas).mp4")),
+        "the journal says where it went"
+    );
+}

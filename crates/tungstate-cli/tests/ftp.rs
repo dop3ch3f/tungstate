@@ -551,3 +551,65 @@ fn a_connection_test_reports_whether_the_root_accepts_files() {
     // listing shows dotfiles at all, and one that hides them would make the
     // assertion pass without meaning anything.
 }
+
+/// A sync between a folder here and a fresh directory on the server.
+fn ftp_sync(home: &tempfile::TempDir, label: &str, extra: &[&str]) -> (std::path::PathBuf, String) {
+    let laptop = home.path().join("laptop");
+    std::fs::create_dir_all(&laptop).unwrap();
+    std::fs::write(laptop.join("a.mp4"), b"version one").unwrap();
+    std::fs::write(laptop.join("b.mp4"), b"stays").unwrap();
+    let end = unique_end(label);
+    connect(home, &server().password);
+    cli(home)
+        .args(["sync", "add", "capcut"])
+        .arg(&laptop)
+        .arg(format!("nas:{end}"))
+        .args(["--all", "--cooldown", "0"])
+        .args(extra)
+        .assert()
+        .success();
+    cli(home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success();
+    assert_eq!(fetch(&format!("{end}/a.mp4")), b"version one");
+    (laptop, end)
+}
+
+#[test]
+fn a_sync_cannot_set_aside_over_ftp_and_says_so_while_the_rest_arrives() {
+    let home = tempfile::tempdir().unwrap();
+    let (laptop, end) = ftp_sync(&home, "sync-aside", &[]);
+
+    std::thread::sleep(std::time::Duration::from_millis(20));
+    std::fs::write(laptop.join("a.mp4"), b"version two, longer").unwrap();
+    std::fs::write(laptop.join("c.mp4"), b"brand new").unwrap();
+    cli(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("nas cannot rename"));
+
+    assert_eq!(
+        fetch(&format!("{end}/a.mp4")),
+        b"version one",
+        "the version there is not overwritten without somewhere to set it aside"
+    );
+    assert_eq!(fetch(&format!("{end}/c.mp4")), b"brand new");
+}
+
+#[test]
+fn an_exact_sync_deletes_over_ftp_when_told_to() {
+    let home = tempfile::tempdir().unwrap();
+    let (laptop, end) = ftp_sync(&home, "sync-delete", &["--exact", "--on-remove", "delete"]);
+
+    std::fs::remove_file(laptop.join("a.mp4")).unwrap();
+    cli(&home)
+        .args(["sync", "run", "capcut", "--yes"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("cannot be undone"));
+
+    assert!(!exists(&format!("{end}/a.mp4")));
+    assert_eq!(fetch(&format!("{end}/b.mp4")), b"stays");
+}

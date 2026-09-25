@@ -234,6 +234,28 @@ impl Journal {
             .map_err(query("listing recent plans"))
     }
 
+    /// The most recent plans for one folder, newest first.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn recent_plans_for(&self, folder: &str, limit: usize) -> Result<Vec<AppliedPlan>> {
+        let conn = self.lock();
+        let mut statement = conn
+            .prepare(
+                "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
+                 FROM plans WHERE folder = ?1 ORDER BY id DESC LIMIT ?2",
+            )
+            .map_err(query("listing a folder's plans"))?;
+        let rows = statement
+            .query_map(
+                rusqlite::params![folder, i64::try_from(limit).unwrap_or(i64::MAX)],
+                row_to_plan,
+            )
+            .map_err(query("listing a folder's plans"))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(query("listing a folder's plans"))
+    }
+
     /// Past reorganisations for one purpose, newest first, with what each
     /// amounted to. Undos are left out: they show as the plan they undid,
     /// marked put back.

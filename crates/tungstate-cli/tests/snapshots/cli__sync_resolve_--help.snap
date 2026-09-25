@@ -1,0 +1,18 @@
+---
+source: crates/tungstate-cli/tests/cli.rs
+expression: help
+---
+Settle a conflict: one member's version everywhere, or every version everywhere, each named after its member
+
+Usage: tungstate sync resolve [OPTIONS] <--keep <MEMBER>|--keep-both> <NAME> <PATH>
+
+Arguments:
+  <NAME>  The sync
+  <PATH>  The path, as the preview lists it
+
+Options:
+      --keep <MEMBER>  This member's version, on every member
+      --keep-both      Every version, on every member, each named after its member
+      --yes            Do not stop to confirm
+      --json           
+  -h, --help           Print help

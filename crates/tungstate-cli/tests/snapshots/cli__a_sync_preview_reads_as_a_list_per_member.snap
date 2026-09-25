@@ -1,0 +1,14 @@
+---
+source: crates/tungstate-cli/tests/cli.rs
+expression: preview
+---
+capcut: every member ends up the same, deletions included
+  laptop: 1 file arriving (15 B), 1 file leaving, 1 replaced, the old version set aside, 1 conflicting version parked
+    at [home]/laptop
+  nas: 1 file arriving (9 B), 1 file leaving, 1 file removed (set aside), 1 file renamed, 1 conflicting version parked
+    at [home]/nas
+  laptop → nas: 2 files (25 B), 1 of them parked
+  nas → laptop: 2 files (28 B), 1 of them parked
+read 3 files to decide (1 to tell a moved file from a new one, 2 to see whether a conflicting version is already parked)
+left alone: 1 file
+  2.mp4: changed differently on laptop and nas; each keeps its own, and the others' versions are parked beside it in .tungstate-quarantine

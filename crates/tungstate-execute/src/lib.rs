@@ -32,8 +32,8 @@ use tungstate_core::snapshot;
 use tungstate_journal::plans::PlanId;
 use tungstate_journal::{Journal, JournalError, Location, NewOp, OpKind, Outcome, Purpose};
 
-pub use recover::{Resolution, resolve_interrupted};
-pub use undo::{Undone, invert, undo};
+pub use recover::{Resolution, resolve_interrupted, resolve_interrupted_on};
+pub use undo::{Irreversible, Reversal, Undone, invert, invert_sync, undo};
 
 /// Anything that stops a plan being carried out.
 #[derive(Debug, thiserror::Error)]

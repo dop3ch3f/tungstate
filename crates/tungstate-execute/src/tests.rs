@@ -375,6 +375,96 @@ fn inverting_ignores_what_never_happened() {
     assert!(invert(&journal.ops_for_plan(plan).expect("ops")).is_empty());
 }
 
+/// Record one committed op under `plan`.
+fn committed(journal: &Journal, plan: tungstate_journal::PlanId, op: &NewOp, hash: Option<&str>) {
+    let id = journal.begin(op).expect("op");
+    journal.attach_to_plan(id, plan).expect("attach");
+    journal
+        .finish(
+            id,
+            &Outcome::Committed {
+                hash: hash.map(str::to_string),
+            },
+        )
+        .expect("finish");
+}
+
+#[test]
+fn a_sync_run_reverses_its_copies_and_renames_in_reverse() {
+    // A superseded version set aside, then the new one copied in: taking it
+    // back takes the new one off first, so the old one's name is free.
+    let journal = Journal::open_in_memory().expect("journal");
+    let plan = journal.begin_plan("sync:capcut", "x", None).expect("plan");
+    let nas = |p: &str| Location::new("/nas", p);
+    committed(
+        &journal,
+        plan,
+        &NewOp {
+            kind: OpKind::Rename,
+            source: Some(nas("a.mp4")),
+            destination: Some(nas(".tungstate-quarantine/a.mp4")),
+            size: None,
+            link: None,
+            link_id: None,
+        },
+        None,
+    );
+    committed(
+        &journal,
+        plan,
+        &NewOp {
+            kind: OpKind::Copy,
+            source: Some(Location::new("/laptop", "a.mp4")),
+            destination: Some(nas("a.mp4")),
+            size: Some(3),
+            link: None,
+            link_id: None,
+        },
+        Some("abc"),
+    );
+
+    let reversed = invert_sync(&journal.ops_for_plan(plan).expect("ops")).expect("reversible");
+
+    assert_eq!(
+        reversed,
+        [
+            Reversal::Unsend {
+                at: nas("a.mp4"),
+                hash: Some("abc".into()),
+                size: Some(3),
+            },
+            Reversal::Unrename {
+                now_at: nas(".tungstate-quarantine/a.mp4"),
+                back_to: nas("a.mp4"),
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_sync_run_that_deleted_cannot_be_reversed() {
+    let journal = Journal::open_in_memory().expect("journal");
+    let plan = journal.begin_plan("sync:capcut", "x", None).expect("plan");
+    committed(
+        &journal,
+        plan,
+        &NewOp {
+            kind: OpKind::Remove,
+            source: Some(Location::new("/nas", "a.mp4")),
+            destination: None,
+            size: None,
+            link: None,
+            link_id: None,
+        },
+        None,
+    );
+
+    assert_eq!(
+        invert_sync(&journal.ops_for_plan(plan).expect("ops")),
+        Err(Irreversible { deleted: 1 })
+    );
+}
+
 // --- staleness and failure ------------------------------------------------
 
 #[test]
@@ -842,4 +932,74 @@ fn a_hash_a_transfer_already_recorded_costs_no_reading() {
     assert_eq!(found, "a-recorded-digest");
     assert_eq!(digest.recorded(), 1);
     assert_eq!(digest.reads(), 0, "the file was never opened");
+}
+
+#[test]
+fn an_interrupted_delete_is_settled_by_whether_the_file_is_still_there() {
+    let fixture = Fixture::new(BY_EXT, &[("kept.txt", "one"), ("gone.txt", "two")]);
+    let root = fixture.root();
+    for path in ["kept.txt", "gone.txt"] {
+        fixture
+            .journal
+            .begin(&NewOp {
+                kind: OpKind::Remove,
+                source: Some(Location::new(&root, path)),
+                destination: None,
+                size: None,
+                link: None,
+                link_id: None,
+            })
+            .expect("op");
+    }
+    std::fs::remove_file(fixture.dir.path().join("gone.txt")).unwrap();
+
+    let mut resolved =
+        resolve_interrupted_on(&fixture.backend(), &fixture.journal, None, &root).expect("ok");
+    resolved.sort_by(|a, b| a.0.cmp(&b.0));
+
+    assert_eq!(
+        resolved,
+        [
+            ("gone.txt".to_string(), Resolution::Committed),
+            ("kept.txt".to_string(), Resolution::Abandoned),
+        ]
+    );
+}
+
+#[test]
+fn recovery_on_a_connection_leaves_another_places_work_alone() {
+    // A local folder and a NAS share can both be called `capcut`.
+    let fixture = Fixture::new(BY_EXT, &[("a.txt", "one")]);
+    let root = fixture.root();
+    let nas = fixture
+        .journal
+        .create_connection(&tungstate_journal::NewConnection {
+            name: "nas".to_string(),
+            scheme: tungstate_journal::Scheme::Fs,
+            host: None,
+            port: None,
+            username: None,
+            root: root.clone(),
+            options: std::collections::BTreeMap::new(),
+        })
+        .expect("connection");
+    let mut elsewhere = Location::new(&root, "a.txt");
+    elsewhere.connection = Some(nas);
+    fixture
+        .journal
+        .begin(&NewOp {
+            kind: OpKind::Remove,
+            source: Some(elsewhere),
+            destination: None,
+            size: None,
+            link: None,
+            link_id: None,
+        })
+        .expect("op");
+
+    let resolved =
+        resolve_interrupted_on(&fixture.backend(), &fixture.journal, None, &root).expect("ok");
+
+    assert!(resolved.is_empty());
+    assert_eq!(fixture.journal.incomplete().unwrap().len(), 1);
 }

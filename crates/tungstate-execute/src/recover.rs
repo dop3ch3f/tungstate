@@ -11,7 +11,7 @@
 use std::path::Path;
 
 use tungstate_backend::Backend;
-use tungstate_journal::{Journal, Location, Op as JournalOp, OpKind, Outcome};
+use tungstate_journal::{ConnectionId, Journal, Location, Op as JournalOp, OpKind, Outcome};
 
 use crate::Result;
 
@@ -40,11 +40,39 @@ pub fn resolve_interrupted(
     journal: &Journal,
     root: &str,
 ) -> Result<Vec<(String, Resolution)>> {
+    resolve_where(backend, journal, |op| belongs_to(op, root))
+}
+
+/// [`resolve_interrupted`] for one place reached through a connection, or
+/// this machine for `None`: a sync's members are several places, and two of
+/// them may share a root spelling on different machines.
+///
+/// # Errors
+/// As [`resolve_interrupted`].
+pub fn resolve_interrupted_on(
+    backend: &dyn Backend,
+    journal: &Journal,
+    connection: Option<ConnectionId>,
+    root: &str,
+) -> Result<Vec<(String, Resolution)>> {
+    resolve_where(backend, journal, |op| {
+        op.source
+            .as_ref()
+            .or(op.destination.as_ref())
+            .is_some_and(|l| l.connection == connection && l.root.to_string_lossy() == root)
+    })
+}
+
+fn resolve_where(
+    backend: &dyn Backend,
+    journal: &Journal,
+    ours: impl Fn(&JournalOp) -> bool,
+) -> Result<Vec<(String, Resolution)>> {
     let mut resolved = Vec::new();
     for op in journal.incomplete()? {
         // A drain's unfinished work belongs to a link and is recovered by the
         // transfer engine, which knows about temporary files. Leave it alone.
-        if op.link_id.is_some() || !belongs_to(&op, root) {
+        if op.link_id.is_some() || !ours(&op) {
             continue;
         }
         let resolution = look(&op, backend);
@@ -88,7 +116,9 @@ fn look(op: &JournalOp, backend: &dyn Backend) -> Resolution {
                 Resolution::Abandoned
             }
         }
-        OpKind::RmDir => {
+        // A directory removed, or a sync's outright delete: still there
+        // means it never happened.
+        OpKind::RmDir | OpKind::Remove => {
             if exists(op.source.as_ref()) {
                 Resolution::Abandoned
             } else {
@@ -107,6 +137,6 @@ fn look(op: &JournalOp, backend: &dyn Backend) -> Resolution {
                 _ => Resolution::Unclear,
             }
         }
-        OpKind::Copy | OpKind::Remove => Resolution::Unclear,
+        OpKind::Copy => Resolution::Unclear,
     }
 }

@@ -202,7 +202,9 @@ impl Blast {
     /// One file in this many trips it too: a fifth of the folder.
     pub const LIMIT_SHARE: usize = 5;
 
-    fn over(files: usize, of: usize) -> bool {
+    /// Whether `files` out of `of` is past either limit.
+    #[must_use]
+    pub fn over(files: usize, of: usize) -> bool {
         // Integer arithmetic rather than a ratio in floating point, which
         // `clippy::pedantic` rightly refuses for a count this large.
         files > Self::LIMIT_FILES || (of > 0 && files * Self::LIMIT_SHARE >= of)

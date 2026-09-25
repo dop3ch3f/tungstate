@@ -1,0 +1,16 @@
+---
+source: crates/tungstate-cli/tests/cli.rs
+expression: help
+---
+Put back what a run did, on every member
+
+Usage: tungstate sync undo [OPTIONS] <NAME>
+
+Arguments:
+  <NAME>  The sync
+
+Options:
+      --last <N>   Put back the last N runs, newest first. Defaults to 1
+      --plan <ID>  Put back one run by id, as `sync run` reported it
+      --json       
+  -h, --help       Print help
