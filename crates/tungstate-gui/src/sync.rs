@@ -759,7 +759,7 @@ pub fn submit(app: &AppHandle, job: Job) -> Result<QueuedView, String> {
     let worker = app.clone();
     std::thread::spawn(move || {
         let state = worker.state::<App>();
-        let _guard = Guard(worker.clone());
+        let guard = Guard::new(worker.clone());
         while let Some(job) = state.syncing.queue.next() {
             let name = job.name.clone();
             let ran = carry(&worker, &state.journal, &state.syncing.stop, job);
@@ -780,6 +780,7 @@ pub fn submit(app: &AppHandle, job: Job) -> Result<QueuedView, String> {
                 state.syncing.queue.clear();
             }
         }
+        guard.disarm();
     });
     Ok(QueuedView {
         started: true,
@@ -787,12 +788,30 @@ pub fn submit(app: &AppHandle, job: Job) -> Result<QueuedView, String> {
     })
 }
 
-/// Releases the worker however its thread ends, a panic included.
-struct Guard(AppHandle);
+/// Stops being the worker if the thread ends by panicking.
+///
+/// Only then: on the normal path `next` has already released the queue, and
+/// releasing it again could release a worker that claimed it since.
+struct Guard {
+    app: AppHandle,
+    armed: bool,
+}
+
+impl Guard {
+    fn new(app: AppHandle) -> Self {
+        Self { app, armed: true }
+    }
+
+    fn disarm(mut self) {
+        self.armed = false;
+    }
+}
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        self.0.state::<App>().syncing.queue.stand_down();
+        if self.armed {
+            self.app.state::<App>().syncing.queue.stand_down();
+        }
     }
 }
 
