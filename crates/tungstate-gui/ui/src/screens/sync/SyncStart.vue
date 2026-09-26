@@ -54,7 +54,9 @@ async function putBack(run: PastSync) {
           <b class="ss-name">{{ sync.name }}</b>
           <span class="ss-way">{{ way(sync) }} · {{ exactly(sync) }}</span>
           <span class="ss-members">{{ sync.members.map((m) => m.name).join(" · ") }}</span>
-          <span class="ss-launch" v-if="sync.launch !== 'no'">runs when the app opens</span>
+          <span class="ss-launch ss-held" v-if="s.isHeld(sync.name)">waiting for you</span>
+          <span class="ss-launch" v-else-if="sync.launch === 'continuous'">kept in step</span>
+          <span class="ss-launch" v-else-if="sync.launch !== 'no'">runs when the app opens</span>
         </button>
       </li>
     </ul>
@@ -93,4 +95,5 @@ async function putBack(run: PastSync) {
 .ss-way { grid-area: way; font-size: var(--small); color: var(--text-quiet); }
 .ss-members { grid-area: members; font-size: var(--fine); color: var(--text-faint); }
 .ss-launch { grid-area: launch; font-size: var(--fine); color: var(--text-faint); }
+.ss-held { color: var(--hold); font-weight: 700; }
 </style>

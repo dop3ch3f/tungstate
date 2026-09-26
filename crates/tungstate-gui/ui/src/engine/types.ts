@@ -665,3 +665,19 @@ export interface SyncUndone {
   parked_left: number;
   revived: { member: string; path: string }[];
 }
+
+/** One member of a sync kept in step, and what is happening to it. */
+export interface MemberStatus {
+  sync: string;
+  member: string;
+  /** `watching`, `polling` or `paused`. */
+  state: string;
+  every_secs: number | null;
+  why: string | null;
+}
+
+export interface FollowingView {
+  members: MemberStatus[];
+  /** Syncs that stopped to ask, by name. */
+  held: string[];
+}

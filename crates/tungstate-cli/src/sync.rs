@@ -100,6 +100,17 @@ pub enum SyncAction {
     },
     /// Change how a sync behaves from its next run on.
     Set(SetSync),
+    /// Keep syncs in step while this runs: run whenever a member changes.
+    ///
+    /// Folders on this machine are watched; folders elsewhere are listed,
+    /// every 30 seconds while they change and up to every 10 minutes when
+    /// quiet. A run that would remove anything stops and waits for
+    /// `tungstate sync run`. Holds the terminal until stopped.
+    Follow {
+        /// Syncs to follow. Defaults to every one set to `--on-launch
+        /// continuous`.
+        names: Vec<String>,
+    },
 }
 
 /// Whose version a resolved conflict keeps.
@@ -140,8 +151,9 @@ pub struct SetSync {
     #[arg(long)]
     first_check: Option<String>,
     /// When the window opens: no, ask (show what would move, and wait for a
-    /// yes), or quietly (run without asking, unless the run would remove
-    /// anything or needs a yes for another reason).
+    /// yes), quietly (run without asking, unless the run would remove
+    /// anything or needs a yes for another reason), or continuous (as
+    /// quietly, and again whenever a member changes while the window is open).
     #[arg(long, value_name = "WHEN")]
     on_launch: Option<String>,
 }
@@ -275,6 +287,7 @@ pub fn run(action: SyncAction, journal: &Journal, secrets: &dyn SecretStore) -> 
             json,
         } => undo(&name, last, plan, json, journal, secrets),
         SyncAction::Set(asked) => set(&asked, journal),
+        SyncAction::Follow { names } => follow(&names, journal, secrets),
     }
 }
 
@@ -419,7 +432,7 @@ fn set(asked: &SetSync, journal: &Journal) -> ExitCode {
     let launch = match asked.on_launch.as_deref().map(Launch::parse) {
         None => None,
         Some(Some(launch)) => Some(launch),
-        Some(None) => return refuse("--on-launch must be no, ask or quietly"),
+        Some(None) => return refuse("--on-launch must be no, ask, quietly or continuous"),
     };
     let changed = journal
         .update_sync(sync.id, &settings)
@@ -756,6 +769,98 @@ fn report(opened: &Opened, decided: &Decided, ran: &Ran) {
                 plan.0
             );
         }
+    }
+}
+
+fn follow(names: &[String], journal: &Journal, secrets: &dyn SecretStore) -> ExitCode {
+    use tungstate_sync::follow::{self, Handle, Heard, Outcome, Pace, State};
+    let names: Vec<String> = if names.is_empty() {
+        match journal.syncs() {
+            Ok(syncs) => syncs
+                .into_iter()
+                .filter(|s| s.launch == Launch::Continuous)
+                .map(|s| s.name)
+                .collect(),
+            Err(error) => return fail(&error),
+        }
+    } else {
+        names.to_vec()
+    };
+    if names.is_empty() {
+        return refuse("nothing to follow: name a sync, or set one to `--on-launch continuous`");
+    }
+    let mut followed = Vec::new();
+    for name in &names {
+        match tungstate_sync::open(journal, name, secrets) {
+            Ok(opened) => followed.push(follow::followed(opened)),
+            Err(error) => return fail(&error),
+        }
+    }
+    println!(
+        "keeping {} in step until stopped (Ctrl-C); runs whenever a folder changes",
+        names.join(", ")
+    );
+    let mut told = |heard: &Heard| match heard {
+        Heard::Member {
+            sync,
+            member,
+            state,
+        } => {
+            let now = match state {
+                State::Watching => "watching for changes".to_string(),
+                State::Polling { every } => format!("listed every {}s", every.as_secs()),
+                State::Paused { why } => format!("out of reach, tried again on its own: {why}"),
+            };
+            println!("{sync}: {member}: {now}");
+        }
+        Heard::Running { sync } => println!("{sync}: running"),
+        Heard::Held { sync } => println!(
+            "{sync}: its next run would remove files, so it waits; \
+             `tungstate sync run {sync}` to look"
+        ),
+    };
+    let mut run = |name: &str| {
+        let opened = match tungstate_sync::open(journal, name, secrets) {
+            Ok(opened) => opened,
+            Err(error) => {
+                eprintln!("{name}: {error}");
+                return Outcome::Busy;
+            }
+        };
+        let decided = match tungstate_sync::decide(&opened, journal) {
+            Ok(decided) => decided,
+            Err(error) => {
+                eprintln!("{name}: {error}");
+                return Outcome::Busy;
+            }
+        };
+        if !follow::unattended(&opened, &decided) {
+            return Outcome::Held;
+        }
+        let unsettled = follow::unsettled(&decided);
+        if decided.plan.is_empty() {
+            return Outcome::Done {
+                wrote: Vec::new(),
+                unsettled,
+            };
+        }
+        let wrote = follow::written(&opened, &decided.plan);
+        let mut progress = crate::CliProgress::new();
+        match tungstate_sync::run(&opened, &decided, journal, &mut progress, None) {
+            Ok(ran) => report(&opened, &decided, &ran),
+            Err(error) => eprintln!("{name}: {error}"),
+        }
+        Outcome::Done { wrote, unsettled }
+    };
+    match follow::follow(
+        followed,
+        &Pace::default(),
+        &Handle::new(),
+        &mut told,
+        &mut run,
+    ) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(why) => refuse(&format!("cannot watch: {why}")),
     }
 }
 

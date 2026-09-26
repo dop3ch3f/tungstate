@@ -130,6 +130,14 @@ numbers on screen are the run's. A run emits the transfer events under
 `SyncRanView` or `sync://error`. Syncs run one after another, and never
 beside a transfer. `put_back_sync` returns what came back, including the
 members whose deletion was undone too (`revived`).
+A sync set to keep in step (`launch: "continuous"`, slice 9e) is run by a loop
+the window starts itself: `following_state` returns each member's state
+(`watching`, `polling` with `every_secs`, `paused` with `why`) and the syncs
+held because a run would remove files, and `sync://following` sends the same
+view whenever any of it changes, never once per look. `resume_following`
+releases a held sync; the window calls it after a person has run one. Runs
+started this way report through the same `sync://done` and `sync://error` as a
+pressed Run, and an error that repeats is sent once.
 
 **Connections** — add, list, update, test, remove, set a password.
 

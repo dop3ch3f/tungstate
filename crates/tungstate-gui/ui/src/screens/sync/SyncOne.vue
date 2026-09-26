@@ -5,7 +5,7 @@
 import { computed, ref, shallowRef } from "vue";
 import { connections, folders, syncs } from "../../engine/commands";
 import type { Connection, PastSync, SyncSettingsForm } from "../../engine/types";
-import { exactlyInFull, reason, wayInFull, whenItRuns, CONFLICTS } from "../../lib/syncwords";
+import { exactlyInFull, following, reason, wayInFull, whenItRuns, CONFLICTS } from "../../lib/syncwords";
 import { useSync } from "../../state/useSync";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
@@ -149,12 +149,21 @@ async function putBack(run: PastSync) {
 <template>
   <div class="so">
     <h2 class="so-title">{{ sync.name }}</h2>
+    <Notice tone="hold" v-if="s.isHeld(sync.name)">
+      Stopped keeping in step: its next run would remove files, so it waits for you.
+      <Button look="link" @click="s.look()">Look at it</Button>
+    </Notice>
 
     <ol class="so-places">
       <li v-for="member in sync.members" :key="member.name" class="so-place" :class="{ 'so-anchor': role(member.name) }">
         <b>{{ member.name }}</b>
         <span class="path so-at">{{ member.at }}</span>
         <span class="so-role" v-if="role(member.name)">{{ role(member.name) }}</span>
+        <span
+          class="so-status"
+          :class="{ 'so-paused': s.statusOf(sync.name, member.name)?.state === 'paused' }"
+          v-if="s.statusOf(sync.name, member.name)"
+        >{{ following(s.statusOf(sync.name, member.name)!) }}</span>
         <button
           class="so-drop"
           v-if="sync.members.length > 2 && !role(member.name)"
@@ -249,6 +258,8 @@ async function putBack(run: PastSync) {
 .so-anchor { box-shadow: inset 0 0 0 var(--bw) var(--control), var(--lift); }
 .so-at { font-size: var(--fine); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .so-role { align-self: flex-start; font-size: var(--fine); font-weight: 700; color: var(--control-ink); background: var(--control); border-radius: var(--radius); padding: 1px 6px; }
+.so-status { font-size: var(--fine); color: var(--text-faint); }
+.so-paused { color: var(--hold); }
 .so-drop { align-self: flex-start; font: inherit; font-size: var(--fine); color: var(--text-faint); background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
 .so-says { margin: 0; padding-left: 1.1em; font-size: var(--small); color: var(--text-quiet); line-height: 1.6; }
 .so-acts { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }

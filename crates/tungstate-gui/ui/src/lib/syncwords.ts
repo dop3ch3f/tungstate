@@ -73,6 +73,7 @@ export const LAUNCH = [
   { id: "no", label: "Only when I press Run", line: "Nothing runs by itself." },
   { id: "ask", label: "When the app opens, show me first", line: "What would move is shown, and nothing moves until you say so." },
   { id: "quietly", label: "When the app opens, just run it", line: "Unless it would remove anything or needs a yes; then it asks." },
+  { id: "continuous", label: "Keep in step while the app is open", line: "Runs when the app opens and whenever something changes. Asks first if it would remove anything." },
 ] as const;
 
 export const FIRST_CHECK = [
@@ -88,8 +89,27 @@ export function whenItRuns(sync: Pick<SyncView, "launch">): string {
       return "Runs when the app opens, after showing you what would move.";
     case "quietly":
       return "Runs by itself when the app opens, unless it would remove anything.";
+    case "continuous":
+      return "Kept in step while the app is open: runs whenever something changes, and asks first if it would remove anything.";
     default:
       return "Runs only when you press Run.";
+  }
+}
+
+/** What is happening to a member of a sync kept in step, in words. */
+export function following(status: { state: string; every_secs: number | null; why: string | null }): string {
+  switch (status.state) {
+    case "watching":
+      return "watching for changes";
+    case "polling": {
+      const secs = status.every_secs ?? 0;
+      const every = secs < 60 ? `${secs} seconds` : secs === 60 ? "minute" : `${Math.round(secs / 60)} minutes`;
+      return `checked every ${every}`;
+    }
+    case "paused":
+      return `out of reach, tried again on its own${status.why ? `: ${status.why}` : ""}`;
+    default:
+      return status.state;
   }
 }
 

@@ -457,7 +457,11 @@ impl From<Refusal> for RefusalView {
 }
 
 /// Open and decide, which is everything a preview is.
-fn decided(journal: &Journal, name: &str, ask: Ask) -> Result<(Opened, Decided), String> {
+pub(crate) fn decided(
+    journal: &Journal,
+    name: &str,
+    ask: Ask,
+) -> Result<(Opened, Decided), String> {
     let opened = tungstate_sync::open(journal, name, &crate::secrets()).map_err(crate::describe)?;
     let asked = ask.into_core(&opened)?;
     let decided = tungstate_sync::decide_with(&opened, journal, &asked).map_err(crate::describe)?;
@@ -666,7 +670,7 @@ pub struct MissedView {
 }
 
 #[derive(Debug, Clone, Serialize)]
-pub struct SyncErrorEvent {
+pub(crate) struct SyncErrorEvent {
     pub sync: String,
     /// `changed` (the run is not the one previewed), `refused` (it needs a
     /// yes it was not given) or `failed`.
@@ -757,52 +761,61 @@ pub fn submit(app: &AppHandle, job: Job) -> Result<QueuedView, String> {
     }
     state.syncing.stop.clear();
     let worker = app.clone();
-    std::thread::spawn(move || {
-        let state = worker.state::<App>();
-        let guard = Guard::new(worker.clone());
-        while let Some(job) = state.syncing.queue.next() {
-            let name = job.name.clone();
-            let ran = carry(&worker, &state.journal, &state.syncing.stop, job);
-            let _ = match ran {
-                Ok(ran) => worker.emit("sync://done", ran),
-                Err((kind, message)) => worker.emit(
-                    "sync://error",
-                    SyncErrorEvent {
-                        sync: name,
-                        kind,
-                        message,
-                    },
-                ),
-            };
-            if state.syncing.stop.asked() {
-                // A stop means the queue as well: what was waiting should
-                // not start behind the person's back.
-                state.syncing.queue.clear();
-            }
-        }
-        guard.disarm();
-    });
+    std::thread::spawn(move || work(&worker));
     Ok(QueuedView {
         started: true,
         waiting: 0,
     })
 }
 
+/// Releases the worker however its thread ends, a panic included.
+/// Be the worker: run every job queued, until there are none, then stop
+/// being the worker. Also what a run kept in step does when it finishes, so a
+/// Run pressed while it was going is picked up rather than left waiting.
+pub(crate) fn work(app: &AppHandle) {
+    let state = app.state::<App>();
+    let guard = Guard::new(app.clone());
+    // `next` hands back `None` only after it has recorded that the worker is
+    // finished, under the lock a submission takes to decide whether to start
+    // one. That is the only way this loop ends normally.
+    while let Some(job) = state.syncing.queue.next() {
+        let name = job.name.clone();
+        let ran = carry(app, &state.journal, &state.syncing.stop, job);
+        let _ = match ran {
+            Ok(ran) => app.emit("sync://done", ran),
+            Err((kind, message)) => app.emit(
+                "sync://error",
+                SyncErrorEvent {
+                    sync: name,
+                    kind,
+                    message,
+                },
+            ),
+        };
+        if state.syncing.stop.asked() {
+            // A stop means the queue as well: what was waiting should
+            // not start behind the person's back.
+            state.syncing.queue.clear();
+        }
+    }
+    guard.disarm();
+}
+
 /// Stops being the worker if the thread ends by panicking.
 ///
 /// Only then: on the normal path `next` has already released the queue, and
 /// releasing it again could release a worker that claimed it since.
-struct Guard {
+pub(crate) struct Guard {
     app: AppHandle,
     armed: bool,
 }
 
 impl Guard {
-    fn new(app: AppHandle) -> Self {
+    pub(crate) fn new(app: AppHandle) -> Self {
         Self { app, armed: true }
     }
 
-    fn disarm(mut self) {
+    pub(crate) fn disarm(mut self) {
         self.armed = false;
     }
 }
@@ -832,10 +845,23 @@ fn carry(
     if !job.confirmed && !tungstate_sync::refusals(&opened, &decided).is_empty() {
         return Err(("refused", "this run needs a yes it was not given".into()));
     }
+    run_decided(app, journal, stop, &job.name, &opened, &decided).map_err(failed)
+}
+
+/// Carry out a decided run, reporting it as `sync://…` events. What a run
+/// pressed in the window and a run started by keeping in step both come to.
+pub(crate) fn run_decided(
+    app: &AppHandle,
+    journal: &Journal,
+    stop: &Arc<Stop>,
+    name: &str,
+    opened: &Opened,
+    decided: &Decided,
+) -> Result<SyncRanView, String> {
     let mut progress = SyncProgress {
         events: EventProgress::for_sync(app.clone()),
         app: app.clone(),
-        sync: job.name.clone(),
+        sync: name.to_string(),
         legs: decided
             .plan
             .legs
@@ -850,16 +876,16 @@ fn carry(
         next: 0,
     };
     let ran = tungstate_sync::run_until(
-        &opened,
-        &decided,
+        opened,
+        decided,
         journal,
         &mut progress,
         None,
         Some(Arc::clone(stop)),
     )
-    .map_err(|e| failed(crate::describe(e)))?;
+    .map_err(crate::describe)?;
     Ok(SyncRanView {
-        sync: job.name,
+        sync: name.to_string(),
         plan: ran.plan.map(|p| p.0),
         legs: ran
             .legs

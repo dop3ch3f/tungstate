@@ -78,6 +78,10 @@ export const syncs = {
   stop: (now: boolean) => invoke<void>("stop_sync", { now }),
   past: () => invoke<T.PastSync[]>("past_syncs"),
   putBack: (name: string, plan: number) => invoke<T.SyncUndone>("put_back_sync", { name, plan }),
+  /** Which syncs are kept in step, each member's state, and which stopped to ask. */
+  following: () => invoke<T.FollowingView>("following_state"),
+  /** A held sync has been looked at: keep it in step again. */
+  resume: (name: string) => invoke<void>("resume_following", { name }),
 };
 
 export const watcher = {

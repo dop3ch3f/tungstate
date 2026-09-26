@@ -749,3 +749,408 @@ fn what_cannot_be_is_refused_as_data() {
     assert_eq!(setup::create(&journal, &one).unwrap_err(), Refused::TooFew);
     assert!(journal.syncs().unwrap().is_empty(), "nothing half-made");
 }
+
+// --- following (slice 9e) ---------------------------------------------------
+
+mod following {
+    use std::sync::{Arc, Mutex};
+    use std::time::{Duration, Instant};
+
+    use super::*;
+    use crate::follow::{self, Followed, Handle, Heard, How, Looked, Outcome, Pace, Poll, State};
+
+    fn quick() -> Pace {
+        Pace {
+            quick: Duration::from_millis(200),
+            slowest: Duration::from_millis(800),
+            retries: vec![Duration::from_millis(100), Duration::from_millis(300)],
+            sweep: Duration::from_secs(3600),
+            echo: Duration::from_secs(5),
+            busy: Duration::from_millis(100),
+            debounce: Duration::from_millis(100),
+            tick: Duration::from_millis(20),
+        }
+    }
+
+    #[test]
+    fn a_quiet_member_is_listed_less_often_and_a_change_brings_it_back_to_quick() {
+        let pace = Pace::default();
+        let now = Instant::now();
+        let mut poll = Poll::new(now, &pace);
+
+        assert_eq!(
+            poll.looked(now, &pace, Ok("a".into())),
+            Looked::Same,
+            "a first look is a starting point"
+        );
+        let mut every = Vec::new();
+        for _ in 0..6 {
+            poll.looked(now, &pace, Ok("a".into()));
+            every.push(poll.every().as_secs());
+        }
+        assert_eq!(
+            every,
+            [60, 120, 240, 480, 600, 600],
+            "doubling up to ten minutes"
+        );
+
+        assert_eq!(poll.looked(now, &pace, Ok("b".into())), Looked::Changed);
+        assert_eq!(poll.every(), Duration::from_secs(30));
+    }
+
+    #[test]
+    fn an_unreachable_member_is_said_once_and_tried_at_one_two_five_then_ten_minutes() {
+        let pace = Pace::default();
+        let now = Instant::now();
+        let mut poll = Poll::new(now, &pace);
+        poll.looked(now, &pace, Ok("a".into()));
+
+        let mut said = Vec::new();
+        let mut waits = Vec::new();
+        for _ in 0..6 {
+            said.push(poll.looked(now, &pace, Err("no route to host".into())));
+            waits.push((poll.next() - now).as_secs() / 60);
+        }
+
+        assert_eq!(said[0], Looked::Paused("no route to host".into()));
+        assert!(
+            said[1..].iter().all(|l| *l == Looked::StillPaused),
+            "no error per poll"
+        );
+        assert_eq!(waits, [1, 2, 5, 10, 10, 10]);
+        assert_eq!(
+            poll.looked(now, &pace, Ok("a".into())),
+            Looked::Back,
+            "and it comes back on its own"
+        );
+    }
+
+    #[test]
+    fn what_a_run_writes_is_expected_back_folders_included() {
+        let journal = Journal::open_in_memory().unwrap();
+        let dirs = folders(2);
+        write(&dirs[0], "exports/cut.mp4", b"bytes");
+        make(&journal, &dirs, SyncDirection::All, None);
+        let opened = open(&journal, "capcut", &MemoryStore::new()).unwrap();
+        let decided = decide(&opened, &journal).unwrap();
+
+        let wrote = follow::written(&opened, &decided.plan);
+
+        let target = dirs[1].path().join("exports/cut.mp4");
+        let resolved = tungstate_journal::resolve_for_lookup(&target);
+        assert!(
+            wrote.contains(&target) || wrote.contains(&resolved),
+            "{wrote:?}"
+        );
+        assert!(
+            wrote.iter().any(|p| p.ends_with("exports")),
+            "the folder it lands in"
+        );
+        assert!(
+            !wrote.iter().any(|p| p.starts_with(dirs[0].path())),
+            "the source is only read"
+        );
+    }
+
+    /// A loop in a thread: its handle, what it said, how many runs it asked
+    /// for, and the thread to join.
+    type Following = (
+        Arc<Handle>,
+        Arc<Mutex<Vec<Heard>>>,
+        Arc<Mutex<usize>>,
+        std::thread::JoinHandle<()>,
+    );
+
+    /// Follow a sync in a thread, running it for real, until stopped.
+    fn following(journal: Arc<Journal>, dirs: &[tempfile::TempDir], pace: Pace) -> Following {
+        let handle = Handle::new();
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let runs = Arc::new(Mutex::new(0));
+        let followed = Followed {
+            sync: "capcut".into(),
+            cooldown: Duration::from_millis(400),
+            members: dirs
+                .iter()
+                .enumerate()
+                .map(|(i, d)| follow::Member {
+                    name: format!("m{i}"),
+                    how: How::Here(d.path().to_path_buf()),
+                })
+                .collect(),
+        };
+        let (h, told, counted) = (Arc::clone(&handle), Arc::clone(&heard), Arc::clone(&runs));
+        let thread = std::thread::spawn(move || {
+            let mut tell = |e: &Heard| told.lock().unwrap().push(e.clone());
+            let mut run = |name: &str| {
+                *counted.lock().unwrap() += 1;
+                let opened = open(&journal, name, &MemoryStore::new()).unwrap();
+                let decided = decide(&opened, &journal).unwrap();
+                let wrote = follow::written(&opened, &decided.plan);
+                run(
+                    &opened,
+                    &decided,
+                    &journal,
+                    &mut tungstate_transfer::SilentProgress,
+                    None,
+                )
+                .unwrap();
+                Outcome::Done {
+                    wrote,
+                    unsettled: follow::unsettled(&decided),
+                }
+            };
+            follow::follow(vec![followed], &pace, &h, &mut tell, &mut run).unwrap();
+        });
+        (handle, heard, runs, thread)
+    }
+
+    /// Wait for something, up to a generous limit: events arrive when the OS
+    /// sends them, and a slow CI machine is not a failure.
+    fn until(limit: Duration, what: impl Fn() -> bool) -> bool {
+        let start = Instant::now();
+        while start.elapsed() < limit {
+            if what() {
+                return true;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        false
+    }
+
+    #[test]
+    fn a_saved_file_arrives_with_nothing_pressed_and_its_own_copy_starts_nothing() {
+        let journal = Arc::new(Journal::open_in_memory().unwrap());
+        let dirs = folders(2);
+        make(&journal, &dirs, SyncDirection::All, None);
+        let (handle, heard, runs, thread) = following(Arc::clone(&journal), &dirs, quick());
+        assert!(
+            until(Duration::from_secs(10), || *runs.lock().unwrap() >= 1),
+            "it runs once at the start"
+        );
+        // Give the watcher a moment to be listening before the save.
+        std::thread::sleep(Duration::from_millis(500));
+
+        write(&dirs[0], "export.mp4", b"the finished cut");
+        let arrived = until(Duration::from_secs(20), || {
+            read(&dirs[1], "export.mp4").is_some()
+        });
+        let after = *runs.lock().unwrap();
+        std::thread::sleep(Duration::from_secs(2));
+        let later = *runs.lock().unwrap();
+        handle.stop();
+        thread.join().unwrap();
+
+        assert!(arrived, "the save reached the other folder");
+        assert_eq!(later, after, "the copy it made did not start another run");
+        assert!(heard.lock().unwrap().iter().any(|h| matches!(
+            h,
+            Heard::Member {
+                state: State::Watching,
+                ..
+            }
+        )));
+    }
+
+    #[test]
+    fn a_file_still_being_written_at_the_start_is_carried_once_it_settles() {
+        // Found by hand: nothing else will ever say when it stopped changing.
+        let journal = Arc::new(Journal::open_in_memory().unwrap());
+        let dirs = folders(2);
+        make(&journal, &dirs, SyncDirection::All, None);
+        let sync = journal.sync_by_name("capcut").unwrap();
+        journal
+            .update_sync(
+                sync.id,
+                &tungstate_journal::SyncSettings {
+                    exact: false,
+                    on_conflict: sync.on_conflict,
+                    on_remove: sync.on_remove,
+                    verify: sync.verify,
+                    // Long enough that the opening run lands inside it even
+                    // on a busy machine, which is the case under test.
+                    cooldown: Duration::from_secs(5),
+                    first_check: sync.first_check,
+                },
+            )
+            .unwrap();
+        write(&dirs[0], "just-saved.mp4", b"fresh");
+
+        let (handle, _, runs, thread) = following(Arc::clone(&journal), &dirs, quick());
+        let arrived = until(Duration::from_secs(20), || {
+            read(&dirs[1], "just-saved.mp4").is_some()
+        });
+        handle.stop();
+        thread.join().unwrap();
+
+        // How many runs that took depends on how long the machine took to
+        // start the first one, so only the arrival is asserted here; the
+        // second run is `a_run_that_left_something_unsettled_is_run_again`.
+        drop(runs);
+        assert!(arrived, "carried once it had settled");
+    }
+
+    #[test]
+    fn a_run_that_left_something_unsettled_is_run_again_with_no_event() {
+        let followed = Followed {
+            sync: "capcut".into(),
+            cooldown: Duration::from_millis(200),
+            members: Vec::new(),
+        };
+        let handle = Handle::new();
+        let asked = Arc::new(Mutex::new(0usize));
+        let (h, counted) = (Arc::clone(&handle), Arc::clone(&asked));
+        let thread = std::thread::spawn(move || {
+            let mut tell = |_: &Heard| {};
+            let mut run = |_: &str| {
+                let mut n = counted.lock().unwrap();
+                *n += 1;
+                Outcome::Done {
+                    wrote: Vec::new(),
+                    // Only the first run leaves something still being written.
+                    unsettled: *n == 1,
+                }
+            };
+            follow::follow(vec![followed], &quick(), &h, &mut tell, &mut run).unwrap();
+        });
+
+        let again = until(Duration::from_secs(5), || *asked.lock().unwrap() >= 2);
+        std::thread::sleep(Duration::from_millis(600));
+        let total = *asked.lock().unwrap();
+        handle.stop();
+        thread.join().unwrap();
+
+        assert!(
+            again,
+            "run again once the cooldown passed, with nothing heard"
+        );
+        assert_eq!(total, 2, "and not again once it settled");
+    }
+
+    #[test]
+    fn saving_again_inside_the_cooldown_puts_the_run_off_rather_than_running_twice() {
+        let journal = Arc::new(Journal::open_in_memory().unwrap());
+        let dirs = folders(2);
+        make(&journal, &dirs, SyncDirection::All, None);
+        let (handle, _, runs, thread) = following(Arc::clone(&journal), &dirs, quick());
+        assert!(until(Duration::from_secs(10), || *runs.lock().unwrap() >= 1));
+        std::thread::sleep(Duration::from_millis(500));
+        let before = *runs.lock().unwrap();
+
+        write(&dirs[0], "export.mp4", b"first");
+        std::thread::sleep(Duration::from_millis(200));
+        write(&dirs[0], "export.mp4", b"second, longer");
+        assert!(until(Duration::from_secs(20), || read(
+            &dirs[1],
+            "export.mp4"
+        )
+        .as_deref()
+            == Some(&b"second, longer"[..])));
+        std::thread::sleep(Duration::from_secs(1));
+        let ran = *runs.lock().unwrap() - before;
+        handle.stop();
+        thread.join().unwrap();
+
+        assert_eq!(ran, 1, "one run for the two saves");
+    }
+
+    #[test]
+    fn a_member_that_cannot_be_listed_is_paused_once_and_run_when_it_is_back() {
+        let tries = Arc::new(Mutex::new(0usize));
+        let counted = Arc::clone(&tries);
+        let followed = Followed {
+            sync: "nas-only".into(),
+            cooldown: Duration::ZERO,
+            members: vec![follow::Member {
+                name: "nas".into(),
+                how: How::Listed(Box::new(move || {
+                    let mut n = counted.lock().unwrap();
+                    *n += 1;
+                    // Reachable, then down for three looks, then back.
+                    if (2..=4).contains(&*n) {
+                        Err("no route to host".into())
+                    } else {
+                        Ok("same".into())
+                    }
+                })),
+            }],
+        };
+        let handle = Handle::new();
+        let heard = Arc::new(Mutex::new(Vec::new()));
+        let runs = Arc::new(Mutex::new(0usize));
+        let (h, told, counted_runs) = (Arc::clone(&handle), Arc::clone(&heard), Arc::clone(&runs));
+        let thread = std::thread::spawn(move || {
+            let mut tell = |e: &Heard| told.lock().unwrap().push(e.clone());
+            let mut run = |_: &str| {
+                *counted_runs.lock().unwrap() += 1;
+                Outcome::Done {
+                    wrote: Vec::new(),
+                    unsettled: false,
+                }
+            };
+            follow::follow(vec![followed], &quick(), &h, &mut tell, &mut run).unwrap();
+        });
+
+        assert!(until(Duration::from_secs(10), || *tries.lock().unwrap() >= 6));
+        handle.stop();
+        thread.join().unwrap();
+
+        let heard = heard.lock().unwrap();
+        let paused = heard
+            .iter()
+            .filter(|h| {
+                matches!(
+                    h,
+                    Heard::Member {
+                        state: State::Paused { .. },
+                        ..
+                    }
+                )
+            })
+            .count();
+        assert_eq!(paused, 1, "said once, not once per look: {heard:?}");
+        assert!(
+            *runs.lock().unwrap() >= 2,
+            "run at the start, and again when it came back"
+        );
+    }
+
+    #[test]
+    fn a_held_sync_waits_for_a_person_and_runs_once_resumed() {
+        let followed = Followed {
+            sync: "capcut".into(),
+            cooldown: Duration::ZERO,
+            members: Vec::new(),
+        };
+        let handle = Handle::new();
+        let asked = Arc::new(Mutex::new(0usize));
+        let (h, counted) = (Arc::clone(&handle), Arc::clone(&asked));
+        let mut pace = quick();
+        pace.sweep = Duration::from_millis(100);
+        let thread = std::thread::spawn(move || {
+            let mut tell = |_: &Heard| {};
+            let mut run = |_: &str| {
+                let mut n = counted.lock().unwrap();
+                *n += 1;
+                if *n == 1 {
+                    Outcome::Held
+                } else {
+                    Outcome::Done {
+                        wrote: Vec::new(),
+                        unsettled: false,
+                    }
+                }
+            };
+            follow::follow(vec![followed], &pace, &h, &mut tell, &mut run).unwrap();
+        });
+
+        std::thread::sleep(Duration::from_millis(600));
+        let while_held = *asked.lock().unwrap();
+        handle.resume("capcut");
+        assert!(until(Duration::from_secs(5), || *asked.lock().unwrap()
+            > while_held));
+        handle.stop();
+        thread.join().unwrap();
+
+        assert_eq!(while_held, 1, "not run again while held, even on the sweep");
+    }
+}

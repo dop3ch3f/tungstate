@@ -47,6 +47,7 @@ export const syncEvents = {
   finished: on<T.Finished>("sync://finished"),
   done: on<T.SyncRan>("sync://done"),
   error: on<T.SyncError>("sync://error"),
+  following: on<T.FollowingView>("sync://following"),
 };
 
 export type { UnlistenFn };

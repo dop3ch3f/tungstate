@@ -337,7 +337,8 @@ fn key_of(folder: &Watched) -> String {
 /// it was watched, so `C:\Users\RUNNER~1` stays short while resolving makes it
 /// long. Resolving goes through the journal's `resolve_for_lookup`, because
 /// bare `canonicalize` on Windows adds a `\\?\` prefix no event carries.
-fn spellings(root: &Path) -> Vec<String> {
+#[must_use]
+pub fn spellings(root: &Path) -> Vec<String> {
     let given = root.to_string_lossy().to_string();
     let resolved = tungstate_journal::resolve_for_lookup(root)
         .to_string_lossy()

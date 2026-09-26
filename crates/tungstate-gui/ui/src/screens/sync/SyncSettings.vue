@@ -46,7 +46,7 @@ function exact(on: boolean) {
       </label>
     </fieldset>
 
-    <fieldset class="sy-group">
+    <fieldset class="sy-group sy-two">
       <legend>When it runs</legend>
       <label v-for="c in LAUNCH" :key="c.id" class="sy-card" :class="{ 'sy-on': form.launch === c.id }">
         <input type="radio" :checked="form.launch === c.id" @change="set({ launch: c.id })" />
@@ -87,6 +87,8 @@ function exact(on: boolean) {
 <style scoped>
 .sy-set { display: flex; flex-direction: column; gap: var(--s4); }
 .sy-group { border: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--s2); }
+/* Four choices read as two pairs; three across leaves one stranded. */
+.sy-two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .sy-group legend { font-size: var(--small); font-weight: 700; margin-bottom: var(--s2); padding: 0; }
 .sy-card {
   position: relative;

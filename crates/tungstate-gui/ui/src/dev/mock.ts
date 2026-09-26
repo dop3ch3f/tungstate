@@ -110,7 +110,7 @@ const syncList: T.SyncView[] = [
     name: "capcut", direction: "all", exact: true, anchor: null, ...syncSettings,
     // Only the launch scene has anything marked to run at launch, or its
     // sheet would sit over every other scene.
-    launch: sceneName === "sync-launch" ? "ask" : "no",
+    launch: sceneName === "sync-launch" ? "ask" : sceneName === "sync-following" || sceneName === "sync-held" ? "continuous" : "no",
     members: [member("laptop", "~/Movies/CapCut"), member("nas", "nas:capcut", true)],
   },
   {
@@ -198,6 +198,17 @@ mockIPC((cmd, args) => {
         items: listings[`${DEMO}/nas/incoming`].entries.map((e, i) => ({ path: e.path, size: e.size, outcome: ["move", "move", "move", "check", "clash"][i] ?? "move", existing: null, towards: "forward" })) };
     case "interrupted": return [];
     case "list_syncs": return syncList;
+    case "following_state":
+      if (sceneName === "sync-following" || sceneName === "sync-held") {
+        return {
+          members: [
+            { sync: "capcut", member: "laptop", state: "watching", every_secs: null, why: null },
+            { sync: "capcut", member: "nas", state: sceneName === "sync-held" ? "polling" : "paused", every_secs: 120, why: sceneName === "sync-held" ? null : "no route to host" },
+          ],
+          held: sceneName === "sync-held" ? ["capcut"] : [],
+        };
+      }
+      return { members: [], held: [] };
     case "past_syncs": return pastSyncs;
     case "preview_sync":
       if (a.name === "photo-archive") {
@@ -612,6 +623,9 @@ const scenes: Record<string, () => unknown> = {
   },
   "sync-settings": async () => { await syncAt(0); await tick(); document.querySelectorAll<HTMLButtonElement>(".so-acts button")[1]?.click(); },
   "sync-launch": () => {},
+  "sync-following": () => syncAt(0),
+  "sync-held": () => syncAt(0),
+  "sync-held-list": async () => { nav.go("sync"); await sy.load(); },
   "drain-preview-pair": async () => { nav.go("drain"); await tab(2); await tick(); click(".lk-do button"); },
 };
 try {

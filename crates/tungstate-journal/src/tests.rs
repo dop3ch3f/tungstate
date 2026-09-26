@@ -2234,7 +2234,7 @@ fn a_sync_can_be_marked_to_run_when_the_window_opens() {
     let sync = a_sync(&journal, None);
     assert_eq!(journal.sync_by_id(sync).unwrap().launch, Launch::No);
 
-    for launch in [Launch::Quietly, Launch::Ask, Launch::No] {
+    for launch in [Launch::Continuous, Launch::Quietly, Launch::Ask, Launch::No] {
         journal.set_launch(sync, launch).unwrap();
         assert_eq!(journal.sync_by_id(sync).unwrap().launch, launch);
     }

@@ -2251,3 +2251,25 @@ fn a_sync_preview_reads_as_a_list_per_member() {
 
     insta::assert_snapshot!(preview);
 }
+
+#[test]
+fn follow_says_what_it_would_follow_or_why_nothing() {
+    let home = sandbox();
+    sandboxed(&home)
+        .args(["sync", "follow"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("--on-launch continuous"));
+
+    let (_, _) = exact_sync(&home, &[]);
+    sandboxed(&home)
+        .args(["sync", "set", "capcut", "--on-launch", "continuous"])
+        .assert()
+        .success();
+    let listed = sandboxed(&home)
+        .args(["sync", "list", "--json"])
+        .output()
+        .unwrap();
+    let syncs: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(syncs[0]["on_launch"], "continuous");
+}

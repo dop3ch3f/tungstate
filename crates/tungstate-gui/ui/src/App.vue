@@ -78,6 +78,9 @@ const WHERE = {
       <span class="gap"></span>
       <span class="live" v-if="t.running.value" title="A transfer is running">●</span>
       <span class="live" v-if="sy.running.value" title="A sync is running">●</span>
+      <button class="waits" v-if="sy.followingNow.value.held.length" title="A sync is waiting for you" @click="nav.go('sync')">
+        ● {{ sy.followingNow.value.held.length === 1 ? "A sync is waiting for you" : `${sy.followingNow.value.held.length} syncs are waiting for you` }}
+      </button>
       <button class="dest" :class="{ here: nav.view.value === 'settings' }" @click="nav.go('settings')">
         <Tile of="settings" :size="22" />
         Settings
@@ -161,6 +164,7 @@ const WHERE = {
 }
 .gap { flex: 1; }
 .live { color: var(--accent); font-size: 9px; padding: var(--s2); }
+.waits { font: inherit; font-size: var(--fine); color: var(--hold); font-weight: 700; background: none; border: none; text-align: left; padding: var(--s2); cursor: pointer; }
 
 .stage { flex: 1; position: relative; min-width: 0; }
 </style>

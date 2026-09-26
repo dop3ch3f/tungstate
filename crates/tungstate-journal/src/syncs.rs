@@ -50,6 +50,9 @@ pub enum Launch {
     /// Run without asking, unless the run would remove anything or needs a
     /// person's yes for another reason.
     Quietly,
+    /// Kept in step for as long as the window is open: run when it opens, and
+    /// again whenever a member changes, on the same terms as `Quietly`.
+    Continuous,
 }
 
 /// What removing a copy means, where a sync removes anything at all.
@@ -63,7 +66,7 @@ pub enum OnRemove {
 string_enum!(SyncDirection { Push => "push", Pull => "pull", All => "all" });
 string_enum!(FirstCheck { Full => "full", Sampled => "sampled", Size => "size" });
 string_enum!(OnRemove { SetAside => "set-aside", Delete => "delete" });
-string_enum!(Launch { No => "no", Ask => "ask", Quietly => "quietly" });
+string_enum!(Launch { No => "no", Ask => "ask", Quietly => "quietly", Continuous => "continuous" });
 
 /// One member as it is to be added.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -114,7 +117,6 @@ pub struct Sync {
     pub cooldown: Duration,
     pub first_check: FirstCheck,
     pub launch: Launch,
-    pub continuous: bool,
     /// Milliseconds since the epoch. A sync removed and made again under the
     /// same name is a different sync, and its runs start here.
     pub created_at: i64,
@@ -490,11 +492,12 @@ impl Journal {
         let changed = self
             .lock()
             .execute(
-                "UPDATE syncs SET on_launch = ?1, run_quietly = ?2
-                 WHERE id = ?3 AND deleted_at IS NULL",
+                "UPDATE syncs SET on_launch = ?1, run_quietly = ?2, continuous = ?3
+                 WHERE id = ?4 AND deleted_at IS NULL",
                 rusqlite::params![
                     i64::from(launch != Launch::No),
-                    i64::from(launch == Launch::Quietly),
+                    i64::from(matches!(launch, Launch::Quietly | Launch::Continuous)),
+                    i64::from(launch == Launch::Continuous),
                     sync.0
                 ],
             )
@@ -613,17 +616,20 @@ fn row_to_sync(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sync> {
         ),
         first_check: FirstCheck::parse(&first_check)
             .ok_or_else(|| bad("first check")(first_check.clone()))?,
-        // Two columns, because `on_launch` came first (v12) and a journal
-        // is only ever added to.
+        // Three columns, because `on_launch` and `continuous` came first
+        // (v12), `run_quietly` later (v13), and a journal is only ever added
+        // to. `continuous` alone says enough; the others are written with it
+        // so an older reading of the row still runs it at launch.
         launch: match (
             row.get::<_, i64>("on_launch")? != 0,
             row.get::<_, i64>("run_quietly")? != 0,
+            row.get::<_, i64>("continuous")? != 0,
         ) {
-            (false, _) => Launch::No,
-            (true, false) => Launch::Ask,
-            (true, true) => Launch::Quietly,
+            (_, _, true) => Launch::Continuous,
+            (false, _, _) => Launch::No,
+            (true, false, _) => Launch::Ask,
+            (true, true, _) => Launch::Quietly,
         },
-        continuous: row.get::<_, i64>("continuous")? != 0,
         created_at: row.get("created_at")?,
         members: Vec::new(),
     })

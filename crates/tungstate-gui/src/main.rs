@@ -15,6 +15,7 @@
 
 mod bridge;
 mod dupes;
+mod following;
 mod sync;
 mod watching;
 
@@ -68,6 +69,9 @@ struct App {
     at_once_ceiling: AtomicUsize,
     /// Syncs asked for, running one after another.
     syncing: sync::Syncing,
+    /// Syncs kept in step while the window is open, and what each member is
+    /// doing.
+    following: following::Following,
     /// Held while a transfer or a sync decides whether it may start, so the
     /// two cannot both find the other idle and start writing to one folder.
     gate: Mutex<()>,
@@ -132,6 +136,14 @@ impl<T> RunQueue<T> {
 
     fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
+    }
+
+    /// Become the worker without queueing anything, for a caller that does
+    /// the work itself on its own thread. `false` when a worker is already
+    /// running. Released by `stand_down`.
+    fn claim(&self) -> bool {
+        let _waiting = lock(&self.waiting);
+        !self.running.swap(true, Ordering::SeqCst)
     }
 }
 
@@ -645,8 +657,11 @@ fn list_syncs(state: State<'_, App>) -> Result<Vec<sync::SyncView>, String> {
 fn make_sync(
     form: sync::NewSyncForm,
     state: State<'_, App>,
+    app: AppHandle,
 ) -> Result<sync::SyncView, sync::RefusedView> {
-    sync::make(&state.journal, &form)
+    let made = sync::make(&state.journal, &form)?;
+    following::restart(&app);
+    Ok(made)
 }
 
 /// Change how a sync behaves from its next run on.
@@ -655,8 +670,11 @@ fn change_sync(
     name: String,
     settings: sync::SettingsForm,
     state: State<'_, App>,
+    app: AppHandle,
 ) -> Result<sync::SyncView, sync::RefusedView> {
-    sync::change(&state.journal, &name, &settings)
+    let changed = sync::change(&state.journal, &name, &settings)?;
+    following::restart(&app);
+    Ok(changed)
 }
 
 /// Add a member: a folder here, or `connection:path`.
@@ -666,8 +684,11 @@ fn add_sync_member(
     end: String,
     called: Option<String>,
     state: State<'_, App>,
+    app: AppHandle,
 ) -> Result<sync::SyncView, sync::RefusedView> {
-    sync::add_member(&state.journal, &name, &end, called.as_deref())
+    let added = sync::add_member(&state.journal, &name, &end, called.as_deref())?;
+    following::restart(&app);
+    Ok(added)
 }
 
 /// Take a member out. Its files stay where they are.
@@ -676,18 +697,37 @@ fn remove_sync_member(
     name: String,
     member: String,
     state: State<'_, App>,
+    app: AppHandle,
 ) -> Result<sync::SyncView, String> {
-    sync::remove_member(&state.journal, &name, &member)
+    let left = sync::remove_member(&state.journal, &name, &member)?;
+    following::restart(&app);
+    Ok(left)
 }
 
 /// Remove a sync. Every member's files stay where they are.
 #[tauri::command]
-fn remove_sync(name: String, state: State<'_, App>) -> Result<(), String> {
+fn remove_sync(name: String, state: State<'_, App>, app: AppHandle) -> Result<(), String> {
     state
         .journal
         .sync_by_name(&name)
         .and_then(|sync| state.journal.remove_sync(sync.id))
-        .map_err(describe)
+        .map_err(describe)?;
+    following::restart(&app);
+    Ok(())
+}
+
+/// Which syncs are kept in step, what each member is doing, and which have
+/// stopped to ask.
+#[tauri::command]
+fn following_state(state: State<'_, App>) -> following::FollowingView {
+    state.following.view()
+}
+
+/// A held sync has been looked at: keep it in step again.
+#[tauri::command]
+fn resume_following(name: String, state: State<'_, App>, app: AppHandle) {
+    state.following.resume(&name);
+    let _ = app.emit("sync://following", state.following.view());
 }
 
 /// What a run would do, changing nothing. Reads every member, so async.
@@ -2394,10 +2434,12 @@ fn main() {
             queue: RunQueue::new(),
             at_once_ceiling: AtomicUsize::new(0),
             syncing: sync::Syncing::default(),
+            following: following::Following::default(),
             gate: Mutex::new(()),
         })
         .setup(move |app| {
             begin_watching_if_wanted(&app.handle().clone(), &starting);
+            following::restart(app.handle());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -2429,6 +2471,8 @@ fn main() {
             stop_sync,
             past_syncs,
             put_back_sync,
+            following_state,
+            resume_following,
             undo_duplicates,
             watch_state,
             set_watching,
@@ -2875,6 +2919,21 @@ mod tests {
         assert!(queue.submit(["c"]), "a new worker is needed");
         assert_eq!(queue.next(), Some("b"));
         assert_eq!(queue.next(), Some("c"));
+    }
+
+    #[test]
+    fn a_run_that_claims_the_queue_keeps_others_out_until_it_stands_down() {
+        // What keeping a sync in step does: it runs on its own thread, so it
+        // claims the queue rather than queueing work for a worker.
+        let queue: RunQueue<u8> = RunQueue::new();
+        assert!(queue.claim());
+        assert!(!queue.claim(), "a second claim is refused");
+        assert!(
+            !queue.submit([1]),
+            "a pressed run waits rather than starting a worker"
+        );
+        queue.stand_down();
+        assert!(queue.claim(), "free again once it stands down");
     }
 
     #[test]

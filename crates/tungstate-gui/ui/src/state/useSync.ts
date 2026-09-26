@@ -12,7 +12,7 @@ import { computed, ref, shallowRef } from "vue";
 import { syncs, transfers } from "../engine/commands";
 import { syncEvents, type UnlistenFn } from "../engine/events";
 import type {
-  PastSync, SyncAsk, SyncConflict, SyncPreview, SyncRan, SyncUndone, SyncView,
+  FollowingView, PastSync, SyncAsk, SyncConflict, SyncPreview, SyncRan, SyncUndone, SyncView,
 } from "../engine/types";
 import { reason } from "../lib/syncwords";
 
@@ -58,6 +58,8 @@ const stopping = ref(false);
 const halting = ref(false);
 const problem = ref<string | null>(null);
 const busy = ref<number | null>(null);
+/** Syncs kept in step: each member's state, and which stopped to ask. */
+const followingNow = shallowRef<FollowingView>({ members: [], held: [] });
 /** Syncs waiting behind the one running, from the launch sheet. */
 const waiting = ref(0);
 
@@ -116,12 +118,20 @@ export async function attachSyncStream() {
         }
       }),
       await syncEvents.done((e) => {
-        ran.value = e;
         stopping.value = halting.value = false;
         waiting.value = Math.max(0, waiting.value - 1);
-        if (current.value?.name === e.sync) phase.value = "done";
+        // A run kept in step happens on its own; it must not pull the screen
+        // away from whatever the person is looking at. Only a run they are
+        // watching moves on to its result.
+        if (current.value?.name === e.sync && phase.value === "running") {
+          ran.value = e;
+          phase.value = "done";
+        }
+        // A held sync that a person has now run is kept in step again.
+        if (followingNow.value.held.includes(e.sync)) void syncs.resume(e.sync);
         void loadPast();
       }),
+      await syncEvents.following((e) => (followingNow.value = e)),
       await syncEvents.error((e) => {
         problem.value =
           e.kind === "changed"
@@ -135,6 +145,8 @@ export async function attachSyncStream() {
   } catch (e) {
     problem.value = `This window cannot hear sync progress, so runs will not show here: ${String(e)}`;
   }
+  // Syncs kept in step start with the window, before anyone opens Sync.
+  await loadFollowing();
 }
 
 export function detachSyncStream() {
@@ -153,7 +165,15 @@ async function load() {
   } finally {
     loaded.value = true;
   }
-  await loadPast();
+  await Promise.all([loadPast(), loadFollowing()]);
+}
+
+async function loadFollowing() {
+  try {
+    followingNow.value = await syncs.following();
+  } catch {
+    // The statuses are a nicety; the syncs themselves still show.
+  }
 }
 
 async function loadPast() {
@@ -205,7 +225,11 @@ async function start(name: string, withAsk: SyncAsk | null, fingerprint: string,
 export function useSync() {
   return {
     phase, list, past, loaded, current, preview, forgetting, choices, seen, confirmed, rechecking,
-    rows, leg, ran, undone, stopping, halting, problem, busy, waiting,
+    rows, leg, ran, undone, stopping, halting, problem, busy, waiting, followingNow,
+    /** A member's status, when its sync is kept in step. */
+    statusOf: (sync: string, member: string) =>
+      followingNow.value.members.find((m) => m.sync === sync && (m.member === member || m.member === "")) ?? null,
+    isHeld: (sync: string) => followingNow.value.held.includes(sync),
     load, loadPast, look,
     /** Files settled in the ledger. */
     settled: computed(() => rows.value.filter((r) => !["waiting", "live", "checking"].includes(r.state)).length),
@@ -324,7 +348,8 @@ export async function launchPreviews(): Promise<{ sync: SyncView; preview: SyncP
   const s = useSync();
   let marked: SyncView[];
   try {
-    marked = (await syncs.list()).filter((sync) => sync.launch !== "no");
+    // A sync kept in step is run at launch by the loop that keeps it, not here.
+    marked = (await syncs.list()).filter((sync) => sync.launch === "ask" || sync.launch === "quietly");
   } catch {
     return [];
   }

@@ -31,6 +31,7 @@ use tungstate_journal::{
 use tungstate_secret::SecretStore;
 use tungstate_transfer::{FixedResolver, Progress, Stop, Summary, Transfer};
 
+pub mod follow;
 pub mod setup;
 mod undo;
 pub use undo::{Undone, standing, undo};

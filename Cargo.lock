@@ -6003,6 +6003,9 @@ dependencies = [
 name = "tungstate-sync"
 version = "0.1.0-alpha.2"
 dependencies = [
+ "blake3",
+ "notify",
+ "notify-debouncer-full",
  "tempfile",
  "thiserror 2.0.20",
  "tungstate-attrs",
@@ -6013,6 +6016,7 @@ dependencies = [
  "tungstate-journal",
  "tungstate-secret",
  "tungstate-transfer",
+ "tungstate-watch",
 ]
 
 [[package]]

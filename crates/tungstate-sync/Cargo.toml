@@ -20,6 +20,10 @@ tungstate-attrs = { path = "../tungstate-attrs" }
 tungstate-execute = { path = "../tungstate-execute" }
 tungstate-transfer = { path = "../tungstate-transfer" }
 tungstate-secret = { path = "../tungstate-secret" }
+tungstate-watch = { path = "../tungstate-watch" }
+notify = { workspace = true }
+notify-debouncer-full = { workspace = true }
+blake3 = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
