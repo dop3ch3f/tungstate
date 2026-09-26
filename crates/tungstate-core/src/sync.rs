@@ -380,6 +380,15 @@ impl SyncPlan {
         self.ops.is_empty()
     }
 
+    /// A short digest of what the run would do, so a preview and the run
+    /// that follows it can be checked to be the same run. Stable across
+    /// processes: ordered maps throughout, and no addresses in `Debug`.
+    #[must_use]
+    pub fn fingerprint(&self) -> String {
+        let described = format!("{:?}", self.ops);
+        blake3::hash(described.as_bytes()).to_hex()[..16].to_string()
+    }
+
     /// Whether `undo` could take this run back: nothing is deleted outright.
     #[must_use]
     pub fn reversible(&self) -> bool {

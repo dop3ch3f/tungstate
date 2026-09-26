@@ -1,18 +1,15 @@
 //! `tungstate sync`: a set of folders kept in step.
 
-use std::path::Path;
 use std::process::ExitCode;
-use std::time::Duration;
 
 use clap::{Args, Subcommand};
 use serde_json::json;
 use tungstate_core::sync::{Asked, MemberBlast, Resolve, SyncOp, SyncPlan, Why};
 use tungstate_journal::{
-    ConflictAction, FirstCheck, Journal, NewMember, NewSync, OnRemove, PlanId, Purpose, Sync,
-    SyncDirection, SyncSettings, VerifyLevel, ends,
+    ConflictAction, Journal, Launch, OnRemove, PlanId, Purpose, Sync, SyncDirection, ends,
 };
 use tungstate_secret::SecretStore;
-use tungstate_sync::{Decided, Opened, Ran, Refusal};
+use tungstate_sync::{Decided, Opened, Ran, Refusal, setup};
 
 use crate::{fail, human_bytes};
 
@@ -142,6 +139,11 @@ pub struct SetSync {
     /// full, sampled or size.
     #[arg(long)]
     first_check: Option<String>,
+    /// When the window opens: no, ask (show what would move, and wait for a
+    /// yes), or quietly (run without asking, unless the run would remove
+    /// anything or needs a yes for another reason).
+    #[arg(long, value_name = "WHEN")]
+    on_launch: Option<String>,
 }
 
 #[derive(Subcommand)]
@@ -288,7 +290,7 @@ fn add(asked: &AddSync, journal: &Journal) -> ExitCode {
         (_, _, true) => SyncDirection::All,
         _ => return refuse("say which way things move: --push, --pull or --all"),
     };
-    let settings = match settings(
+    let settings = match setup::settings(
         asked.exact,
         &asked.on_conflict,
         &asked.on_remove,
@@ -297,50 +299,20 @@ fn add(asked: &AddSync, journal: &Journal) -> ExitCode {
         &asked.first_check,
     ) {
         Ok(settings) => settings,
-        Err(message) => return refuse(&message),
+        Err(refused) => return refuse(&words(&refused)),
     };
-    if direction == SyncDirection::All && asked.anchor.is_some() {
-        return refuse("--all has no anchor: every member sends and receives");
-    }
-    if asked.names.len() > asked.ends.len() {
-        return refuse("more --as names than folders");
-    }
-
-    let mut members = Vec::with_capacity(asked.ends.len());
-    for (index, raw) in asked.ends.iter().enumerate() {
-        match member(raw, asked.names.get(index).map(String::as_str), journal) {
-            Ok(member) => members.push(member),
-            Err(message) => return refuse(&message),
-        }
-    }
-    if let Err(message) = distinct(&members) {
-        return refuse(&message);
-    }
-    let anchor = match direction {
-        SyncDirection::All => None,
-        _ => Some(
-            asked
-                .anchor
-                .clone()
-                .unwrap_or_else(|| members[0].name.clone()),
-        ),
-    };
-
-    let created = journal.create_sync(
-        &NewSync {
+    let created = setup::create(
+        journal,
+        &setup::Setup {
             name: asked.name.clone(),
+            ends: asked.ends.clone(),
+            names: asked.names.clone(),
             direction,
-            exact: settings.exact,
-            anchor,
-            on_conflict: settings.on_conflict,
-            on_remove: settings.on_remove,
-            verify: settings.verify,
-            cooldown: settings.cooldown,
-            first_check: settings.first_check,
+            anchor: asked.anchor.clone(),
+            settings,
         },
-        &members,
     );
-    match created.and_then(|_| journal.sync_by_name(&asked.name)) {
+    match created {
         Ok(sync) => {
             println!("created `{}`: {}", sync.name, promise(&sync));
             for member in &sync.members {
@@ -350,45 +322,46 @@ fn add(asked: &AddSync, journal: &Journal) -> ExitCode {
             println!("`tungstate sync preview {}` shows the first run", sync.name);
             ExitCode::SUCCESS
         }
-        Err(error) => fail(&error),
+        Err(refused) => refuse(&words(&refused)),
     }
 }
 
-/// The settings a person typed, checked. Shared by `add` and `set`, so the
-/// two cannot come to different conclusions about what is allowed.
-fn settings(
-    exact: bool,
-    on_conflict: &str,
-    on_remove: &str,
-    verify: &str,
-    cooldown: u64,
-    first_check: &str,
-) -> Result<SyncSettings, String> {
-    let on_remove = OnRemove::parse(on_remove).ok_or("--on-remove must be set-aside or delete")?;
-    if on_remove == OnRemove::Delete && !exact {
-        // Without --exact nothing is removed, so the only thing `delete` could
-        // ever touch is an old version being replaced, and losing that for
-        // good is not what anybody asking for a superset meant.
-        return Err("--on-remove delete needs --exact".into());
+/// A refusal from `tungstate_sync::setup`, in the command line's words.
+fn words(refused: &setup::Refused) -> String {
+    use setup::Refused;
+    match refused {
+        Refused::DeleteNeedsExact => "--on-remove delete needs --exact".into(),
+        Refused::ReplaceHasNoMeaning => {
+            "--on-conflict replace has no meaning when several members changed a file".into()
+        }
+        Refused::Unknown { setting, value } => {
+            let allowed = match *setting {
+                "on_remove" => "set-aside or delete",
+                "on_conflict" => "quarantine, rename or skip",
+                "verify" => "size, hash or readback",
+                _ => "full, sampled or size",
+            };
+            format!(
+                "--{} must be {allowed}, not `{value}`",
+                setting.replace('_', "-")
+            )
+        }
+        Refused::AllHasNoAnchor => "--all has no anchor: every member sends and receives".into(),
+        Refused::NoSuchAnchor(anchor) => {
+            format!("the anchor `{anchor}` is not one of the members")
+        }
+        Refused::MoreNamesThanFolders => "more --as names than folders".into(),
+        Refused::TooFew => "a sync needs two or more folders".into(),
+        Refused::NotAFolder(raw) => format!("`{raw}` is not a folder on this machine"),
+        Refused::SameName(name) => {
+            format!("two members would both be called `{name}`; name them with --as")
+        }
+        Refused::Overlap(a, b) => {
+            format!("`{a}` and `{b}` overlap; a member cannot sit inside another")
+        }
+        Refused::Taken(name) => format!("a sync called `{name}` already exists"),
+        Refused::BadEnd { why, .. } | Refused::Journal(why) => why.clone(),
     }
-    let on_conflict = ConflictAction::parse(on_conflict)
-        .ok_or("--on-conflict must be quarantine, rename or skip")?;
-    if on_conflict == ConflictAction::Replace {
-        // With three members changed, "replace" cannot say whose version
-        // wins; any answer would be a guess, so it is not offered.
-        return Err(
-            "--on-conflict replace has no meaning when several members changed a file".into(),
-        );
-    }
-    Ok(SyncSettings {
-        exact,
-        on_conflict,
-        on_remove,
-        verify: VerifyLevel::parse(verify).ok_or("--verify must be size, hash or readback")?,
-        cooldown: Duration::from_secs(cooldown),
-        first_check: FirstCheck::parse(first_check)
-            .ok_or("--first-check must be full, sampled or size")?,
-    })
 }
 
 /// What a sync does about removing anything, in one sentence.
@@ -425,7 +398,7 @@ fn set(asked: &SetSync, journal: &Journal) -> ExitCode {
         .on_remove
         .clone()
         .unwrap_or_else(|| sync.on_remove.as_str().to_string());
-    let checked = settings(
+    let checked = setup::settings(
         exact,
         asked
             .on_conflict
@@ -441,12 +414,17 @@ fn set(asked: &SetSync, journal: &Journal) -> ExitCode {
     );
     let settings = match checked {
         Ok(settings) => settings,
-        Err(message) => return refuse(&message),
+        Err(refused) => return refuse(&words(&refused)),
     };
-    match journal
+    let launch = match asked.on_launch.as_deref().map(Launch::parse) {
+        None => None,
+        Some(Some(launch)) => Some(launch),
+        Some(None) => return refuse("--on-launch must be no, ask or quietly"),
+    };
+    let changed = journal
         .update_sync(sync.id, &settings)
-        .and_then(|()| journal.sync_by_name(&asked.name))
-    {
+        .and_then(|()| launch.map_or(Ok(()), |launch| journal.set_launch(sync.id, launch)));
+    match changed.and_then(|()| journal.sync_by_name(&asked.name)) {
         Ok(sync) => {
             println!("`{}`: {}", sync.name, promise(&sync));
             println!("{}", removal_line(&sync));
@@ -454,58 +432,6 @@ fn set(asked: &SetSync, journal: &Journal) -> ExitCode {
         }
         Err(error) => fail(&error),
     }
-}
-
-/// One member from what was typed.
-fn member(raw: &str, called: Option<&str>, journal: &Journal) -> Result<NewMember, String> {
-    let end = ends::parse_end(raw, None, journal).map_err(|e| e.to_string())?;
-    let path = if end.connection.is_some() {
-        end.path.to_string_lossy().to_string()
-    } else {
-        let resolved = tungstate_journal::resolve_for_lookup(&end.path);
-        if !resolved.is_dir() {
-            return Err(format!("`{raw}` is not a folder on this machine"));
-        }
-        resolved.to_string_lossy().to_string()
-    };
-    let name = called.map_or_else(
-        || match end.connection {
-            // The connection's own name: `nas:capcut` is "nas".
-            Some(_) => raw.split_once(':').map_or(raw, |(c, _)| c).to_string(),
-            None => Path::new(&path)
-                .file_name()
-                .map_or_else(|| path.clone(), |n| n.to_string_lossy().to_string()),
-        },
-        str::to_string,
-    );
-    Ok(NewMember {
-        name,
-        connection: end.connection,
-        path,
-    })
-}
-
-/// Members need names a person can tell apart, and folders that do not sit
-/// inside one another: two members over one directory would fight over it.
-fn distinct(members: &[NewMember]) -> Result<(), String> {
-    for (i, a) in members.iter().enumerate() {
-        for b in &members[i + 1..] {
-            if a.name == b.name {
-                return Err(format!(
-                    "two members would both be called `{}`; name them with --as",
-                    a.name
-                ));
-            }
-            let (pa, pb) = (Path::new(&a.path), Path::new(&b.path));
-            if a.connection == b.connection && (pa.starts_with(pb) || pb.starts_with(pa)) {
-                return Err(format!(
-                    "`{}` and `{}` overlap; a member cannot sit inside another",
-                    a.name, b.name
-                ));
-            }
-        }
-    }
-    Ok(())
 }
 
 /// What a sync promises, in words.
@@ -557,6 +483,7 @@ fn list(journal: &Journal, json: bool) -> ExitCode {
                     "exact": sync.exact,
                     "on_conflict": sync.on_conflict.as_str(),
                     "on_remove": sync.on_remove.as_str(),
+                    "on_launch": sync.launch.as_str(),
                     "members": sync.members.iter().map(|m| json!({
                         "name": m.name,
                         "at": where_is(m, journal),
@@ -598,29 +525,12 @@ fn members(name: &str, action: MemberAction, journal: &Journal) -> ExitCode {
     };
     match action {
         MemberAction::Add { end, called } => {
-            let new = match member(&end, called.as_deref(), journal) {
-                Ok(new) => new,
-                Err(message) => return refuse(&message),
-            };
-            let existing: Vec<NewMember> = sync
-                .members
-                .iter()
-                .map(|m| NewMember {
-                    name: m.name.clone(),
-                    connection: m.connection,
-                    path: m.path.clone(),
-                })
-                .chain(std::iter::once(new.clone()))
-                .collect();
-            if let Err(message) = distinct(&existing) {
-                return refuse(&message);
-            }
-            match journal.add_member(sync.id, &new) {
-                Ok(_) => {
+            match setup::add_member(journal, &sync, &end, called.as_deref()) {
+                Ok(new) => {
                     println!("added `{}` to `{name}`; the next run fills it", new.name);
                     ExitCode::SUCCESS
                 }
-                Err(error) => fail(&error),
+                Err(refused) => refuse(&words(&refused)),
             }
         }
         MemberAction::Remove { member } => match journal.remove_member(sync.id, &member) {

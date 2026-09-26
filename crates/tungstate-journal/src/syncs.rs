@@ -40,6 +40,18 @@ pub enum FirstCheck {
     Size,
 }
 
+/// Whether a sync runs when the window opens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum Launch {
+    #[default]
+    No,
+    /// Show what would move, and wait for a yes.
+    Ask,
+    /// Run without asking, unless the run would remove anything or needs a
+    /// person's yes for another reason.
+    Quietly,
+}
+
 /// What removing a copy means, where a sync removes anything at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum OnRemove {
@@ -51,6 +63,7 @@ pub enum OnRemove {
 string_enum!(SyncDirection { Push => "push", Pull => "pull", All => "all" });
 string_enum!(FirstCheck { Full => "full", Sampled => "sampled", Size => "size" });
 string_enum!(OnRemove { SetAside => "set-aside", Delete => "delete" });
+string_enum!(Launch { No => "no", Ask => "ask", Quietly => "quietly" });
 
 /// One member as it is to be added.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -100,7 +113,7 @@ pub struct Sync {
     pub verify: VerifyLevel,
     pub cooldown: Duration,
     pub first_check: FirstCheck,
-    pub on_launch: bool,
+    pub launch: Launch,
     pub continuous: bool,
     /// Milliseconds since the epoch. A sync removed and made again under the
     /// same name is a different sync, and its runs start here.
@@ -469,6 +482,29 @@ impl Journal {
         Ok(())
     }
 
+    /// Whether a sync runs when the window opens, and whether it asks first.
+    ///
+    /// # Errors
+    /// [`JournalError::UnknownSync`] if it does not exist.
+    pub fn set_launch(&self, sync: SyncId, launch: Launch) -> Result<()> {
+        let changed = self
+            .lock()
+            .execute(
+                "UPDATE syncs SET on_launch = ?1, run_quietly = ?2
+                 WHERE id = ?3 AND deleted_at IS NULL",
+                rusqlite::params![
+                    i64::from(launch != Launch::No),
+                    i64::from(launch == Launch::Quietly),
+                    sync.0
+                ],
+            )
+            .map_err(query("changing when a sync runs"))?;
+        if changed == 0 {
+            return Err(JournalError::UnknownSync(sync.0.to_string()));
+        }
+        Ok(())
+    }
+
     /// A sync's runs, newest first, undone ones included and undos left out.
     ///
     /// Only runs since it was made: a sync removed and made again under the
@@ -577,7 +613,16 @@ fn row_to_sync(row: &rusqlite::Row<'_>) -> rusqlite::Result<Sync> {
         ),
         first_check: FirstCheck::parse(&first_check)
             .ok_or_else(|| bad("first check")(first_check.clone()))?,
-        on_launch: row.get::<_, i64>("on_launch")? != 0,
+        // Two columns, because `on_launch` came first (v12) and a journal
+        // is only ever added to.
+        launch: match (
+            row.get::<_, i64>("on_launch")? != 0,
+            row.get::<_, i64>("run_quietly")? != 0,
+        ) {
+            (false, _) => Launch::No,
+            (true, false) => Launch::Ask,
+            (true, true) => Launch::Quietly,
+        },
         continuous: row.get::<_, i64>("continuous")? != 0,
         created_at: row.get("created_at")?,
         members: Vec::new(),

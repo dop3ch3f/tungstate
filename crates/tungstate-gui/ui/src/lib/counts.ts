@@ -15,7 +15,10 @@
 // `moves.length` or `ops.length` where a `FileCount` is wanted and `vue-tsc`
 // refuses it, on every platform CI runs on.
 
-import type { Cleared, DupeRow, Found, Notice, Outcome, PastRun, PreviewView, PutBackDone, ScanProgress, TidyDone } from "../engine/types";
+import type {
+  Cleared, DupeRow, Found, MemberPreview, Notice, Outcome, PastRun, PastSync, PreviewView,
+  PutBackDone, ScanProgress, SyncLeg, SyncPreview, SyncRan, SyncUndone, TidyDone,
+} from "../engine/types";
 
 declare const isFileCount: unique symbol;
 
@@ -86,6 +89,55 @@ export const movedBy = (outcome: Outcome): FileCount => seal(outcome.files);
 
 /** Files one way of filing looked at. */
 export const seenBy = (outcome: Outcome): FileCount => seal(outcome.of);
+
+// Syncs. Copied, taken off, renamed and parked are four different numbers and
+// are never added together: a run that copies ten and removes ten has not
+// "changed twenty files". Each has its own extractor for that reason.
+
+/** Files a sync would copy onto a member. */
+export const arriving = (m: MemberPreview): FileCount => seal(m.arriving);
+/** Files a sync would copy off a member onto others. */
+export const leaving = (m: MemberPreview): FileCount => seal(m.leaving);
+/** Files whose old version a sync would take off for a newer one. */
+export const replacing = (m: MemberPreview): FileCount => seal(m.replacing);
+/** Files a sync would take off because another member deleted them, because
+ *  they are extra, or because they were forgotten. */
+export const removing = (m: MemberPreview): FileCount => seal(m.removing);
+/** Files a sync would rename in place. */
+export const renaming = (m: MemberPreview): FileCount => seal(m.renaming);
+/** Conflicting versions a sync would park in a member's set-aside area. */
+export const parking = (m: MemberPreview): FileCount => seal(m.parking);
+/** Files a member holds. */
+export const holds = (m: MemberPreview): FileCount => seal(m.holds);
+/** Files one pair of members would carry between them. */
+export const inLeg = (leg: SyncLeg): FileCount => seal(leg.files);
+/** Files a run would copy, across every member. */
+export const arrivingAcross = (p: SyncPreview): FileCount =>
+  seal(p.members.reduce((n, m) => n + m.arriving, 0));
+/** Files a run would take off, across every member. */
+export const removingAcross = (p: SyncPreview): FileCount =>
+  seal(p.members.reduce((n, m) => n + m.removing, 0));
+/** Files a preview lists as taken off, one entry each. */
+export const listedRemovals = (p: SyncPreview): FileCount => seal(p.removed.length);
+/** Files the decision had to read. */
+export const readToDecide = (p: SyncPreview): FileCount => seal(p.read.files);
+/** Files a finished sync copied, across every pair. */
+export const syncCopied = (ran: SyncRan): FileCount =>
+  seal(ran.legs.reduce((n, leg) => n + leg.copied, 0));
+/** Files a finished sync set aside or deleted. */
+export const syncTookOff = (ran: SyncRan): FileCount => seal(ran.taken_off);
+/** Files a finished sync renamed. */
+export const syncRenamed = (ran: SyncRan): FileCount => seal(ran.renamed);
+/** Files a finished sync did not get to, and will decide again. */
+export const syncMissed = (ran: SyncRan): FileCount => seal(ran.missed.length);
+/** Files putting a sync run back moved back where they were. */
+export const syncPutBack = (u: SyncUndone): FileCount => seal(u.put_back);
+/** Copies putting a sync run back took off again. */
+export const syncUnsent = (u: SyncUndone): FileCount => seal(u.taken_off);
+/** A past run's copies, removals and renames. */
+export const pastCopied = (run: PastSync): FileCount => seal(run.copied);
+export const pastTookOff = (run: PastSync): FileCount => seal(run.taken_off);
+export const pastRenamed = (run: PastSync): FileCount => seal(run.renamed);
 
 /**
  * Directories, which are counted and said separately on purpose.

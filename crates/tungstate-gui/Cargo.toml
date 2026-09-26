@@ -24,6 +24,7 @@ tungstate-execute = { path = "../tungstate-execute" }
 tungstate-watch = { path = "../tungstate-watch" }
 tungstate-attrs = { path = "../tungstate-attrs" }
 tungstate-core = { path = "../tungstate-core" }
+tungstate-sync = { path = "../tungstate-sync" }
 directories = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

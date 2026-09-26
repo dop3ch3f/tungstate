@@ -102,6 +102,22 @@ impl AppliedPlan {
     }
 }
 
+/// A past sync run and what it amounted to, for a history list.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PastSync {
+    pub plan: AppliedPlan,
+    /// The sync's name, from the plan's `sync:<name>`.
+    pub sync: String,
+    /// Files copied onto a member, not counting conflicting versions parked.
+    pub copied: u64,
+    /// Files set aside or deleted.
+    pub taken_off: u64,
+    /// Files renamed in place.
+    pub renamed: u64,
+    /// Bytes copied.
+    pub bytes: u64,
+}
+
 impl Journal {
     /// Record that a reorganisation is starting.
     ///
@@ -302,6 +318,64 @@ impl Journal {
             .map_err(query("listing past plans"))?;
         rows.collect::<std::result::Result<Vec<_>, _>>()
             .map_err(query("listing past plans"))
+    }
+
+    /// Past sync runs, newest first, with what each did. One aggregate query,
+    /// so a long history costs one pass over its ops. Undos are left out:
+    /// they show as the run they put back, marked undone.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn past_syncs(&self, limit: usize) -> Result<Vec<PastSync>> {
+        let conn = self.lock();
+        let mut statement = conn
+            .prepare(
+                "SELECT p.id, p.folder, p.snapshot, p.applied_at, p.undone_at, p.undoes,
+                        p.reversible, p.purpose,
+                        COALESCE(SUM(o.kind = 'copy'
+                                     AND instr(o.dst_path, '.tungstate-quarantine') = 0), 0)
+                            AS copied,
+                        COALESCE(SUM(o.kind = 'remove'
+                                     OR (o.kind = 'rename'
+                                         AND instr(o.dst_path, '.tungstate-quarantine') > 0)), 0)
+                            AS taken_off,
+                        COALESCE(SUM(o.kind = 'rename'
+                                     AND instr(o.dst_path, '.tungstate-quarantine') = 0), 0)
+                            AS renamed,
+                        COALESCE(SUM(CASE WHEN o.kind = 'copy' THEN o.size ELSE 0 END), 0)
+                            AS bytes
+                 FROM plans p
+                 LEFT JOIN ops o ON o.plan_id = p.id AND o.status = 'committed'
+                 WHERE p.purpose = 'sync' AND p.undoes IS NULL
+                 GROUP BY p.id
+                 ORDER BY p.id DESC LIMIT ?1",
+            )
+            .map_err(query("listing past syncs"))?;
+        let count = |row: &rusqlite::Row<'_>, column: &str| -> rusqlite::Result<u64> {
+            Ok(u64::try_from(row.get::<_, i64>(column)?).unwrap_or(0))
+        };
+        let rows = statement
+            .query_map(
+                rusqlite::params![i64::try_from(limit).unwrap_or(i64::MAX)],
+                |row| {
+                    let plan = row_to_plan(row)?;
+                    Ok(PastSync {
+                        sync: plan
+                            .folder
+                            .strip_prefix("sync:")
+                            .unwrap_or(&plan.folder)
+                            .to_string(),
+                        copied: count(row, "copied")?,
+                        taken_off: count(row, "taken_off")?,
+                        renamed: count(row, "renamed")?,
+                        bytes: count(row, "bytes")?,
+                        plan,
+                    })
+                },
+            )
+            .map_err(query("listing past syncs"))?;
+        rows.collect::<std::result::Result<Vec<_>, _>>()
+            .map_err(query("listing past syncs"))
     }
 
     /// Everything one reorganisation did, oldest first.

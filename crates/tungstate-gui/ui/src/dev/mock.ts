@@ -99,9 +99,72 @@ const pastCleanups = [
   pastRun(8, "Pictures", 3, 42_991_616, 3 * day, false, false),
 ];
 
+// --- syncs: two real-shaped ones, a pair and a set of four ------------------
+const sceneName = new URLSearchParams(location.search).get("scene") ?? "";
+const member = (name: string, at: string, remote = false) => ({ name, at, remote });
+const syncSettings = {
+  on_conflict: "quarantine", on_remove: "set-aside", verify: "hash", cooldown_secs: 30, first_check: "full",
+};
+const syncList: T.SyncView[] = [
+  {
+    name: "capcut", direction: "all", exact: true, anchor: null, ...syncSettings,
+    // Only the launch scene has anything marked to run at launch, or its
+    // sheet would sit over every other scene.
+    launch: sceneName === "sync-launch" ? "ask" : "no",
+    members: [member("laptop", "~/Movies/CapCut"), member("nas", "nas:capcut", true)],
+  },
+  {
+    name: "photo-archive", direction: "push", exact: false, anchor: "laptop", ...syncSettings,
+    launch: sceneName === "sync-launch" ? "quietly" : "no",
+    members: [
+      member("laptop", "~/Pictures/Exports"),
+      member("nas", "nas:photos", true),
+      member("spare", "/Volumes/Spare/photos"),
+      member("ftp", "ftp:backup/photos", true),
+    ],
+  },
+];
+const memberPreview = (name: string, at: string, over: Partial<T.MemberPreview> = {}): T.MemberPreview => ({
+  name, at, arriving: 0, arriving_bytes: 0, leaving: 0, replacing: 0, removing: 0, deleting: 0, renaming: 0, parking: 0, holds: 212, ...over,
+});
+const syncPreview = (over: Partial<T.SyncPreview> = {}): T.SyncPreview => ({
+  sync: "capcut",
+  fingerprint: "a1b2c3",
+  empty: false,
+  reversible: true,
+  members: [
+    memberPreview("laptop", "~/Movies/CapCut", { arriving: 2, arriving_bytes: 734_003_200, leaving: 3, replacing: 1, holds: 214 }),
+    memberPreview("nas", "nas:capcut", { arriving: 3, arriving_bytes: 1_288_490_188, leaving: 2, removing: 4, renaming: 9, holds: 409 }),
+  ],
+  legs: [
+    { from: "laptop", to: "nas", files: 3, parked: 0, bytes: 1_288_490_188, through_here: false },
+    { from: "nas", to: "laptop", files: 2, parked: 0, bytes: 734_003_200, through_here: false },
+  ],
+  read: { files: 9, sampled: 0, no_times: 0, moves: 9, parked: 0 },
+  removed: [
+    { member: "nas", path: "2025/wedding-rough-cut.mp4", because: "deleted", gone: false },
+    { member: "nas", path: "2025/wedding-rough-cut-v2.mp4", because: "deleted", gone: false },
+    { member: "nas", path: "tests/colour-test.mov", because: "deleted", gone: false },
+    { member: "nas", path: "tests/audio-sync.mov", because: "deleted", gone: false },
+  ],
+  conflicts: [],
+  left_alone: [{ path: "exports/today.mp4", why: "too_recent", members: ["laptop"], existing: null }],
+  refusals: [],
+  ...over,
+});
+const conflicted: T.SyncConflict[] = [
+  { path: "exports/trailer-final.mp4", versions: [{ member: "laptop", size: 412_000_000, modified: now - 3_600_000 }, { member: "nas", size: 398_000_000, modified: now - 7_200_000 }] },
+  { path: "exports/thumbnail.png", versions: [{ member: "laptop", size: 2_400_000, modified: now - 600_000 }, { member: "nas", size: 2_100_000, modified: now - 900_000 }] },
+];
+const pastSyncs: T.PastSync[] = [
+  { plan: 31, sync: "capcut", applied_at: now - 3 * 3_600_000, copied: 12, taken_off: 2, renamed: 0, bytes: 4_294_967_296, undone: false, undoable: true },
+  { plan: 27, sync: "photo-archive", applied_at: now - day, copied: 184, taken_off: 0, renamed: 9, bytes: 1_073_741_824, undone: false, undoable: true },
+  { plan: 22, sync: "capcut", applied_at: now - 4 * day, copied: 3, taken_off: 0, renamed: 0, bytes: 734_003_200, undone: true, undoable: false },
+];
+
 mockIPC((cmd, args) => {
   const a = (args ?? {}) as Record<string, any>;
-  if (bare && ["governed", "list_links", "list_connections", "recent", "history", "whereis", "archives", "interrupted", "past_tidies", "past_cleanups", "recent_scans"].includes(cmd)) {
+  if (bare && ["governed", "list_links", "list_connections", "recent", "history", "whereis", "archives", "interrupted", "past_tidies", "past_cleanups", "recent_scans", "list_syncs", "past_syncs"].includes(cmd)) {
     return [];
   }
   switch (cmd) {
@@ -134,6 +197,27 @@ mockIPC((cmd, args) => {
       return { overlapping: [], fresh: 3, same_size: 1, clashes: 1, too_recent: 0, bytes: 629_145_600, removes_originals: true,
         items: listings[`${DEMO}/nas/incoming`].entries.map((e, i) => ({ path: e.path, size: e.size, outcome: ["move", "move", "move", "check", "clash"][i] ?? "move", existing: null, towards: "forward" })) };
     case "interrupted": return [];
+    case "list_syncs": return syncList;
+    case "past_syncs": return pastSyncs;
+    case "preview_sync":
+      if (a.name === "photo-archive") {
+        return syncPreview({
+          sync: "photo-archive",
+          members: [
+            memberPreview("laptop", "~/Pictures/Exports", { leaving: 18 }),
+            memberPreview("nas", "nas:photos", { arriving: 6, arriving_bytes: 48_000_000 }),
+            memberPreview("spare", "/Volumes/Spare/photos", { arriving: 6, arriving_bytes: 48_000_000 }),
+            memberPreview("ftp", "ftp:backup/photos", { arriving: 6, arriving_bytes: 48_000_000 }),
+          ],
+          removed: [],
+          left_alone: [],
+        });
+      }
+      return syncPreview();
+    case "make_sync": return syncList[0];
+    case "change_sync": return syncList[0];
+    case "run_sync": return { started: true, waiting: 0 };
+    case "put_back_sync": return { plan: 31, put_back: 2, taken_off: 5, parked_left: 0, revived: [{ member: "laptop", path: "2025/wedding-rough-cut.mp4" }] };
     case "places": return [{ label: "Demo", path: DEMO }, { label: "NAS", path: `${DEMO}/nas` }];
     case "last_panes": return { left: `${DEMO}/photos-by-nothing`, right: `${DEMO}/nas/incoming` };
     case "browse": return listings[a.path] ?? { path: a.path, parent: null, entries: [] };
@@ -255,6 +339,7 @@ const { useFolders } = await import("../state/useFolders");
 const { useTransfer } = await import("../state/useTransfer");
 const { ask } = await import("../ui/useDialog");
 const { useDupes } = await import("../state/useDupes");
+const { useSync } = await import("../state/useSync");
 
 createApp(App).mount("#app");
 
@@ -262,6 +347,18 @@ const nav = useNav();
 const f = useFolders();
 const t = useTransfer();
 const dz = useDupes();
+const sy = useSync();
+/** Open a sync's page and put a preview on it, as a scene wants. */
+async function syncAt(index: number, preview?: T.SyncPreview) {
+  nav.go("sync");
+  await sy.load();
+  sy.open(syncList[index]!);
+  if (preview) {
+    sy.preview.value = preview;
+    sy.seen.value = preview.conflicts;
+    sy.phase.value = "preview";
+  }
+}
 const DL = `${DEMO}/messy-downloads`;
 
 /** Open a governed folder straight at its preview. */
@@ -451,6 +548,70 @@ const scenes: Record<string, () => unknown> = {
     t.deaf.value = "This window cannot hear the engine, so a running transfer will report nothing here. Transfers themselves are unaffected.";
   },
   "history-nothing-found": async () => { nav.go("history"); await tick(); type("input", "nothing like this"); click(".h-find button"); },
+  "sync-start": async () => { nav.go("sync"); await sy.load(); },
+  "sync-make": async () => { nav.go("sync"); await sy.load(); sy.making(); },
+  "sync-one": () => syncAt(0),
+  "sync-four": () => syncAt(1),
+  "sync-preview": () => syncAt(0, syncPreview()),
+  "sync-nothing": () => syncAt(0, syncPreview({ empty: true, legs: [], removed: [], left_alone: [], read: { files: 0, sampled: 0, no_times: 0, moves: 0, parked: 0 }, members: [memberPreview("laptop", "~/Movies/CapCut"), memberPreview("nas", "nas:capcut")] })),
+  "sync-conflict": async () => {
+    await syncAt(0, syncPreview({ conflicts: conflicted, removed: [], left_alone: conflicted.map((c) => ({ path: c.path, why: "conflict", members: ["laptop", "nas"], existing: null })) }));
+    sy.choices.value = { "exports/thumbnail.png": "laptop" };
+  },
+  "sync-refused": () =>
+    // An unplugged share: nas lists nothing, so an exact sync would carry
+    // "everything deleted" to the laptop. Every number agrees with that.
+    syncAt(0, syncPreview({
+      members: [
+        memberPreview("laptop", "~/Movies/CapCut", { removing: 212, holds: 212 }),
+        memberPreview("nas", "/Volumes/nas/capcut", { holds: 0 }),
+      ],
+      legs: [],
+      left_alone: [],
+      read: { files: 0, sampled: 0, no_times: 0, moves: 0, parked: 0 },
+      refusals: [
+        { kind: "hollow", member: "nas", held: 212 },
+        { kind: "blast", member: "laptop", taking_off: 212, of: 212 },
+      ],
+      removed: Array.from({ length: 212 }, (_, i) => ({
+        member: "laptop", path: `exports/clip-${String(i + 1).padStart(3, "0")}.mp4`, because: "deleted", gone: false,
+      })),
+    })),
+  "sync-deletes": () =>
+    syncAt(0, syncPreview({
+      reversible: false,
+      members: [memberPreview("laptop", "~/Movies/CapCut"), memberPreview("nas", "nas:capcut", { removing: 4, deleting: 4 })],
+      removed: syncPreview().removed.map((r) => ({ ...r, gone: true })),
+    })),
+  "sync-running": async () => {
+    await syncAt(0);
+    sy.phase.value = "running";
+    sy.leg.value = { index: 0, from: "laptop", to: "nas" };
+    sy.rows.value = [
+      { leg: 0, path: "exports/trailer-final.mp4", size: 412_000_000, state: "live", detail: null, done: 180_000_000 },
+      { leg: 0, path: "exports/teaser.mp4", size: 88_000_000, state: "transferred", detail: null, done: 88_000_000 },
+      { leg: 0, path: "exports/bts.mp4", size: 790_000_000, state: "waiting", detail: null, done: 0 },
+    ];
+  },
+  "sync-done": async () => {
+    await syncAt(0);
+    sy.phase.value = "done";
+    sy.rows.value = [
+      { leg: 0, path: "exports/trailer-final.mp4", size: 412_000_000, state: "transferred", detail: null, done: 412_000_000 },
+      { leg: 1, path: "2024/wedding.mp4", size: 734_003_200, state: "transferred", detail: null, done: 734_003_200 },
+    ];
+    sy.ran.value = {
+      sync: "capcut", plan: 31, stopped: false, reversible: true, taken_off: 4, renamed: 9,
+      legs: [{ from: "laptop", to: "nas", copied: 1, bytes: 412_000_000, failed: 0 }, { from: "nas", to: "laptop", copied: 1, bytes: 734_003_200, failed: 0 }],
+      missed: [{ member: "nas", path: "tests/audio-sync.mov", why: "it has been written to since the run was decided" }],
+    };
+  },
+  "sync-put-back": async () => {
+    await syncAt(0);
+    await sy.putBack("capcut", 31);
+  },
+  "sync-settings": async () => { await syncAt(0); await tick(); document.querySelectorAll<HTMLButtonElement>(".so-acts button")[1]?.click(); },
+  "sync-launch": () => {},
   "drain-preview-pair": async () => { nav.go("drain"); await tab(2); await tick(); click(".lk-do button"); },
 };
 try {

@@ -240,6 +240,10 @@ const MIGRATIONS: &[&str] = &[
          recorded_at INTEGER NOT NULL
      );
      CREATE INDEX sync_state_current ON sync_state (member_id, path, id);",
+    // v13: a sync marked to run when the window opens can also be marked to
+    // run without asking first. Slice 9d. A run that would remove anything
+    // still asks, whatever this says.
+    "ALTER TABLE syncs ADD COLUMN run_quietly INTEGER NOT NULL DEFAULT 0;",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

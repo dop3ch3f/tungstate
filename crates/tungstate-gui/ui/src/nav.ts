@@ -7,7 +7,7 @@
 
 import { ref } from "vue";
 
-export type View = "home" | "folder" | "drain" | "dupes" | "history" | "settings";
+export type View = "home" | "folder" | "drain" | "sync" | "dupes" | "history" | "settings";
 
 const view = ref<View>("home");
 

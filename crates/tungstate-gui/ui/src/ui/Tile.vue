@@ -10,6 +10,7 @@ const TINT = {
   home: "t-home",
   folder: "t-folder",
   drain: "t-drain",
+  sync: "t-sync",
   dupes: "t-dupes",
   history: "t-history",
   settings: "t-history",
@@ -42,4 +43,5 @@ const TINT = {
 .t-drain { background: var(--tint-drain); }
 .t-history { background: var(--tint-history); }
 .t-dupes { background: var(--tint-dupes); }
+.t-sync { background: var(--tint-sync); }
 </style>

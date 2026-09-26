@@ -77,18 +77,40 @@ pub struct ConflictEvent {
 /// Forwards engine progress into the window as events.
 pub struct EventProgress {
     app: AppHandle,
+    /// `transfer` or `sync`: the two runs are shown in different sections
+    /// and may be going at once, so each has its own stream of events.
+    stream: &'static str,
 }
 
 impl EventProgress {
     pub fn new(app: AppHandle) -> Self {
-        Self { app }
+        Self {
+            app,
+            stream: "transfer",
+        }
+    }
+
+    /// The same events, as `sync://…`.
+    pub fn for_sync(app: AppHandle) -> Self {
+        Self {
+            app,
+            stream: "sync",
+        }
+    }
+
+    fn emit<P: Serialize + Clone>(&self, event: &str, payload: P) {
+        // A failed emit means the window has gone. The engine keeps working;
+        // losing a progress line is not a reason to abandon a run.
+        let _ = self
+            .app
+            .emit(&format!("{}://{event}", self.stream), payload);
     }
 }
 
 impl Progress for EventProgress {
     fn began(&mut self, shape: RunShape) {
-        let _ = self.app.emit(
-            "transfer://began",
+        self.emit(
+            "began",
             BeganEvent {
                 removes_originals: shape.removes_originals,
                 at_once: shape.at_once,
@@ -97,8 +119,8 @@ impl Progress for EventProgress {
     }
 
     fn planned(&mut self, files: &[tungstate_transfer::Planned]) {
-        let _ = self.app.emit(
-            "transfer://planned",
+        self.emit(
+            "planned",
             files
                 .iter()
                 .map(|f| PlannedEvent {
@@ -110,12 +132,12 @@ impl Progress for EventProgress {
     }
 
     fn at_once(&mut self, files: usize) {
-        let _ = self.app.emit("transfer://at-once", files);
+        self.emit("at-once", files);
     }
 
     fn checking(&mut self, path: &Path, done: u64, total: u64) {
-        let _ = self.app.emit(
-            "transfer://checking",
+        self.emit(
+            "checking",
             AdvancedEvent {
                 path: path.display().to_string(),
                 done,
@@ -125,8 +147,8 @@ impl Progress for EventProgress {
     }
 
     fn advanced(&mut self, path: &Path, done: u64, total: u64) {
-        let _ = self.app.emit(
-            "transfer://advanced",
+        self.emit(
+            "advanced",
             AdvancedEvent {
                 path: path.display().to_string(),
                 done,
@@ -136,10 +158,8 @@ impl Progress for EventProgress {
     }
 
     fn starting(&mut self, path: &Path, size: u64) {
-        // A failed emit means the window has gone. The engine keeps working;
-        // losing a progress line is not a reason to abandon a drain.
-        let _ = self.app.emit(
-            "transfer://started",
+        self.emit(
+            "started",
             StartedEvent {
                 path: path.display().to_string(),
                 size,
@@ -168,8 +188,8 @@ impl Progress for EventProgress {
                 ("skipped", Some("another file holds that name"))
             }
         };
-        let _ = self.app.emit(
-            "transfer://finished",
+        self.emit(
+            "finished",
             FinishedEvent {
                 path: path.display().to_string(),
                 outcome,

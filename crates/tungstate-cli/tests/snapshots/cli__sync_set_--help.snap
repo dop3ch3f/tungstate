@@ -17,4 +17,5 @@ Options:
       --verify <VERIFY>            size, hash or readback
       --cooldown <COOLDOWN>        Seconds a file must have been untouched before it moves
       --first-check <FIRST_CHECK>  full, sampled or size
+      --on-launch <WHEN>           When the window opens: no, ask (show what would move, and wait for a yes), or quietly (run without asking, unless the run would remove anything or needs a yes for another reason)
   -h, --help                       Print help

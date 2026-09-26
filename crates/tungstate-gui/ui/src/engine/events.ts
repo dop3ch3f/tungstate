@@ -36,4 +36,17 @@ export const transferEvents = {
   error: on<string>("transfer://error"),
 };
 
+/** A sync's run: the same file events a transfer sends, under `sync://`, and
+ *  a `leg` as each pair of members begins. */
+export const syncEvents = {
+  leg: on<T.SyncLegEvent>("sync://leg"),
+  planned: on<T.PlannedFile[]>("sync://planned"),
+  started: on<T.Started>("sync://started"),
+  advanced: on<T.Advanced>("sync://advanced"),
+  checking: on<T.Advanced>("sync://checking"),
+  finished: on<T.Finished>("sync://finished"),
+  done: on<T.SyncRan>("sync://done"),
+  error: on<T.SyncError>("sync://error"),
+};
+
 export type { UnlistenFn };

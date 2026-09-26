@@ -6,9 +6,9 @@
 // each row into one path so a 16-square icon is one element and not sixteen.
 
 export type Art =
-  | "home" | "folder" | "drain" | "dupes" | "history" | "settings"
+  | "home" | "folder" | "drain" | "sync" | "dupes" | "history" | "settings"
   | "no-folders" | "no-runs" | "no-pairs" | "no-connections" | "no-archives" | "nothing-found"
-  | "no-history";
+  | "no-history" | "no-syncs" | "in-step" | "conflict";
 
 /** The four section marks, eight squares across, to sit in a 22pt tile. */
 const SECTIONS: Record<string, string[]> = {
@@ -51,6 +51,16 @@ const SECTIONS: Record<string, string[]> = {
     "...x.o.x",
     "...x...x",
     "...xxxxx",
+  ],
+  sync: [
+    "..xxxxx.",
+    ".x....xx",
+    "x.....x.",
+    "x.......",
+    ".......x",
+    ".x.....x",
+    "xx....x.",
+    ".xxxxx..",
   ],
   history: [
     "..xxxx..",
@@ -145,6 +155,60 @@ const SCENES: Record<string, string[]> = {
     ".....x.oo.x.....",
     ".....xxxxxx.....",
     "................",
+    "................",
+    "................",
+  ],
+  "no-syncs": [
+    "................",
+    "................",
+    ".xxxxx....xxxxx.",
+    ".x...x....x...x.",
+    ".x.o.x....x.o.x.",
+    ".x...x....x...x.",
+    ".xxxxx....xxxxx.",
+    "................",
+    "....xxxxxxx.....",
+    "...x.......x....",
+    "..x.........x...",
+    ".xxx.......xxx..",
+    "................",
+    "................",
+    "................",
+    "................",
+  ],
+  "in-step": [
+    "................",
+    "................",
+    ".xxxxx....xxxxx.",
+    ".xooox....xooox.",
+    ".xooox.xx.xooox.",
+    ".xooox.xx.xooox.",
+    ".xxxxx....xxxxx.",
+    "................",
+    "..xxxxxxxxxxxx..",
+    "................",
+    "..xxxxxxxxxxxx..",
+    "................",
+    "................",
+    "................",
+    "................",
+    "................",
+  ],
+  conflict: [
+    "................",
+    "................",
+    ".xxxxx....xxxxx.",
+    ".xooox....x...x.",
+    ".xooox....x.o.x.",
+    ".xooox....x...x.",
+    ".xxxxx....xxxxx.",
+    "........x.......",
+    ".......xxx......",
+    "......xx.xx.....",
+    ".....xx...xx....",
+    ".....xx.x.xx....",
+    "....xxx...xxx...",
+    "....xxxxxxxxx...",
     "................",
     "................",
   ],

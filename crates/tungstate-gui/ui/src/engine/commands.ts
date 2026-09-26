@@ -57,6 +57,29 @@ export const dupes = {
   past: () => invoke<T.PastRun[]>("past_cleanups"),
 };
 
+export const syncs = {
+  list: () => invoke<T.SyncView[]>("list_syncs"),
+  /** Rejects with a `SyncRefused`, not a sentence: the window words it. */
+  make: (form: T.NewSyncForm) => invoke<T.SyncView>("make_sync", { form }),
+  change: (name: string, settings: T.SyncSettingsForm) =>
+    invoke<T.SyncView>("change_sync", { name, settings }),
+  addMember: (name: string, end: string, called: string | null) =>
+    invoke<T.SyncView>("add_sync_member", { name, end, called }),
+  removeMember: (name: string, member: string) =>
+    invoke<T.SyncView>("remove_sync_member", { name, member }),
+  remove: (name: string) => invoke<void>("remove_sync", { name }),
+  /** Reads every member, so it can take a while on a network. */
+  preview: (name: string, ask: T.SyncAsk | null) =>
+    invoke<T.SyncPreview>("preview_sync", { name, ask }),
+  /** Takes the preview's fingerprint: a run that would now do something else
+   *  is refused, with a `sync://error`, rather than carried out unseen. */
+  run: (name: string, ask: T.SyncAsk | null, expected: string, confirmed: boolean) =>
+    invoke<T.SyncQueued>("run_sync", { name, ask, expected, confirmed }),
+  stop: (now: boolean) => invoke<void>("stop_sync", { now }),
+  past: () => invoke<T.PastSync[]>("past_syncs"),
+  putBack: (name: string, plan: number) => invoke<T.SyncUndone>("put_back_sync", { name, plan }),
+};
+
 export const watcher = {
   state: () => invoke<T.WatchState>("watch_state"),
   /** Starts or stops a loop at once, rather than at the next launch. */

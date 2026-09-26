@@ -9,10 +9,13 @@ import { useNav } from "./nav";
 import { attachTransferStream, detachTransferStream, useTransfer } from "./state/useTransfer";
 import { attachDupeStream, detachDupeStream } from "./state/useDupes";
 import { attachWatchStream, detachWatchStream, useWatch } from "./state/useWatch";
+import { attachSyncStream, detachSyncStream, useSync } from "./state/useSync";
 import Home from "./screens/Home.vue";
 import FolderHalf from "./screens/folder/FolderHalf.vue";
 import DrainHalf from "./screens/drain/DrainHalf.vue";
 import DupesHalf from "./screens/dupes/DupesHalf.vue";
+import SyncHalf from "./screens/sync/SyncHalf.vue";
+import SyncLaunch from "./screens/sync/SyncLaunch.vue";
 import HistoryView from "./screens/HistoryView.vue";
 import SettingsView from "./screens/SettingsView.vue";
 import DialogHost from "./ui/DialogHost.vue";
@@ -22,6 +25,7 @@ import Window from "./ui/Window.vue";
 
 const nav = useNav();
 const t = useTransfer();
+const sy = useSync();
 /** Whether the open section's window fills the stage. Kept across sections. */
 const max = ref(false);
 
@@ -33,6 +37,7 @@ onMounted(() => {
   void attachTransferStream();
   void attachDupeStream();
   void attachWatchStream();
+  void attachSyncStream();
   // What the watcher did before this screen existed: the loop starts when the
   // window does, so by the time anybody looks there may already be a record.
   void useWatch().load();
@@ -41,12 +46,14 @@ onUnmounted(() => {
   detachTransferStream();
   detachDupeStream();
   detachWatchStream();
+  detachSyncStream();
 });
 
 const WHERE = {
   home: "Home",
   folder: "Organize",
   drain: "Transfer",
+  sync: "Sync",
   dupes: "Duplicates",
   history: "History",
 } as const;
@@ -70,6 +77,7 @@ const WHERE = {
       </button>
       <span class="gap"></span>
       <span class="live" v-if="t.running.value" title="A transfer is running">●</span>
+      <span class="live" v-if="sy.running.value" title="A sync is running">●</span>
       <button class="dest" :class="{ here: nav.view.value === 'settings' }" @click="nav.go('settings')">
         <Tile of="settings" :size="22" />
         Settings
@@ -89,6 +97,7 @@ const WHERE = {
       >
         <FolderHalf v-if="nav.view.value === 'folder'" />
         <DrainHalf v-else-if="nav.view.value === 'drain'" />
+        <SyncHalf v-else-if="nav.view.value === 'sync'" />
         <DupesHalf v-else-if="nav.view.value === 'dupes'" />
         <HistoryView v-else-if="nav.view.value === 'history'" />
         <SettingsView v-else />
@@ -96,6 +105,7 @@ const WHERE = {
     </main>
 
     <DialogHost />
+    <SyncLaunch />
   </div>
 </template>
 

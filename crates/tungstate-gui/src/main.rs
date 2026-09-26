@@ -15,6 +15,7 @@
 
 mod bridge;
 mod dupes;
+mod sync;
 mod watching;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -65,6 +66,11 @@ struct App {
     /// handshake, and it does not stop tungstate backing off if the far side
     /// objects. Zero means "no ceiling asked for", which is the normal case.
     at_once_ceiling: AtomicUsize,
+    /// Syncs asked for, running one after another.
+    syncing: sync::Syncing,
+    /// Held while a transfer or a sync decides whether it may start, so the
+    /// two cannot both find the other idle and start writing to one folder.
+    gate: Mutex<()>,
 }
 
 /// Work waiting for a worker, and whether a worker is there to take it.
@@ -624,6 +630,121 @@ fn past_tidies(state: State<'_, App>) -> Result<Vec<PastView>, String> {
 #[tauri::command]
 fn past_cleanups(state: State<'_, App>) -> Result<Vec<PastView>, String> {
     past_for(&state.journal, Purpose::Duplicates)
+}
+
+// --- syncs ------------------------------------------------------------------
+
+/// Every sync.
+#[tauri::command]
+fn list_syncs(state: State<'_, App>) -> Result<Vec<sync::SyncView>, String> {
+    sync::list(&state.journal)
+}
+
+/// Make a sync. Refused as data the window words.
+#[tauri::command(async)]
+fn make_sync(
+    form: sync::NewSyncForm,
+    state: State<'_, App>,
+) -> Result<sync::SyncView, sync::RefusedView> {
+    sync::make(&state.journal, &form)
+}
+
+/// Change how a sync behaves from its next run on.
+#[tauri::command]
+fn change_sync(
+    name: String,
+    settings: sync::SettingsForm,
+    state: State<'_, App>,
+) -> Result<sync::SyncView, sync::RefusedView> {
+    sync::change(&state.journal, &name, &settings)
+}
+
+/// Add a member: a folder here, or `connection:path`.
+#[tauri::command(async)]
+fn add_sync_member(
+    name: String,
+    end: String,
+    called: Option<String>,
+    state: State<'_, App>,
+) -> Result<sync::SyncView, sync::RefusedView> {
+    sync::add_member(&state.journal, &name, &end, called.as_deref())
+}
+
+/// Take a member out. Its files stay where they are.
+#[tauri::command]
+fn remove_sync_member(
+    name: String,
+    member: String,
+    state: State<'_, App>,
+) -> Result<sync::SyncView, String> {
+    sync::remove_member(&state.journal, &name, &member)
+}
+
+/// Remove a sync. Every member's files stay where they are.
+#[tauri::command]
+fn remove_sync(name: String, state: State<'_, App>) -> Result<(), String> {
+    state
+        .journal
+        .sync_by_name(&name)
+        .and_then(|sync| state.journal.remove_sync(sync.id))
+        .map_err(describe)
+}
+
+/// What a run would do, changing nothing. Reads every member, so async.
+#[tauri::command(async)]
+fn preview_sync(
+    name: String,
+    ask: Option<sync::Ask>,
+    state: State<'_, App>,
+) -> Result<sync::SyncPreviewView, String> {
+    sync::preview(&state.journal, &name, ask.unwrap_or_default())
+}
+
+/// Run what was previewed. Refused, as a `sync://error`, if the run would now
+/// do something other than the preview said.
+#[tauri::command]
+fn run_sync(
+    name: String,
+    ask: Option<sync::Ask>,
+    expected: String,
+    confirmed: bool,
+    app: AppHandle,
+) -> Result<sync::QueuedView, String> {
+    sync::submit(
+        &app,
+        sync::Job {
+            name,
+            ask: ask.unwrap_or_default(),
+            expected,
+            confirmed,
+        },
+    )
+}
+
+/// Stop the sync in flight after the file in hand, or at once.
+#[tauri::command]
+fn stop_sync(now: bool, state: State<'_, App>) {
+    if now {
+        state.syncing.stop.now();
+    } else {
+        state.syncing.stop.after_this_file();
+    }
+}
+
+/// Sync runs, newest first, for the section's own history.
+#[tauri::command]
+fn past_syncs(state: State<'_, App>) -> Result<Vec<sync::PastSyncView>, String> {
+    sync::past(&state.journal)
+}
+
+/// Put a run back on every member.
+#[tauri::command(async)]
+fn put_back_sync(
+    name: String,
+    plan: i64,
+    state: State<'_, App>,
+) -> Result<sync::UndoneView, String> {
+    sync::put_back(&state.journal, &name, plan)
 }
 
 /// The places scanned before, newest first.
@@ -2057,6 +2178,11 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
         wanted.push_back(state.journal.link_by_name(name).map_err(describe)?);
     }
 
+    let _gate = lock(&state.gate);
+    if state.syncing.queue.is_running() {
+        return Err("a sync is running; move files when it has finished".into());
+    }
+
     // The lock is held across the push *and* the decision to start a worker.
     // That is the whole correctness argument: a worker only ever clears
     // `running` while holding this same lock, so it cannot decide it has
@@ -2214,6 +2340,8 @@ fn describe(error: impl std::error::Error) -> String {
     message
 }
 
+// Long because it lists every command the window can call, one per line.
+#[allow(clippy::too_many_lines)]
 fn main() {
     tracing_subscriber::fmt()
         .with_env_filter(
@@ -2265,6 +2393,8 @@ fn main() {
             thumbs,
             queue: RunQueue::new(),
             at_once_ceiling: AtomicUsize::new(0),
+            syncing: sync::Syncing::default(),
+            gate: Mutex::new(()),
         })
         .setup(move |app| {
             begin_watching_if_wanted(&app.handle().clone(), &starting);
@@ -2288,6 +2418,17 @@ fn main() {
             recent_scans,
             past_tidies,
             past_cleanups,
+            list_syncs,
+            make_sync,
+            change_sync,
+            add_sync_member,
+            remove_sync_member,
+            remove_sync,
+            preview_sync,
+            run_sync,
+            stop_sync,
+            past_syncs,
+            put_back_sync,
             undo_duplicates,
             watch_state,
             set_watching,

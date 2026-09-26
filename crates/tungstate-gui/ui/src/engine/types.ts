@@ -481,3 +481,187 @@ export const CHOICES = {
     ["replace", "replace: move the existing one aside"],
   ],
 } as const;
+
+// --- syncs ---------------------------------------------------------------
+// Mirrors `crates/tungstate-gui/src/sync.rs`. Counts and reasons cross as data;
+// `lib/syncwords.ts` is where they become words.
+
+export interface SyncMember {
+  name: string;
+  /** `~/CapCut` or `nas:capcut`. */
+  at: string;
+  remote: boolean;
+}
+
+export interface SyncView {
+  name: string;
+  /** `push`, `pull` or `all`. */
+  direction: string;
+  exact: boolean;
+  /** The anchor's member name, for `push` and `pull`. */
+  anchor: string | null;
+  on_conflict: string;
+  on_remove: string;
+  verify: string;
+  cooldown_secs: number;
+  first_check: string;
+  /** `no`, `ask` or `quietly`. */
+  launch: string;
+  members: SyncMember[];
+}
+
+export interface SyncSettingsForm {
+  exact: boolean;
+  on_conflict: string;
+  on_remove: string;
+  verify: string;
+  cooldown_secs: number;
+  first_check: string;
+  launch: string;
+}
+
+export interface NewSyncForm {
+  name: string;
+  ends: string[];
+  names: string[];
+  direction: string;
+  anchor: string | null;
+  settings: SyncSettingsForm;
+}
+
+/** Why a sync could not be made or changed. */
+export type SyncRefused =
+  | { kind: "delete_needs_exact" }
+  | { kind: "replace_has_no_meaning" }
+  | { kind: "unknown"; setting: string; value: string }
+  | { kind: "all_has_no_anchor" }
+  | { kind: "no_such_anchor"; member: string }
+  | { kind: "more_names_than_folders" }
+  | { kind: "too_few" }
+  | { kind: "not_a_folder"; folder: string }
+  | { kind: "bad_end"; folder: string; why: string }
+  | { kind: "same_name"; member: string }
+  | { kind: "overlap"; first: string; second: string }
+  | { kind: "taken"; name: string }
+  | { kind: "other"; why: string };
+
+/** What a person has said about particular paths before a run. */
+export interface SyncAsk {
+  resolve?: { path: string; keep: string | null }[];
+  forget?: string[];
+  only?: boolean;
+}
+
+export interface MemberPreview {
+  name: string;
+  at: string;
+  arriving: number;
+  arriving_bytes: number;
+  leaving: number;
+  replacing: number;
+  removing: number;
+  deleting: number;
+  renaming: number;
+  parking: number;
+  holds: number;
+}
+
+export interface SyncLeg {
+  from: string;
+  to: string;
+  files: number;
+  parked: number;
+  bytes: number;
+  through_here: boolean;
+}
+
+export interface SyncRemoved {
+  member: string;
+  path: string;
+  /** `deleted`, `extra` or `forgotten`. */
+  because: string;
+  /** Deleted outright rather than set aside. */
+  gone: boolean;
+}
+
+export interface SyncConflict {
+  path: string;
+  versions: { member: string; size: number; modified: number | null }[];
+}
+
+export interface SyncLeftAlone {
+  path: string;
+  /** `too_recent`, `only_anchor_sends`, `only_anchor_receives`, `conflict`,
+   *  `case_clash` or `needs_rename`. */
+  why: string;
+  members: string[];
+  existing: string | null;
+}
+
+export type SyncRefusal =
+  | { kind: "hollow"; member: string; held: number }
+  | { kind: "blast"; member: string; taking_off: number; of: number };
+
+export interface SyncPreview {
+  sync: string;
+  fingerprint: string;
+  empty: boolean;
+  reversible: boolean;
+  members: MemberPreview[];
+  legs: SyncLeg[];
+  read: { files: number; sampled: number; no_times: number; moves: number; parked: number };
+  removed: SyncRemoved[];
+  conflicts: SyncConflict[];
+  left_alone: SyncLeftAlone[];
+  refusals: SyncRefusal[];
+}
+
+export interface SyncQueued {
+  started: boolean;
+  waiting: number;
+}
+
+export interface SyncLegEvent {
+  sync: string;
+  index: number;
+  from: string;
+  to: string;
+}
+
+export interface SyncRan {
+  sync: string;
+  plan: number | null;
+  legs: { from: string; to: string; copied: number; bytes: number; failed: number }[];
+  taken_off: number;
+  renamed: number;
+  missed: { member: string; path: string; why: string }[];
+  stopped: boolean;
+  reversible: boolean;
+}
+
+export interface SyncError {
+  sync: string;
+  /** `changed`, `refused` or `failed`. */
+  kind: string;
+  message: string;
+}
+
+export interface PastSync {
+  plan: number;
+  sync: string;
+  applied_at: number;
+  copied: number;
+  taken_off: number;
+  renamed: number;
+  bytes: number;
+  undone: boolean;
+  undoable: boolean;
+}
+
+export interface SyncUndone {
+  plan: number;
+  put_back: number;
+  taken_off: number;
+  parked_left: number;
+  revived: { member: string; path: string }[];
+}

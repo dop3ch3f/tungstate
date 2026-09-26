@@ -109,6 +109,28 @@ not one per sweep (slice 9).
 `cancel_run`, `stop_now`, `list_links`, `create_link`, `run_link`,
 `remove_link`, `preview_link`, `set_at_once`.
 
+**Syncs** — `list_syncs`, `make_sync`, `change_sync`, `add_sync_member`,
+`remove_sync_member`, `remove_sync`, `preview_sync`, `run_sync`, `stop_sync`,
+`past_syncs`, `put_back_sync` (slice 9d). Making and changing one is checked
+by `tungstate_sync::setup`, the same code `sync add` and `sync set` use, and a
+refusal crosses as data (`{ kind: "overlap", first, second }`), never a
+sentence. `preview_sync` returns `SyncPreviewView`: per member, copies
+arriving, copies leaving, versions replaced, files taken off, files deleted,
+renames and parked conflicts, each its own number and never summed; the files
+taken off listed one by one with why; conflicts with each member's version;
+"left alone" with a reason kind per path; and the refusals (`hollow`,
+`blast`) as data. It also carries a `fingerprint`, which `run_sync` must be
+given back: the engine decides again when the run starts and refuses, with
+`sync://error` of kind `changed`, a run that would now do something other
+than what was shown. Conflicts are answered in the preview, before anything
+moves, through `ask.resolve`, and the answers are previewed again so the
+numbers on screen are the run's. A run emits the transfer events under
+`sync://` (`planned`, `started`, `advanced`, `checking`, `finished`), a
+`sync://leg` as each pair of members begins, then `sync://done` with
+`SyncRanView` or `sync://error`. Syncs run one after another, and never
+beside a transfer. `put_back_sync` returns what came back, including the
+members whose deletion was undone too (`revived`).
+
 **Connections** — add, list, update, test, remove, set a password.
 
 **Storage** — `archives`, `reset_storage`, `restore_archive`, `forget_archive`,

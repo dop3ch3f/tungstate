@@ -655,3 +655,97 @@ fn a_leg_checks_copies_the_way_the_sync_says_now() {
 
     assert_eq!(link.verify, VerifyLevel::Readback);
 }
+
+#[test]
+fn a_stopped_run_remembers_nothing_it_did_not_finish() {
+    let journal = Journal::open_in_memory().unwrap();
+    let dirs = folders(2);
+    write(&dirs[0], "a.mp4", b"one");
+    write(&dirs[0], "b.mp4", b"two");
+    make(&journal, &dirs, SyncDirection::All, None);
+    let opened = open(&journal, "capcut", &MemoryStore::new()).unwrap();
+    let decided = decide(&opened, &journal).unwrap();
+    let stop = std::sync::Arc::new(tungstate_transfer::Stop::new());
+    stop.after_this_file();
+
+    let ran = run_until(
+        &opened,
+        &decided,
+        &journal,
+        &mut tungstate_transfer::SilentProgress,
+        None,
+        Some(stop),
+    )
+    .unwrap();
+
+    assert!(ran.stopped);
+    assert!(read(&dirs[1], "a.mp4").is_none());
+    let (again, _) = sync_once(&journal);
+    assert_eq!(
+        again.plan.legs[0].paths.len(),
+        2,
+        "all of it is decided again"
+    );
+    assert_eq!(read(&dirs[1], "b.mp4").as_deref(), Some(&b"two"[..]));
+}
+
+fn setup_of(dirs: &[tempfile::TempDir], direction: SyncDirection) -> setup::Setup {
+    setup::Setup {
+        name: "capcut".into(),
+        ends: dirs
+            .iter()
+            .map(|d| d.path().to_string_lossy().to_string())
+            .collect(),
+        names: vec!["laptop".into(), "nas".into()],
+        direction,
+        anchor: None,
+        settings: setup::settings(false, "quarantine", "set-aside", "hash", 0, "full").unwrap(),
+    }
+}
+
+#[test]
+fn a_sync_is_made_with_its_first_member_as_anchor_and_refused_twice() {
+    let journal = Journal::open_in_memory().unwrap();
+    let dirs = folders(2);
+
+    let made = setup::create(&journal, &setup_of(&dirs, SyncDirection::Push)).unwrap();
+
+    assert_eq!(made.anchor, Some(made.members[0].id));
+    assert_eq!(
+        setup::create(&journal, &setup_of(&dirs, SyncDirection::Push)).unwrap_err(),
+        setup::Refused::Taken("capcut".into())
+    );
+}
+
+#[test]
+fn what_cannot_be_is_refused_as_data() {
+    use setup::Refused;
+    let journal = Journal::open_in_memory().unwrap();
+    let dirs = folders(2);
+
+    assert_eq!(
+        setup::settings(false, "quarantine", "delete", "hash", 0, "full").unwrap_err(),
+        Refused::DeleteNeedsExact
+    );
+    assert_eq!(
+        setup::settings(true, "replace", "delete", "hash", 0, "full").unwrap_err(),
+        Refused::ReplaceHasNoMeaning
+    );
+    let mut all = setup_of(&dirs, SyncDirection::All);
+    all.anchor = Some("laptop".into());
+    assert_eq!(
+        setup::create(&journal, &all).unwrap_err(),
+        Refused::AllHasNoAnchor
+    );
+    let mut inside = setup_of(&dirs, SyncDirection::All);
+    std::fs::create_dir_all(dirs[0].path().join("inside")).unwrap();
+    inside.ends[1] = dirs[0].path().join("inside").to_string_lossy().to_string();
+    assert_eq!(
+        setup::create(&journal, &inside).unwrap_err(),
+        Refused::Overlap("laptop".into(), "nas".into())
+    );
+    let mut one = setup_of(&dirs[..1], SyncDirection::All);
+    one.names.truncate(1);
+    assert_eq!(setup::create(&journal, &one).unwrap_err(), Refused::TooFew);
+    assert!(journal.syncs().unwrap().is_empty(), "nothing half-made");
+}

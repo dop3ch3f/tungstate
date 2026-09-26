@@ -5964,6 +5964,7 @@ dependencies = [
  "tungstate-journal",
  "tungstate-likeness",
  "tungstate-secret",
+ "tungstate-sync",
  "tungstate-transfer",
  "tungstate-watch",
 ]

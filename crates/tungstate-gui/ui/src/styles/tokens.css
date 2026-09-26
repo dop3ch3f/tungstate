@@ -27,6 +27,9 @@
   --raw-blue: #3f74e6;
   --raw-blue-soft: rgba(63, 116, 230, 0.16);
   --raw-slate: #5d6573;
+  /* Sync: teal, between home's blue and duplicates' green, and bluer than
+     the green so the two never read as one. */
+  --raw-teal: #2bb3b1;
   --raw-fluoresce: #7fd4ff;
   --raw-fluoresce-soft: rgba(127, 212, 255, 0.14);
   --raw-fluoresce-ink: #062030;
@@ -77,6 +80,7 @@
   --tint-drain: var(--raw-blue);
   --tint-history: var(--raw-slate);
   --tint-dupes: var(--raw-green);
+  --tint-sync: var(--raw-teal);
   --tint-ink: var(--raw-white);
   --tint-home-ink: var(--raw-fluoresce-ink);
 
@@ -135,6 +139,7 @@
 /* The section you are in colours the main button. */
 [data-half="folder"] { --control: var(--raw-plum); --control-ink: var(--raw-white); }
 [data-half="drain"] { --control: var(--raw-blue); --control-ink: var(--raw-white); }
+[data-half="sync"] { --control: var(--raw-teal); --control-ink: var(--raw-fluoresce-ink); }
 
 /* Themes, chosen by `data-theme` on <html>. Retro ships as the default (see
    main.ts); graphite, the :root values above, and paper are kept for a theme
@@ -165,6 +170,7 @@
   --tint-drain: #2f6bdf;
   --tint-history: #8d8a83;
   --tint-dupes: #2f9e62;
+  --tint-sync: #13918f;
   --accent: #0a8fd1;
   --accent-soft: rgba(10, 143, 209, 0.12);
   --accent-ink: #ffffff;
@@ -176,6 +182,7 @@
 }
 [data-theme="paper"] [data-half="folder"] { --control: #8a4fd6; }
 [data-theme="paper"] [data-half="drain"] { --control: #2f6bdf; }
+[data-theme="paper"] [data-half="sync"] { --control: #13918f; --control-ink: #ffffff; }
 
 /* Retro OS, after PostHog: a cream desktop, windows with title bars, dark
    outlines, chunky buttons with a hard shadow, and three bold primaries. */
@@ -208,6 +215,7 @@
   --hold: #c47d00;
   --tint-history: #4a4d45;
   --tint-dupes: #2f8f4e;
+  --tint-sync: #0f9ba0;
   --ok: #2f8f4e;
   --bad: #d23d1f;
   --radius: 4px;
@@ -225,4 +233,5 @@
 }
 [data-theme="retro"] [data-half="folder"] { --control: #f54e00; --control-ink: #ffffff; }
 [data-theme="retro"] [data-half="drain"] { --control: #1d4aff; --control-ink: #ffffff; }
+[data-theme="retro"] [data-half="sync"] { --control: #0f9ba0; --control-ink: #ffffff; }
 

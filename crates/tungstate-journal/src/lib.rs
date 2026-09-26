@@ -32,11 +32,11 @@ pub use folders::{Folder, FolderId};
 pub use links::{
     ConflictAction, Link, LinkId, NewLink, Order, Removal, SourcePolicy, VerifyLevel, temp_name,
 };
-pub use plans::{AppliedPlan, PastPlan, PlanId, Purpose};
+pub use plans::{AppliedPlan, PastPlan, PastSync, PlanId, Purpose};
 pub use storage::{Archive, ArchiveSummary};
 pub use syncs::{
-    FirstCheck, Member, MemberId, NewMember, NewSync, OnRemove, Reading, Sync, SyncDirection,
-    SyncId, SyncSettings,
+    FirstCheck, Launch, Member, MemberId, NewMember, NewSync, OnRemove, Reading, Sync,
+    SyncDirection, SyncId, SyncSettings,
 };
 
 use std::path::{Path, PathBuf};

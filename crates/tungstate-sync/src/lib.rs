@@ -17,6 +17,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use tungstate_backend::{Backend, RootToken};
@@ -28,8 +29,9 @@ use tungstate_journal::{
     Outcome, PlanId, Purpose, Reading, SourcePolicy, Sync, SyncDirection, ends,
 };
 use tungstate_secret::SecretStore;
-use tungstate_transfer::{FixedResolver, Progress, Summary, Transfer};
+use tungstate_transfer::{FixedResolver, Progress, Stop, Summary, Transfer};
 
+pub mod setup;
 mod undo;
 pub use undo::{Undone, standing, undo};
 
@@ -438,6 +440,9 @@ pub struct Ran {
     pub missed: Vec<Missed>,
     /// Readings remembered.
     pub remembered: usize,
+    /// Stopped when asked, before everything was done. What did not happen
+    /// is decided again next run.
+    pub stopped: bool,
 }
 
 /// Carry a decided run out. Legs run one after another: two legs writing one
@@ -447,13 +452,31 @@ pub struct Ran {
 /// [`SyncError::Leg`] if a leg cannot run at all, or [`SyncError::Vanished`]
 /// if a member's volume changed underneath the run. A file that fails is
 /// reported in [`Ran`] instead, and simply decided again next run.
-#[allow(clippy::too_many_lines)]
 pub fn run(
     opened: &Opened,
     decided: &Decided,
     journal: &Journal,
     progress: &mut dyn Progress,
     parallel: Option<usize>,
+) -> Result<Ran> {
+    run_until(opened, decided, journal, progress, parallel, None)
+}
+
+/// [`run`], stopping when `stop` says so: after the file in hand, or at once.
+///
+/// Beside `run` rather than a new argument on it, whose callers have no one
+/// to press Stop.
+///
+/// # Errors
+/// As [`run`].
+#[allow(clippy::too_many_lines)]
+pub fn run_until(
+    opened: &Opened,
+    decided: &Decided,
+    journal: &Journal,
+    progress: &mut dyn Progress,
+    parallel: Option<usize>,
+    stop: Option<Arc<Stop>>,
 ) -> Result<Ran> {
     let plan = &decided.plan;
     if plan.is_empty() {
@@ -510,6 +533,7 @@ pub fn run(
         failed: BTreeSet::new(),
         blocked: BTreeSet::new(),
         readings: Vec::new(),
+        stop,
     };
 
     // 1. Everything taken off or renamed, member by member, before any copy
@@ -552,6 +576,10 @@ pub fn run(
     // 2. The legs.
     let mut landed = BTreeSet::new();
     for leg in &plan.legs {
+        if runner.stopping() {
+            runner.failed.extend(leg.paths.iter().cloned());
+            continue;
+        }
         let (outcome, arrived) = runner.leg(leg, progress, parallel)?;
         landed.extend(arrived.into_iter().map(|path| (leg.to, path)));
         runner.ran.legs.push(outcome);
@@ -642,9 +670,18 @@ struct Runner<'a> {
     /// what had to happen there first did not.
     blocked: BTreeSet<(i64, String)>,
     readings: Vec<Reading>,
+    stop: Option<Arc<Stop>>,
 }
 
 impl Runner<'_> {
+    /// Whether a person asked the run to stop. Everything not yet done is
+    /// left, not remembered, and decided again next run.
+    fn stopping(&mut self) -> bool {
+        let asked = self.stop.as_ref().is_some_and(|stop| stop.asked());
+        self.ran.stopped |= asked;
+        asked
+    }
+
     /// Stop if a member's volume is not the one the run started on: writing
     /// to whatever is mounted there now is how files end up on the wrong disk.
     fn still_there(&self, place: &Place) -> Result<()> {
@@ -714,6 +751,11 @@ impl Runner<'_> {
     }
 
     fn take_off(&mut self, place: &Place, path: &str, how: &Removal) -> Result<()> {
+        if self.stopping() {
+            self.failed.insert(path.to_string());
+            self.blocked.insert((place.member.id.0, path.to_string()));
+            return Ok(());
+        }
         self.still_there(place)?;
         if let Err(why) = self.unchanged(place, path) {
             self.miss(place, path, why);
@@ -766,6 +808,13 @@ impl Runner<'_> {
     }
 
     fn rename(&mut self, place: &Place, from: &str, to: &str, hash: Option<&String>) -> Result<()> {
+        if self.stopping() {
+            for path in [from, to] {
+                self.failed.insert(path.to_string());
+                self.blocked.insert((place.member.id.0, path.to_string()));
+            }
+            return Ok(());
+        }
         self.still_there(place)?;
         if let Err(why) = self.unchanged(place, from) {
             self.miss(place, from, why);
@@ -865,6 +914,9 @@ impl Runner<'_> {
         .landing(landing);
         if let Some(at_once) = parallel {
             transfer = transfer.parallel(at_once);
+        }
+        if let Some(stop) = &self.stop {
+            transfer = transfer.cancellable(Arc::clone(stop));
         }
         let summary = transfer
             .run_selection(&chosen)

@@ -2228,6 +2228,68 @@ fn a_syncs_settings_change_and_its_members_do_not() {
 }
 
 #[test]
+fn a_sync_can_be_marked_to_run_when_the_window_opens() {
+    use crate::Launch;
+    let journal = Journal::open_in_memory().unwrap();
+    let sync = a_sync(&journal, None);
+    assert_eq!(journal.sync_by_id(sync).unwrap().launch, Launch::No);
+
+    for launch in [Launch::Quietly, Launch::Ask, Launch::No] {
+        journal.set_launch(sync, launch).unwrap();
+        assert_eq!(journal.sync_by_id(sync).unwrap().launch, launch);
+    }
+}
+
+#[test]
+fn a_past_sync_run_counts_copies_removals_and_renames_apart() {
+    let journal = Journal::open_in_memory().unwrap();
+    let plan = journal
+        .begin_plan_for("sync:capcut", "-", None, true, Some(crate::Purpose::Sync))
+        .unwrap();
+    let at = |path: &str| crate::Location::new("/nas", path);
+    for (kind, from, to, size) in [
+        (OpKind::Copy, "a.mp4", "a.mp4", 10),
+        (
+            OpKind::Copy,
+            "b.mp4",
+            ".tungstate-quarantine/b (laptop).mp4",
+            5,
+        ),
+        (OpKind::Rename, "c.mp4", ".tungstate-quarantine/c.mp4", 0),
+        (OpKind::Rename, "d.mp4", "2026/d.mp4", 0),
+    ] {
+        let id = journal
+            .begin(&NewOp {
+                kind,
+                source: Some(at(from)),
+                destination: Some(at(to)),
+                size: Some(size),
+                link: None,
+                link_id: None,
+            })
+            .unwrap();
+        journal.attach_to_plan(id, plan).unwrap();
+        journal
+            .finish(id, &Outcome::Committed { hash: None })
+            .unwrap();
+    }
+
+    let past = journal.past_syncs(10).unwrap();
+
+    assert_eq!(past.len(), 1);
+    assert_eq!(past[0].sync, "capcut");
+    assert_eq!(
+        (
+            past[0].copied,
+            past[0].taken_off,
+            past[0].renamed,
+            past[0].bytes
+        ),
+        (1, 1, 1, 15)
+    );
+}
+
+#[test]
 fn a_runs_readings_come_back_in_the_order_they_were_written() {
     let journal = Journal::open_in_memory().unwrap();
     let sync = a_sync(&journal, None);

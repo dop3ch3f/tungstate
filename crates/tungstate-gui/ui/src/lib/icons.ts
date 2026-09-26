@@ -3,7 +3,7 @@
 // Drawn rather than an icon font: three shapes do not justify a dependency,
 // and a path takes the colour of whatever it sits in.
 
-export type Section = "home" | "folder" | "drain" | "dupes" | "history" | "settings";
+export type Section = "home" | "folder" | "drain" | "sync" | "dupes" | "history" | "settings";
 
 export const ICON: Record<Section, string> = {
   home: "M2.5 7.5L8 3l5.5 4.5M4 6.5V13h8V6.5",
@@ -12,4 +12,6 @@ export const ICON: Record<Section, string> = {
   history: "M8 2a6 6 0 1 0 0 12A6 6 0 0 0 8 2zM8 4.5V8l2.5 1.5",
   settings: "M2.5 4.5h11M2.5 8h11M2.5 11.5h11M5.5 3v3M10.5 6.5v3M7 10v3",
   dupes: "M2.5 2.5h8v8h-8zM5.5 5.5h8v8h-8z",
+  // Two arrows chasing each other round: things going both ways.
+  sync: "M3 7a5 5 0 0 1 9-2.5M13 9a5 5 0 0 1-9 2.5M12.5 2v3h-3M3.5 14v-3h3",
 };
