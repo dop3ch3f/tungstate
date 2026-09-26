@@ -918,6 +918,25 @@ mod following {
     }
 
     #[test]
+    fn reading_a_file_is_not_a_change_but_writing_one_is() {
+        // Found on Linux CI: inotify reports opens, so a run reading its own
+        // sources started the next run, and that one the next.
+        use notify::EventKind;
+        use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, ModifyKind};
+        assert!(!follow::changes(EventKind::Access(AccessKind::Open(
+            AccessMode::Any
+        ))));
+        assert!(!follow::changes(EventKind::Access(AccessKind::Close(
+            AccessMode::Read
+        ))));
+        assert!(follow::changes(EventKind::Create(CreateKind::File)));
+        assert!(follow::changes(EventKind::Modify(ModifyKind::Data(
+            DataChange::Any
+        ))));
+        assert!(follow::changes(EventKind::Any));
+    }
+
+    #[test]
     fn a_saved_file_arrives_with_nothing_pressed_and_its_own_copy_starts_nothing() {
         let journal = Arc::new(Journal::open_in_memory().unwrap());
         let dirs = folders(2);

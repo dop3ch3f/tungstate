@@ -170,6 +170,12 @@ before, and the share was unmounted again.
 - **By reading, in the 9d code:** the guard that frees the queue if a run
   panics also freed it on a normal exit, after the next worker might already
   have claimed it. It is now disarmed on a normal exit.
+- **By Linux CI: a run started the next run.** On Linux the watcher also
+  reports a file being opened, so a run reading its own sources was heard as
+  a change, and each run caused another. macOS does not report reads, so it
+  never showed here. Events that are only reads are now ignored; a save
+  always comes with a create or a modify too. There is a test for it on every
+  platform.
 - **A test that raced the clock.** The first "still being written" test
   counted runs, and under the load of the whole workspace testing at once its
   opening run sometimes started after the file had already settled: the file
@@ -180,7 +186,8 @@ before, and the share was unmounted again.
 
 ## 10. What is checked
 
-- **9 in `tungstate-sync`** for following:
+- **10 in `tungstate-sync`** for following:
+  - a read not counting as a change;
   - the pace, to the minute;
   - an unreachable member said once, and its retries;
   - what a run writes being expected back;

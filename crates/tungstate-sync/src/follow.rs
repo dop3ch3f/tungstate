@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use notify::RecursiveMode;
+use notify::{EventKind, RecursiveMode};
 use notify_debouncer_full::new_debouncer;
 use tungstate_core::sync::{Removal, SyncOp, SyncPlan, is_partial};
 use tungstate_watch::{Echoes, Schedule, is_ours, root_of, spellings};
@@ -439,16 +439,19 @@ pub fn follow(
         }
         if let Ok(result) = events.recv_timeout(wait) {
             let now = Instant::now();
-            let paths: Vec<PathBuf> = match result {
-                Ok(batch) => batch.into_iter().flat_map(|e| e.event.paths).collect(),
+            let paths: Vec<PathBuf> = if let Ok(batch) = result {
+                batch
+                    .into_iter()
+                    .filter(|e| changes(e.event.kind))
+                    .flat_map(|e| e.event.paths)
+                    .collect()
+            } else {
                 // The watcher lost track: everything is worth a look.
-                Err(_) => Vec::new(),
-            };
-            if paths.is_empty() {
                 for sync in &followed {
                     schedule.stirred(&sync.sync, now, sync.cooldown);
                 }
-            }
+                Vec::new()
+            };
             for path in paths {
                 let Some(root) = root_of(&path, &roots) else {
                     continue;
@@ -548,6 +551,13 @@ pub fn follow(
     }
     drop(debouncer);
     Ok(())
+}
+
+/// Whether an event may mean a file changed. On Linux a run's own reads of
+/// its sources arrive as `Access`, and would start the next run; a save
+/// always comes with a create or modify as well.
+pub(crate) fn changes(kind: EventKind) -> bool {
+    !matches!(kind, EventKind::Access(_))
 }
 
 /// Whether a decided run left a file alone for still being written, so it
