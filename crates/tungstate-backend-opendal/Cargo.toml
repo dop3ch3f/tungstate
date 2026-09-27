@@ -7,11 +7,12 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["ftp"]
+default = ["ftp", "s3"]
 # FTP is on by default because a release binary has to be able to reach a NAS.
 # It stays a feature so a smaller build is possible, and so `SchemeNotCompiled`
-# means something rather than being a placeholder.
+# means something rather than being a placeholder. S3 is the same bargain.
 ftp = ["opendal/services-ftp"]
+s3 = ["opendal/services-s3", "dep:opendal-http-transport-reqwest", "dep:reqwest", "dep:rustls"]
 
 [dependencies]
 tungstate-backend = { path = "../tungstate-backend" }
@@ -22,6 +23,12 @@ opendal = { workspace = true }
 # extension trait. One RETR per file instead of one per megabyte.
 futures-util = { version = "0.3", default-features = false, features = ["std"] }
 tokio = { workspace = true }
+# S3 speaks HTTPS through rustls, with `ring` doing the cryptography: already
+# in the build through Tauri, where rustls's own default would add a C library
+# every release runner has to build.
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"], optional = true }
+reqwest = { version = "0.13", default-features = false, features = ["rustls-no-provider"], optional = true }
+opendal-http-transport-reqwest = { version = "0.59", default-features = false, features = ["rustls-no-provider"], optional = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 

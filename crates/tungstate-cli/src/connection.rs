@@ -4,10 +4,77 @@ use std::collections::BTreeMap;
 use std::process::ExitCode;
 
 use clap::Subcommand;
-use tungstate_journal::{ConnectionSettings, Journal, NewConnection, Scheme};
+use tungstate_journal::{ConnectionSettings, Journal, NewConnection, Scheme, option, share_of};
 use tungstate_secret::{SecretStore, connection_key};
 
 use crate::fail;
+
+/// Settings only some schemes read. Each becomes an option or part of the
+/// root, so the journal needs no new columns for them.
+#[derive(clap::Args, Default)]
+pub struct KindFlags {
+    /// S3: the bucket every path lives in.
+    #[arg(long)]
+    bucket: Option<String>,
+    /// S3: the bucket's region. Needed for AWS unless the bucket is in
+    /// us-east-1; other services are asked, and most accept any.
+    #[arg(long)]
+    region: Option<String>,
+    /// S3: the service's address, for anything that is not AWS itself, as in
+    /// `https://s3.eu-central-003.backblazeb2.com` or `http://nas.local:9000`.
+    #[arg(long)]
+    endpoint: Option<String>,
+    /// SMB: the share, which the root then continues inside. `--share media
+    /// --root backups` is the same as `--root media/backups`.
+    #[arg(long)]
+    share: Option<String>,
+}
+
+impl KindFlags {
+    /// Fold these into options and a root. `stored` says the root came from
+    /// the saved connection, so it already starts with a share to replace;
+    /// a root typed alongside `--share` is the folder inside it.
+    fn apply(&self, options: &mut BTreeMap<String, String>, root: &mut String, stored: bool) {
+        for (key, value) in [
+            (option::BUCKET, &self.bucket),
+            (option::REGION, &self.region),
+            (option::ENDPOINT, &self.endpoint),
+        ] {
+            if let Some(value) = value {
+                options.insert(key.to_string(), value.clone());
+            }
+        }
+        if let Some(share) = &self.share {
+            *root = if stored {
+                let inside = share_of(root).map_or("", |current| {
+                    root.trim_start_matches(['/', '\\'])[current.len()..]
+                        .trim_start_matches(['/', '\\'])
+                });
+                with_share(share, inside)
+            } else {
+                with_share(share, root)
+            };
+        }
+    }
+}
+
+/// `share` followed by `root`, the folder inside it. A root that already
+/// begins with that share is left as it is, so saying it twice is harmless.
+fn with_share(share: &str, root: &str) -> String {
+    let share = share.trim_matches(['/', '\\']);
+    let rest = match share_of(root) {
+        // Already begins with this share: keep the folder part as it is.
+        Some(current) if current == share => {
+            return root.trim_start_matches(['/', '\\']).to_string();
+        }
+        _ => root.trim_start_matches(['/', '\\']),
+    };
+    if rest.is_empty() {
+        share.to_string()
+    } else {
+        format!("{share}/{rest}")
+    }
+}
 
 #[derive(Subcommand)]
 pub enum ConnectionAction {
@@ -15,7 +82,8 @@ pub enum ConnectionAction {
     Add {
         /// What this connection is called on the command line.
         name: String,
-        /// Which protocol it speaks.
+        /// Which protocol it speaks: fs (a folder this machine can reach),
+        /// smb, ftps, ftp or s3.
         #[arg(long)]
         scheme: String,
         /// Hostname, for the schemes that have one.
@@ -24,7 +92,7 @@ pub enum ConnectionAction {
         /// Port, where it differs from the protocol default.
         #[arg(long)]
         port: Option<u16>,
-        /// Who to connect as.
+        /// Who to connect as. For S3, the access key id.
         #[arg(long = "user")]
         username: Option<String>,
         /// Absolute path on the far side that every link path is relative to.
@@ -32,13 +100,19 @@ pub enum ConnectionAction {
         /// For a remote this is a path on the server, not on this machine, and
         /// it is often not the same as the directory you land in when you log
         /// in: many servers put you in `/home/you` while `/` is the whole
-        /// disk. `connection test` prints what it found there, so check it.
+        /// disk. For SMB it starts with the share; for S3 it is a folder
+        /// inside the bucket. `connection test` prints what it found there,
+        /// so check it.
         #[arg(long, default_value = "")]
         root: String,
-        /// Per-scheme extra, as `key=value`. Repeatable.
+        #[command(flatten)]
+        kind: KindFlags,
+        /// Per-scheme extra, as `key=value`. Repeatable. SMB reads
+        /// `encryption=required`, to refuse a server that will not encrypt.
         #[arg(long = "option", value_name = "KEY=VALUE")]
         options: Vec<String>,
-        /// Read the password from stdin rather than prompting, for scripts.
+        /// Read the password, or S3 secret key, from stdin rather than
+        /// prompting, for scripts.
         #[arg(long)]
         secret_stdin: bool,
     },
@@ -59,12 +133,14 @@ pub enum ConnectionAction {
         /// Port, where it differs from the protocol default.
         #[arg(long)]
         port: Option<u16>,
-        /// Who to connect as.
+        /// Who to connect as. For S3, the access key id.
         #[arg(long = "user")]
         username: Option<String>,
         /// Absolute path on the far side that every link path is relative to.
         #[arg(long)]
         root: Option<String>,
+        #[command(flatten)]
+        kind: KindFlags,
         /// Set one per-scheme extra, as `key=value`. Repeatable.
         #[arg(long = "option", value_name = "KEY=VALUE")]
         options: Vec<String>,
@@ -105,6 +181,7 @@ pub fn run(action: ConnectionAction, journal: &Journal, secrets: &dyn SecretStor
             port,
             username,
             root,
+            kind,
             options,
             secret_stdin,
         } => add(
@@ -117,6 +194,7 @@ pub fn run(action: ConnectionAction, journal: &Journal, secrets: &dyn SecretStor
                 port,
                 username,
                 root,
+                kind,
                 options,
                 secret_stdin,
             },
@@ -128,6 +206,7 @@ pub fn run(action: ConnectionAction, journal: &Journal, secrets: &dyn SecretStor
             port,
             username,
             root,
+            kind,
             options,
         } => update(
             journal,
@@ -138,6 +217,7 @@ pub fn run(action: ConnectionAction, journal: &Journal, secrets: &dyn SecretStor
                 port,
                 username,
                 root,
+                kind,
                 options,
             },
         ),
@@ -159,13 +239,14 @@ struct AddArgs {
     port: Option<u16>,
     username: Option<String>,
     root: String,
+    kind: KindFlags,
     options: Vec<String>,
     secret_stdin: bool,
 }
 
 fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode {
     let Some(scheme) = Scheme::parse(&args.scheme) else {
-        eprintln!("error: --scheme must be fs, ftp or ftps");
+        eprintln!("error: --scheme must be {}", schemes());
         return ExitCode::from(2);
     };
 
@@ -177,22 +258,32 @@ fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode
         };
         parsed.insert(key.to_string(), value.to_string());
     }
+    let mut root = args.root.clone();
+    args.kind.apply(&mut parsed, &mut root, false);
+    let settings = ConnectionSettings {
+        scheme,
+        host: args.host.clone(),
+        port: args.port,
+        username: args.username.clone(),
+        root,
+        options: parsed,
+    };
+    // Refused before the password prompt, so nobody types a secret into a
+    // connection that was never going to work.
+    if refused(&settings) {
+        return ExitCode::from(2);
+    }
 
     // Said before the password prompt, so the user can still change their mind
     // about sending it in the clear.
-    if !scheme.is_encrypted() {
-        eprintln!(
-            "warning: `{}` sends your password and your files across the network \
-             unencrypted.\n  \
-             If the server offers it, use --scheme ftps instead.",
-            scheme.as_str()
-        );
+    if let Some(warning) = settings.in_the_clear() {
+        eprintln!("warning: this connection {warning}");
     }
 
     // Read the password before writing the row. Storing a connection whose
     // password prompt was then cancelled would leave something half-made.
     let secret = if scheme.authenticates() {
-        match read_secret(&args.name, args.secret_stdin) {
+        match read_secret(&args.name, scheme, args.secret_stdin) {
             Ok(secret) => secret,
             Err(error) => {
                 eprintln!("error: could not read a password: {error}");
@@ -206,11 +297,11 @@ fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode
     let created = journal.create_connection(&NewConnection {
         name: args.name.clone(),
         scheme,
-        host: args.host.clone(),
-        port: args.port,
-        username: args.username.clone(),
-        root: args.root.clone(),
-        options: parsed,
+        host: settings.host.clone(),
+        port: settings.port,
+        username: settings.username.clone(),
+        root: settings.root.clone(),
+        options: settings.options.clone(),
     });
     if let Err(error) = created {
         return fail(&error);
@@ -229,7 +320,7 @@ fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode
     }
 
     println!("added connection `{}`", args.name);
-    if let Some(warning) = scheme.rootless_warning(&args.root) {
+    if let Some(warning) = scheme.rootless_warning(&settings.root) {
         println!("note: {warning}");
     }
     println!("check it with: tungstate connection test {}", args.name);
@@ -244,6 +335,7 @@ struct UpdateArgs {
     port: Option<u16>,
     username: Option<String>,
     root: Option<String>,
+    kind: KindFlags,
     options: Vec<String>,
 }
 
@@ -263,7 +355,7 @@ fn update(journal: &Journal, args: &UpdateArgs) -> ExitCode {
         None => current.scheme,
         Some(Some(scheme)) => scheme,
         Some(None) => {
-            eprintln!("error: --scheme must be fs, ftp or ftps");
+            eprintln!("error: --scheme must be {}", schemes());
             return ExitCode::from(2);
         }
     };
@@ -280,14 +372,20 @@ fn update(journal: &Journal, args: &UpdateArgs) -> ExitCode {
         options.insert(key.to_string(), value.to_string());
     }
 
+    let stored = args.root.is_none();
+    let mut root = args.root.clone().unwrap_or(current.root);
+    args.kind.apply(&mut options, &mut root, stored);
     let settings = ConnectionSettings {
         scheme,
         host: args.host.clone().or(current.host),
         port: args.port.or(current.port),
         username: args.username.clone().or(current.username),
-        root: args.root.clone().unwrap_or(current.root),
+        root,
         options,
     };
+    if refused(&settings) {
+        return ExitCode::from(2);
+    }
 
     if let Err(error) = journal.update_connection(&args.name, &settings) {
         return fail(&error);
@@ -300,11 +398,8 @@ fn update(journal: &Journal, args: &UpdateArgs) -> ExitCode {
 
     // Two notes, both about a scheme change, because that is the edit whose
     // consequences are not on the screen. Neither is an error.
-    if !scheme.is_encrypted() {
-        eprintln!(
-            "warning: `{}` sends your password and your files across the network unencrypted.",
-            scheme.as_str()
-        );
+    if let Some(warning) = settings.in_the_clear() {
+        eprintln!("warning: this connection {warning}");
     }
     if scheme.authenticates() && !current.scheme.authenticates() {
         println!(
@@ -340,7 +435,7 @@ fn password(
         return ExitCode::from(2);
     }
 
-    let typed = match read_secret(name, from_stdin) {
+    let typed = match read_secret(name, connection.scheme, from_stdin) {
         Ok(secret) => secret,
         Err(error) => {
             eprintln!("error: could not read a password: {error}");
@@ -369,9 +464,16 @@ fn list(journal: &Journal) -> ExitCode {
         }
         Ok(connections) => {
             for connection in &connections {
-                let where_to = match (&connection.host, connection.port) {
-                    (Some(host), Some(port)) => format!("{host}:{port}"),
-                    (Some(host), None) => host.clone(),
+                let bucket = connection.options.get(option::BUCKET);
+                let where_to = match (&connection.host, connection.port, bucket) {
+                    (_, _, Some(bucket)) if connection.scheme == Scheme::S3 => {
+                        match connection.options.get(option::ENDPOINT) {
+                            Some(endpoint) => format!("bucket {bucket} at {endpoint}"),
+                            None => format!("bucket {bucket}"),
+                        }
+                    }
+                    (Some(host), Some(port), _) => format!("{host}:{port}"),
+                    (Some(host), None, _) => host.clone(),
                     _ => "this machine".to_string(),
                 };
                 let as_who = connection
@@ -382,7 +484,10 @@ fn list(journal: &Journal) -> ExitCode {
                 // Named on every line, not just when adding. "Which of my
                 // connections is still sending passwords in the clear?" should
                 // be answerable by looking.
-                let wire = if connection.scheme.is_encrypted() {
+                let wire = if ConnectionSettings::from(connection)
+                    .in_the_clear()
+                    .is_none()
+                {
                     ""
                 } else {
                     "  [UNENCRYPTED]"
@@ -457,16 +562,24 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
                         println!(
                             "  set the root to a directory this account can write to:\n    \
                              tungstate connection update {name} --root /<folder>\n  \
-                             and make the link's path relative to it. The root has to accept\n  \
-                             files even when nothing is meant to land there, because the FTP\n  \
-                             library writes each temporary file at the root before moving it."
+                             and make the link's path relative to it."
                         );
+                        if matches!(connection.scheme, Scheme::Ftp | Scheme::Ftps) {
+                            println!(
+                                "  The root has to accept files even when nothing is meant to\n  \
+                                 land there, because the FTP library writes each temporary file\n  \
+                                 at the root before moving it."
+                            );
+                        }
                         return ExitCode::FAILURE;
                     }
                     Err(error) => return fail(&error),
                 }
             }
-            if !connection.scheme.is_encrypted() {
+            if ConnectionSettings::from(&connection)
+                .in_the_clear()
+                .is_some()
+            {
                 println!("  (this connection is not encrypted)");
             }
             ExitCode::SUCCESS
@@ -486,6 +599,22 @@ fn remove(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode 
     }
     println!("removed connection `{name}`");
     ExitCode::SUCCESS
+}
+
+/// Every scheme's spelling, for an error that has to list them.
+fn schemes() -> String {
+    let names: Vec<&str> = Scheme::ALL.iter().map(|scheme| scheme.as_str()).collect();
+    names.join(", ")
+}
+
+/// Print why these settings will not work, if they will not. `true` when
+/// something was printed and the command should stop.
+fn refused(settings: &ConnectionSettings) -> bool {
+    let problems = settings.problems();
+    for problem in &problems {
+        eprintln!("error: {problem}");
+    }
+    !problems.is_empty()
 }
 
 /// Apply a typed answer to the store.
@@ -511,14 +640,19 @@ fn store_password(
 ///
 /// An argument would land in shell history and be visible in `ps` to every
 /// other user on the machine, which is why there is no `--password` flag.
-fn read_secret(name: &str, from_stdin: bool) -> std::io::Result<Option<String>> {
+fn read_secret(name: &str, scheme: Scheme, from_stdin: bool) -> std::io::Result<Option<String>> {
     if from_stdin {
         let mut line = String::new();
         std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line)?;
         let trimmed = line.trim_end_matches(['\r', '\n']);
         return Ok((!trimmed.is_empty()).then(|| trimmed.to_string()));
     }
-    let typed = rpassword::prompt_password(format!("password for {name} (blank for none): "))?;
+    let what = if scheme == Scheme::S3 {
+        "secret key"
+    } else {
+        "password"
+    };
+    let typed = rpassword::prompt_password(format!("{what} for {name} (blank for none): "))?;
     Ok((!typed.is_empty()).then_some(typed))
 }
 
@@ -544,6 +678,16 @@ mod tests {
             Some("second"),
             "the recovery path: a mistyped password must be correctable"
         );
+    }
+
+    #[test]
+    fn a_share_and_a_root_make_one_path_whichever_way_they_are_given() {
+        assert_eq!(with_share("media", ""), "media");
+        assert_eq!(with_share("media", "backups"), "media/backups");
+        assert_eq!(with_share("/media/", "/backups/2026"), "media/backups/2026");
+        // Given twice, it is not doubled.
+        assert_eq!(with_share("media", "media/backups"), "media/backups");
+        assert_eq!(with_share("media", "media\\backups"), "media\\backups");
     }
 
     #[test]

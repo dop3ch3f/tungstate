@@ -160,7 +160,147 @@ fn connection_update_refuses_a_name_and_a_scheme_it_does_not_know() {
         .args(["connection", "update", "nas", "--scheme", "telepathy"])
         .assert()
         .code(2)
-        .stderr(predicates::str::contains("must be fs, ftp or ftps"));
+        .stderr(predicates::str::contains("must be fs, smb, ftps, ftp, s3"));
+}
+
+#[test]
+fn connection_help_is_stable() {
+    for args in [
+        vec!["connection", "add", "--help"],
+        vec!["connection", "update", "--help"],
+    ] {
+        let output = tungstate().args(&args).output().expect("help should run");
+        let help = String::from_utf8(output.stdout).expect("utf-8");
+        insta::assert_snapshot!(args.join("_"), help);
+    }
+}
+
+#[test]
+fn a_connection_missing_what_its_kind_needs_is_refused_before_any_password() {
+    let home = sandbox();
+    // No stdin is given: reaching the prompt would fail differently.
+    sandboxed(&home)
+        .args([
+            "connection",
+            "add",
+            "photos",
+            "--scheme",
+            "s3",
+            "--user",
+            "AKIA",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("S3 needs a bucket"));
+    sandboxed(&home)
+        .args([
+            "connection",
+            "add",
+            "nas",
+            "--scheme",
+            "smb",
+            "--host",
+            "nas.local",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("start with the share's name"));
+    sandboxed(&home)
+        .args([
+            "connection",
+            "add",
+            "nas",
+            "--scheme",
+            "smb",
+            "--root",
+            "media",
+        ])
+        .assert()
+        .code(2)
+        .stderr(predicates::str::contains("the server's name or address"));
+    sandboxed(&home)
+        .args(["connection", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("no connections configured"));
+}
+
+#[test]
+fn an_s3_and_an_smb_connection_are_recorded_with_their_own_settings() {
+    let home = sandbox();
+    sandboxed(&home)
+        .args([
+            "connection",
+            "add",
+            "photos",
+            "--scheme",
+            "s3",
+            "--user",
+            "AKIA",
+        ])
+        .args([
+            "--bucket",
+            "family",
+            "--endpoint",
+            "http://nas.local:9000",
+            "--root",
+            "2026",
+        ])
+        .arg("--secret-stdin")
+        .write_stdin("secret\n")
+        .assert()
+        .success()
+        .stderr(predicates::str::contains("plain http"));
+    sandboxed(&home)
+        .args([
+            "connection",
+            "add",
+            "nas",
+            "--scheme",
+            "smb",
+            "--host",
+            "nas.local",
+        ])
+        .args(["--user", "me", "--share", "media", "--root", "backups"])
+        .arg("--secret-stdin")
+        .write_stdin("s3cret\n")
+        .assert()
+        .success()
+        .stderr(predicates::str::contains(
+            "unless the server turns on SMB encryption",
+        ));
+
+    sandboxed(&home)
+        .args(["connection", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "photos  s3 bucket family at http://nas.local:9000 as AKIA  root=2026  [UNENCRYPTED]",
+        ))
+        .stdout(predicates::str::contains(
+            "nas  smb nas.local as me  root=media/backups  [UNENCRYPTED]",
+        ));
+
+    // Insisting on encryption is what takes the warning away.
+    sandboxed(&home)
+        .args([
+            "connection",
+            "update",
+            "nas",
+            "--option",
+            "encryption=required",
+            "--share",
+            "video",
+        ])
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["connection", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "nas  smb nas.local as me  root=video/backups\n",
+        ));
 }
 
 #[test]

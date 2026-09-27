@@ -35,11 +35,34 @@ pub enum Scheme {
     /// which one a connection uses has to be visible at a glance in
     /// `connection list`, not buried in an options blob.
     Ftps,
+    /// Anything that speaks the S3 API: AWS, Backblaze B2, Cloudflare R2,
+    /// `MinIO`, a NAS's own object store. The bucket, region and endpoint are
+    /// options; the access key id is the username and the secret key is the
+    /// password.
+    S3,
+    /// Windows file sharing, reached directly rather than through a mount.
+    /// The server is the host, and the root is the share followed by the
+    /// folder inside it.
+    Smb,
 }
 
 // The same spellings serve the database and the CLI, so a stored value is
-// always a value the user could have typed.
-string_enum!(Scheme { Fs => "fs", Ftp => "ftp", Ftps => "ftps" });
+// always a value the user could have typed. New values are new strings, so a
+// journal written before them reads exactly as it did.
+string_enum!(Scheme { Fs => "fs", Ftp => "ftp", Ftps => "ftps", S3 => "s3", Smb => "smb" });
+
+/// Keys in a connection's options that some scheme reads.
+pub mod option {
+    /// S3: the bucket every path lives in. Required.
+    pub const BUCKET: &str = "bucket";
+    /// S3: the bucket's region. Found by asking AWS when not given.
+    pub const REGION: &str = "region";
+    /// S3: where the service is, for anything that is not AWS itself.
+    pub const ENDPOINT: &str = "endpoint";
+    /// SMB: `required` to refuse a server that will not encrypt. Left to the
+    /// server otherwise, which is what Finder and Windows do.
+    pub const ENCRYPTION: &str = "encryption";
+}
 
 impl Scheme {
     /// Whether this scheme has a password worth keeping in the keychain.
@@ -47,17 +70,21 @@ impl Scheme {
     pub fn authenticates(self) -> bool {
         match self {
             Self::Fs => false,
-            Self::Ftp | Self::Ftps => true,
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb => true,
         }
     }
 
-    /// Whether credentials and content are encrypted in transit.
+    /// Whether credentials and content are encrypted in transit, by the
+    /// scheme alone. A connection can say otherwise either way; ask
+    /// [`ConnectionSettings::in_the_clear`] about a real one.
     #[must_use]
     pub fn is_encrypted(self) -> bool {
         match self {
             // Local, so nothing crosses a wire in the first place.
-            Self::Fs | Self::Ftps => true,
-            Self::Ftp => false,
+            Self::Fs | Self::Ftps | Self::S3 => true,
+            // SMB leaves encrypting the contents to the server unless told
+            // to insist, so it is not encrypted until a connection says so.
+            Self::Ftp | Self::Smb => false,
         }
     }
 
@@ -71,8 +98,9 @@ impl Scheme {
     #[must_use]
     pub fn can_rename(self) -> bool {
         match self {
-            Self::Fs => true,
-            Self::Ftp | Self::Ftps => false,
+            Self::Fs | Self::Smb => true,
+            // An object store has no rename at all: a new name is a copy.
+            Self::Ftp | Self::Ftps | Self::S3 => false,
         }
     }
 
@@ -86,7 +114,9 @@ impl Scheme {
             // Not a checksum, but reading the file back is free and local, so
             // `hash` is not misleading the way it is over a network.
             Self::Fs => true,
-            Self::Ftp | Self::Ftps => false,
+            // An S3 ETag is an MD5 only for single-part uploads, so it cannot
+            // be trusted as a checksum of what landed.
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb => false,
         }
     }
 
@@ -99,7 +129,11 @@ impl Scheme {
     /// wrong moment to learn it. `None` when there is nothing to warn about.
     #[must_use]
     pub fn rootless_warning(self, root: &str) -> Option<&'static str> {
-        (self.is_networked() && root.trim().is_empty()).then_some(concat!(
+        // An S3 root is a prefix inside a bucket and SMB's starts with the
+        // share, which `ConnectionSettings::problems` insists on; neither has
+        // a server-wide `/` to land in.
+        let has_server_root = matches!(self, Self::Ftp | Self::Ftps);
+        (has_server_root && root.trim().is_empty()).then_some(concat!(
             "no root was given, so paths are taken from the server's own `/`.\n",
             "      That is rarely where the account can write, and you would find out at\n",
             "      the first file. If your login lands in a folder, set that as the root.\n",
@@ -115,7 +149,7 @@ impl Scheme {
     pub fn is_networked(self) -> bool {
         match self {
             Self::Fs => false,
-            Self::Ftp | Self::Ftps => true,
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb => true,
         }
     }
 
@@ -123,13 +157,19 @@ impl Scheme {
     #[must_use]
     pub fn default_port(self) -> Option<u16> {
         match self {
-            Self::Fs => None,
+            // A folder has no port, and an S3 endpoint is a URL that carries
+            // its own.
+            Self::Fs | Self::S3 => None,
             // Explicit FTPS (`AUTH TLS`) upgrades an ordinary control
             // connection, so it uses 21 too. Implicit FTPS on 990 is legacy
             // and servers that need it can be given `--port 990`.
             Self::Ftp | Self::Ftps => Some(21),
+            Self::Smb => Some(445),
         }
     }
+
+    /// Every scheme, in the order a person choosing one should see them.
+    pub const ALL: [Self; 5] = [Self::Fs, Self::Smb, Self::Ftps, Self::Ftp, Self::S3];
 }
 
 /// A scheme spelling this build does not know, which means a newer tungstate
@@ -214,6 +254,155 @@ impl From<&Connection> for ConnectionSettings {
             options: connection.options.clone(),
         }
     }
+}
+
+/// Something in a connection's settings that would stop it working, found
+/// before it is saved rather than at the first file.
+///
+/// Data rather than a sentence, so the command line and the window refuse the
+/// same things and each can say it in its own place.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum SettingsProblem {
+    /// A folder on this machine with no path.
+    #[error("a folder on this machine needs its path as the root")]
+    NeedsRoot,
+    /// A networked scheme with nowhere to connect to.
+    #[error("this needs the server's name or address as the host")]
+    NeedsHost,
+    /// S3 with no bucket.
+    #[error("S3 needs a bucket")]
+    NeedsBucket,
+    /// SMB with no share at the start of the root.
+    #[error("the root has to start with the share's name, as in media/backups")]
+    NeedsShare,
+    /// An S3 endpoint that is not a web address.
+    #[error("the endpoint has to start with https:// or http://, and `{0}` does not")]
+    BadEndpoint(String),
+    /// A value outside the ones an option accepts.
+    #[error("`{value}` is not a choice for {key}; use {expected}")]
+    BadValue {
+        /// The option.
+        key: &'static str,
+        /// What was given.
+        value: String,
+        /// What would have been accepted, as words.
+        expected: &'static str,
+    },
+    /// An option some other scheme reads, which this one would ignore.
+    #[error("{0} means nothing to this kind of connection")]
+    UnusedOption(&'static str),
+}
+
+impl ConnectionSettings {
+    /// Everything that would stop these settings working. Empty means they
+    /// are worth saving and testing.
+    #[must_use]
+    pub fn problems(&self) -> Vec<SettingsProblem> {
+        let mut found = Vec::new();
+        let given = |key: &str| {
+            self.options
+                .get(key)
+                .map(|value| value.trim())
+                .filter(|value| !value.is_empty())
+        };
+        let host = self
+            .host
+            .as_deref()
+            .is_some_and(|host| !host.trim().is_empty());
+
+        match self.scheme {
+            Scheme::Fs if self.root.trim().is_empty() => found.push(SettingsProblem::NeedsRoot),
+            Scheme::Ftp | Scheme::Ftps | Scheme::Smb if !host => {
+                found.push(SettingsProblem::NeedsHost);
+            }
+            _ => {}
+        }
+        if self.scheme == Scheme::Smb && share_of(&self.root).is_none() {
+            found.push(SettingsProblem::NeedsShare);
+        }
+        if self.scheme == Scheme::S3 {
+            if given(option::BUCKET).is_none() {
+                found.push(SettingsProblem::NeedsBucket);
+            }
+            if let Some(endpoint) = given(option::ENDPOINT) {
+                let lower = endpoint.to_ascii_lowercase();
+                if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+                    found.push(SettingsProblem::BadEndpoint(endpoint.to_string()));
+                }
+            }
+        }
+        if let Some(value) = given(option::ENCRYPTION)
+            && self.scheme == Scheme::Smb
+            && value != "required"
+        {
+            found.push(SettingsProblem::BadValue {
+                key: option::ENCRYPTION,
+                value: value.to_string(),
+                expected: "required, or leave it out",
+            });
+        }
+
+        // Only the keys some scheme reads. An unknown key may be a newer
+        // build's, and refusing it would stop an older one saving anything.
+        let reads = |key: &str| match key {
+            option::BUCKET | option::REGION | option::ENDPOINT => self.scheme == Scheme::S3,
+            option::ENCRYPTION => self.scheme == Scheme::Smb,
+            _ => true,
+        };
+        for key in [
+            option::BUCKET,
+            option::REGION,
+            option::ENDPOINT,
+            option::ENCRYPTION,
+        ] {
+            if given(key).is_some() && !reads(key) {
+                found.push(SettingsProblem::UnusedOption(key));
+            }
+        }
+        found
+    }
+
+    /// What crosses the network unencrypted with these settings, as advice,
+    /// or `None` when nothing does.
+    ///
+    /// The scheme alone cannot say: S3 is encrypted unless its endpoint is
+    /// plain `http://`, and SMB only when the server or the connection
+    /// insists.
+    #[must_use]
+    pub fn in_the_clear(&self) -> Option<&'static str> {
+        let option = |key: &str| {
+            self.options
+                .get(key)
+                .map(|value| value.trim().to_ascii_lowercase())
+        };
+        match self.scheme {
+            Scheme::Fs | Scheme::Ftps => None,
+            Scheme::Ftp => Some(
+                "sends your password and your files across the network unencrypted. \
+                 If the server offers it, use ftps instead.",
+            ),
+            Scheme::S3 => option(option::ENDPOINT)
+                .is_some_and(|endpoint| endpoint.starts_with("http://"))
+                .then_some(
+                    "the endpoint is plain http, so your files cross the network \
+                     unencrypted. Your secret key never does. Use an https:// endpoint \
+                     if the service has one.",
+                ),
+            Scheme::Smb => (option(option::ENCRYPTION).as_deref() != Some("required")).then_some(
+                "files cross the network unencrypted unless the server turns on SMB \
+                 encryption. Your password is never sent as it is. Set encryption to \
+                 required to refuse a server that will not encrypt.",
+            ),
+        }
+    }
+}
+
+/// The share an SMB root starts with, if it names one.
+///
+/// Either slash separates, because a Windows user will type `media\backups`.
+#[must_use]
+pub fn share_of(root: &str) -> Option<&str> {
+    root.split(['/', '\\']).find(|part| !part.trim().is_empty())
 }
 
 /// One end of a link: which place, and where inside it.

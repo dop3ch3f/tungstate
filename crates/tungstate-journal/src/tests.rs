@@ -909,6 +909,187 @@ fn a_networked_connection_with_no_root_is_warned_about() {
     assert!(Scheme::Fs.rootless_warning("").is_none());
 }
 
+fn settings(
+    scheme: Scheme,
+    host: Option<&str>,
+    root: &str,
+    options: &[(&str, &str)],
+) -> ConnectionSettings {
+    ConnectionSettings {
+        scheme,
+        host: host.map(str::to_string),
+        port: None,
+        username: None,
+        root: root.to_string(),
+        options: options
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
+            .collect(),
+    }
+}
+
+#[test]
+fn each_kind_of_connection_says_what_it_is_missing() {
+    use crate::SettingsProblem as P;
+    assert_eq!(
+        settings(Scheme::Fs, None, "", &[]).problems(),
+        [P::NeedsRoot]
+    );
+    assert_eq!(
+        settings(Scheme::Ftps, None, "/volume1", &[]).problems(),
+        [P::NeedsHost]
+    );
+    assert_eq!(
+        settings(Scheme::Smb, Some("  "), "media", &[]).problems(),
+        [P::NeedsHost]
+    );
+    assert_eq!(
+        settings(Scheme::Smb, Some("nas"), "", &[]).problems(),
+        [P::NeedsShare]
+    );
+    assert_eq!(
+        settings(Scheme::Smb, Some("nas"), "//", &[]).problems(),
+        [P::NeedsShare]
+    );
+    assert_eq!(
+        settings(Scheme::S3, None, "", &[]).problems(),
+        [P::NeedsBucket]
+    );
+
+    // Complete ones are worth saving.
+    assert!(
+        settings(Scheme::Fs, None, "/Volumes/nas", &[])
+            .problems()
+            .is_empty()
+    );
+    assert!(
+        settings(Scheme::Smb, Some("nas"), "media/backups", &[])
+            .problems()
+            .is_empty()
+    );
+    assert!(
+        settings(Scheme::Smb, Some("nas"), "media\\backups", &[])
+            .problems()
+            .is_empty()
+    );
+    // S3 needs no host and no root: the bucket is the place.
+    assert!(
+        settings(Scheme::S3, None, "", &[("bucket", "photos")])
+            .problems()
+            .is_empty()
+    );
+}
+
+#[test]
+fn settings_that_would_be_ignored_or_misread_are_refused() {
+    use crate::SettingsProblem as P;
+    let endpoint = settings(
+        Scheme::S3,
+        None,
+        "",
+        &[("bucket", "b"), ("endpoint", "minio.local:9000")],
+    );
+    assert_eq!(
+        endpoint.problems(),
+        [P::BadEndpoint("minio.local:9000".into())]
+    );
+
+    let encryption = settings(
+        Scheme::Smb,
+        Some("nas"),
+        "media",
+        &[("encryption", "always")],
+    );
+    assert!(matches!(
+        encryption.problems()[..],
+        [P::BadValue {
+            key: "encryption",
+            ..
+        }]
+    ));
+
+    // A bucket on an FTP connection would be silently ignored.
+    let stray = settings(Scheme::Ftp, Some("nas"), "/v", &[("bucket", "b")]);
+    assert_eq!(stray.problems(), [P::UnusedOption("bucket")]);
+
+    // A key nothing here reads may be a newer build's, and is left alone.
+    let unknown = settings(Scheme::Ftp, Some("nas"), "/v", &[("passive", "true")]);
+    assert!(unknown.problems().is_empty());
+}
+
+#[test]
+fn what_crosses_the_network_in_the_clear_depends_on_the_connection_not_just_the_scheme() {
+    assert!(
+        settings(Scheme::Ftp, Some("nas"), "/v", &[])
+            .in_the_clear()
+            .is_some()
+    );
+    assert!(
+        settings(Scheme::Ftps, Some("nas"), "/v", &[])
+            .in_the_clear()
+            .is_none()
+    );
+
+    let aws = settings(Scheme::S3, None, "", &[("bucket", "b")]);
+    assert!(aws.in_the_clear().is_none());
+    let https = settings(
+        Scheme::S3,
+        None,
+        "",
+        &[("bucket", "b"), ("endpoint", "https://r2.example")],
+    );
+    assert!(https.in_the_clear().is_none());
+    let http = settings(
+        Scheme::S3,
+        None,
+        "",
+        &[("bucket", "b"), ("endpoint", "HTTP://minio:9000")],
+    );
+    assert!(
+        http.in_the_clear()
+            .is_some_and(|note| note.contains("secret key never"))
+    );
+
+    let smb = settings(Scheme::Smb, Some("nas"), "media", &[]);
+    assert!(
+        smb.in_the_clear()
+            .is_some_and(|note| note.contains("password is never sent"))
+    );
+    let insisting = settings(
+        Scheme::Smb,
+        Some("nas"),
+        "media",
+        &[("encryption", "required")],
+    );
+    assert!(insisting.in_the_clear().is_none());
+}
+
+#[test]
+fn new_kinds_of_connection_are_stored_and_read_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let journal = Journal::open(&dir.path().join("journal.db")).unwrap();
+    for (name, scheme) in [("bucket", Scheme::S3), ("share", Scheme::Smb)] {
+        journal
+            .create_connection(&NewConnection {
+                name: name.to_string(),
+                scheme,
+                host: Some("nas".to_string()),
+                port: None,
+                username: Some("me".to_string()),
+                root: "media".to_string(),
+                options: std::collections::BTreeMap::from([("bucket".into(), "photos".into())]),
+            })
+            .unwrap();
+        assert_eq!(journal.connection_by_name(name).unwrap().scheme, scheme);
+    }
+    // The spellings are the CLI's, so every stored value is one a person can type.
+    for scheme in Scheme::ALL {
+        assert_eq!(Scheme::parse(scheme.as_str()), Some(scheme));
+    }
+    assert_eq!(Scheme::S3.as_str(), "s3");
+    assert_eq!(Scheme::Smb.as_str(), "smb");
+}
+
 #[test]
 fn two_journals_on_one_file_do_not_collide() {
     // Two drains at once is an ordinary thing to want, and each is its own

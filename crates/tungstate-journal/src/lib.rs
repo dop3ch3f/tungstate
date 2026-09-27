@@ -23,7 +23,8 @@ mod storage;
 pub mod syncs;
 
 pub use connections::{
-    Connection, ConnectionId, ConnectionSettings, Endpoint, NewConnection, Scheme,
+    Connection, ConnectionId, ConnectionSettings, Endpoint, NewConnection, Scheme, SettingsProblem,
+    option, share_of,
 };
 pub use ends::{
     EndError, connection_prefix, describe, join_display, parent_display, parse_end, place,

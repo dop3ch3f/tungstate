@@ -91,6 +91,13 @@ pub enum OpenError {
         name: String,
     },
 
+    /// An S3 connection was recorded without a bucket.
+    #[error("connection `{name}` has no bucket; set one with --bucket")]
+    MissingBucket {
+        /// The connection that is missing one.
+        name: String,
+    },
+
     /// The connection names a scheme this build has no service for.
     #[error("connection `{name}` speaks `{scheme}`, which this build cannot open")]
     SchemeNotCompiled {
@@ -230,6 +237,10 @@ pub fn probe_writable(
 /// reporting `PermissionDenied` — and is worth a patch.
 fn classify(connection: &Connection, error: tungstate_backend::BackendError) -> BackendError {
     const FTP_NOT_LOGGED_IN: &str = "530";
+    // S3 names a wrong key id or a wrong secret in its error code. These two
+    // are about the credentials alone; `AccessDenied` is not, because a right
+    // key can lack permission on one bucket.
+    const S3_BAD_KEY: [&str; 2] = ["InvalidAccessKeyId", "SignatureDoesNotMatch"];
 
     if !connection.scheme.authenticates() {
         return error;
@@ -242,7 +253,11 @@ fn classify(connection: &Connection, error: tungstate_backend::BackendError) -> 
         source = cause.source();
     }
 
-    if rendered.contains(FTP_NOT_LOGGED_IN) {
+    let refused = match connection.scheme {
+        Scheme::S3 => S3_BAD_KEY.iter().any(|code| rendered.contains(code)),
+        _ => rendered.contains(FTP_NOT_LOGGED_IN),
+    };
+    if refused {
         return BackendError::Auth {
             endpoint: connection.name.clone(),
         };
@@ -257,17 +272,112 @@ fn operator_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
         #[cfg(feature = "ftp")]
         Scheme::Ftp | Scheme::Ftps => ftp_operator(connection, secrets),
 
+        #[cfg(feature = "s3")]
+        Scheme::S3 => s3_operator(connection, secrets),
+
         // Named rather than silently unmatched, so a build without the feature
         // says what is wrong instead of failing somewhere obscure.
         #[cfg(not(feature = "ftp"))]
-        Scheme::Ftp | Scheme::Ftps => {
-            let _ = secrets;
-            Err(OpenError::SchemeNotCompiled {
-                name: connection.name.clone(),
-                scheme: connection.scheme.as_str(),
-            })
-        }
+        Scheme::Ftp | Scheme::Ftps => not_compiled(connection, secrets),
+        #[cfg(not(feature = "s3"))]
+        Scheme::S3 => not_compiled(connection, secrets),
+
+        // Not an OpenDAL service: `open` hands SMB to its own crate before
+        // asking for an operator, so arriving here is a caller's mistake.
+        Scheme::Smb => not_compiled(connection, secrets),
     }
+}
+
+/// A connection whose scheme this build has no operator for.
+#[allow(clippy::unnecessary_wraps)]
+fn not_compiled(connection: &Connection, _secrets: &dyn SecretStore) -> Result<(Operator, Anchor)> {
+    Err(OpenError::SchemeNotCompiled {
+        name: connection.name.clone(),
+        scheme: connection.scheme.as_str(),
+    })
+}
+
+/// Give `OpenDAL` an HTTPS client, once per process.
+///
+/// Its own before-`main` hook for this is behind default features the
+/// workspace turns off, and would bring a second cryptography library. Both
+/// installs are first-wins, so later calls, and a provider some other part of
+/// the app installed first, are fine.
+#[cfg(feature = "s3")]
+fn install_https() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        let _ = rustls::crypto::ring::default_provider().install_default();
+        match reqwest::Client::builder().build() {
+            Ok(client) => opendal::HttpTransporter::install_default(
+                opendal_http_transport_reqwest::ReqwestTransport::new(client),
+            ),
+            // Left uninstalled, the first request says so in its own error.
+            Err(error) => tracing::warn!(%error, "could not build an HTTPS client"),
+        }
+    });
+}
+
+/// An operator over an S3 bucket, or anything that speaks S3.
+///
+/// Configuration comes from the connection and the keychain only. `OpenDAL`
+/// would otherwise also read `~/.aws`, the environment and the EC2 metadata
+/// service, and a connection that quietly worked because of some other
+/// program's credentials would stop working on the next machine.
+#[cfg(feature = "s3")]
+fn s3_operator(connection: &Connection, secrets: &dyn SecretStore) -> Result<(Operator, Anchor)> {
+    use tungstate_journal::option;
+
+    install_https();
+
+    let setting = |key: &str| {
+        connection
+            .options
+            .get(key)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let Some(bucket) = setting(option::BUCKET) else {
+        return Err(OpenError::MissingBucket {
+            name: connection.name.clone(),
+        });
+    };
+    let endpoint = setting(option::ENDPOINT);
+    // AWS itself needs the bucket's real region, which `--region` gives. Any
+    // other service is asked, and most accept anything when it cannot say.
+    let region = match (setting(option::REGION), &endpoint) {
+        (Some(region), _) => region,
+        (None, Some(endpoint)) => {
+            let (endpoint, bucket) = (endpoint.clone(), bucket.clone());
+            runtime::dispatch(async move {
+                opendal::services::S3::detect_region(&endpoint, &bucket).await
+            })
+            .unwrap_or_else(|| "us-east-1".to_string())
+        }
+        (None, None) => "us-east-1".to_string(),
+    };
+
+    let mut builder = opendal::services::S3::default()
+        .bucket(&bucket)
+        .region(&region)
+        .root(&connection.root)
+        .disable_config_load()
+        .disable_ec2_metadata();
+    if let Some(endpoint) = &endpoint {
+        builder = builder.endpoint(endpoint);
+    }
+    if let Some(key) = connection.username.as_deref() {
+        builder = builder.access_key_id(key);
+    }
+    if let Some(secret) = secret_for(connection, secrets)? {
+        builder = builder.secret_access_key(&secret);
+    }
+
+    let operator = Operator::new(builder).map_err(|source| OpenError::Opendal {
+        name: connection.name.clone(),
+        source,
+    })?;
+    Ok((operator, Anchor::Store))
 }
 
 /// An operator over an FTP or FTPS server.
@@ -312,7 +422,7 @@ fn ftp_operator(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
 /// `None` is not an error: an anonymous FTP server is a real thing, and a
 /// rejected login is something the server reports rather than something to
 /// guess at here.
-#[cfg(feature = "ftp")]
+#[cfg(any(feature = "ftp", feature = "s3"))]
 fn secret_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<Option<String>> {
     secrets
         .get(&tungstate_secret::connection_key(&connection.name))

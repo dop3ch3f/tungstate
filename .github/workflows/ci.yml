@@ -133,3 +133,43 @@ jobs:
       - name: FTP server log
         if: always()
         run: docker logs tungstate-ftp
+
+  # S3 needs a service too. MinIO is the object store the suite runs against:
+  # the same API as AWS, B2 and R2, and no rename, so this is the engine's
+  # no-rename path over a second protocol.
+  s3:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start an S3 service
+        run: |
+          docker run -d --name tungstate-minio -p 9000:9000 \
+            -e MINIO_ROOT_USER=tungstate -e MINIO_ROOT_PASSWORD=s3cret-s3cret \
+            minio/minio server /data
+
+          # Ready means a bucket exists, which needs the server answering.
+          for _ in $(seq 1 60); do
+            if docker exec tungstate-minio mc alias set local http://127.0.0.1:9000 tungstate s3cret-s3cret >/dev/null 2>&1 \
+              && docker exec tungstate-minio mc mb --ignore-existing local/tungstate; then
+              echo "s3 service is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "s3 service never came up" >&2
+          exit 1
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --locked -p tungstate-cli --features s3-integration --test s3
+        env:
+          TUNGSTATE_S3_ENDPOINT: http://127.0.0.1:9000
+          TUNGSTATE_S3_BUCKET: tungstate
+          TUNGSTATE_S3_KEY: tungstate
+          TUNGSTATE_S3_SECRET: s3cret-s3cret
+
+      - name: S3 service log
+        if: always()
+        run: docker logs tungstate-minio

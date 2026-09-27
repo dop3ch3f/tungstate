@@ -15,6 +15,8 @@ path = "src/main.rs"
 # on Linux only. Everything the engine does without rename is covered by a fake
 # backend in tungstate-transfer, on all three platforms.
 ftp-integration = []
+# The same bargain for S3: CI runs these on Linux against MinIO.
+s3-integration = []
 
 [dependencies]
 tungstate-api = { path = "../tungstate-api" }
@@ -42,6 +44,13 @@ tracing-subscriber = { workspace = true }
 rpassword = { workspace = true }
 
 [dev-dependencies]
+# The S3 suite's second, independent client. Already in the build through
+# tungstate-backend-opendal, so this costs no new compilation.
+opendal = { workspace = true, features = ["services-s3"] }
+opendal-http-transport-reqwest = { version = "0.59", default-features = false }
+reqwest = { version = "0.13", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+tokio = { workspace = true }
 # Drawing a picture for the near-duplicate test, so no binary is checked in.
 image = { workspace = true }
 assert_cmd = { workspace = true }

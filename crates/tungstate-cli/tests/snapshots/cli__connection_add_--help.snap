@@ -1,0 +1,52 @@
+---
+source: crates/tungstate-cli/tests/cli.rs
+expression: help
+---
+Record a place link ends can live, other than this machine
+
+Usage: tungstate connection add [OPTIONS] --scheme <SCHEME> <NAME>
+
+Arguments:
+  <NAME>
+          What this connection is called on the command line
+
+Options:
+      --scheme <SCHEME>
+          Which protocol it speaks: fs (a folder this machine can reach), smb, ftps, ftp or s3
+
+      --host <HOST>
+          Hostname, for the schemes that have one
+
+      --port <PORT>
+          Port, where it differs from the protocol default
+
+      --user <USERNAME>
+          Who to connect as. For S3, the access key id
+
+      --root <ROOT>
+          Absolute path on the far side that every link path is relative to.
+          
+          For a remote this is a path on the server, not on this machine, and it is often not the same as the directory you land in when you log in: many servers put you in `/home/you` while `/` is the whole disk. For SMB it starts with the share; for S3 it is a folder inside the bucket. `connection test` prints what it found there, so check it.
+          
+          [default: ""]
+
+      --bucket <BUCKET>
+          S3: the bucket every path lives in
+
+      --region <REGION>
+          S3: the bucket's region. Needed for AWS unless the bucket is in us-east-1; other services are asked, and most accept any
+
+      --endpoint <ENDPOINT>
+          S3: the service's address, for anything that is not AWS itself, as in `https://s3.eu-central-003.backblazeb2.com` or `http://nas.local:9000`
+
+      --share <SHARE>
+          SMB: the share, which the root then continues inside. `--share media --root backups` is the same as `--root media/backups`
+
+      --option <KEY=VALUE>
+          Per-scheme extra, as `key=value`. Repeatable. SMB reads `encryption=required`, to refuse a server that will not encrypt
+
+      --secret-stdin
+          Read the password, or S3 secret key, from stdin rather than prompting, for scripts
+
+  -h, --help
+          Print help (see a summary with '-h')
