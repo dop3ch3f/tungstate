@@ -165,6 +165,9 @@ export const dirsCounted = (n: number): DirCount => n as DirCount;
 /** Files a transfer verified at the far side. Not `already_present`. */
 export const sent = (summary: Summary): FileCount => seal(summary.transferred);
 
+/** Files a transfer found already at the far side, byte for byte. */
+export const alreadyThere = (summary: Summary): FileCount => seal(summary.already_present);
+
 /** Files a waiting transfer will take on, once counted. */
 export const inLine = (job: JobView & { files: number }): FileCount => seal(job.files);
 

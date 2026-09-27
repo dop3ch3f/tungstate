@@ -4,7 +4,7 @@
 import { computed, ref } from "vue";
 import { useTransfer, type Ran } from "../../state/useTransfer";
 import { bytes, ordinal, shortPath } from "../../lib/format";
-import { files, inLine, sent } from "../../lib/counts";
+import { alreadyThere, files, inLine, sent } from "../../lib/counts";
 import type { JobView } from "../../engine/types";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
@@ -45,7 +45,10 @@ function outcome(run: Ran): string {
   if (!s) return "Could not carry on";
   if (s.destination_lost) return "The far side disappeared";
   if (s.cancelled) return "Stopped";
-  const done = `${run.job.removes_originals ? "Moved" : "Copied"} ${files(sent(s))}, ${bytes(s.bytes)}`;
+  const there = s.already_present ? `${files(alreadyThere(s))} already there` : "";
+  const done = s.transferred || !there
+    ? [`${run.job.removes_originals ? "Moved" : "Copied"} ${files(sent(s))}, ${bytes(s.bytes)}`, there].filter(Boolean).join(", ")
+    : `Nothing to send: ${there}`;
   return s.failed ? `${done}. ${s.failed} failed` : done;
 }
 const troubled = (run: Ran) => !run.summary || run.summary.failed > 0 || run.summary.destination_lost;
