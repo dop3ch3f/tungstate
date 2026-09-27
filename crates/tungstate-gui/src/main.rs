@@ -21,7 +21,7 @@ mod watching;
 
 use std::collections::{BTreeMap, VecDeque};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -50,10 +50,14 @@ struct App {
     /// The duplicate scan in flight, so it can be stopped. Its own flag
     /// rather than the transfer's: stopping a scan must not stop a drain.
     scan: dupes::Scan,
-    /// Work the running transfer has not reached yet, and whether a worker
-    /// exists to reach it. Shared rather than moved into the worker, which is
-    /// the whole of what lets a transfer be added to one already in flight.
-    queue: RunQueue<Link>,
+    /// Transfers the worker has not reached yet, and whether a worker exists
+    /// to reach them. Shared rather than moved into the worker, which is the
+    /// whole of what lets a transfer be queued behind one already in flight.
+    queue: RunQueue<Arc<Job>>,
+    /// The transfer the worker is on. Only the worker writes it.
+    running_job: Mutex<Option<Arc<Job>>>,
+    /// Numbers transfers, so the window can name one to take out of the queue.
+    next_job: AtomicU64,
     /// The folder watcher, and what it has done since the window opened.
     watcher: Arc<watching::Watching>,
     /// Where small pictures of what a scan found are kept.
@@ -134,6 +138,22 @@ impl<T> RunQueue<T> {
         lock(&self.waiting).len()
     }
 
+    /// Everything waiting, in the order it will be taken.
+    fn waiting_list(&self) -> Vec<T>
+    where
+        T: Clone,
+    {
+        lock(&self.waiting).iter().cloned().collect()
+    }
+
+    /// Take one waiting item out before the worker reaches it. `None` when
+    /// nothing waiting matches, which includes one the worker already took.
+    fn remove(&self, which: impl Fn(&T) -> bool) -> Option<T> {
+        let mut waiting = lock(&self.waiting);
+        let at = waiting.iter().position(which)?;
+        waiting.remove(at)
+    }
+
     fn is_running(&self) -> bool {
         self.running.load(Ordering::SeqCst)
     }
@@ -156,6 +176,81 @@ fn lock<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+/// One transfer as the window started it: a direction, or both directions of
+/// an exchange, taken one after the other.
+struct Job {
+    id: u64,
+    links: Vec<Link>,
+    /// Files and bytes, counted from the source while it waits.
+    measured: Mutex<Option<(usize, u64)>>,
+}
+
+/// A transfer in the queue, as the window lists it.
+#[derive(Debug, Clone, Serialize)]
+struct JobView {
+    id: u64,
+    /// The saved pair's name; a one-off transfer from the browser has none.
+    name: Option<String>,
+    source: String,
+    destination: String,
+    /// Both ways at once, from ticks in both panes.
+    exchange: bool,
+    removes_originals: bool,
+    /// Unknown until counted, which a waiting transfer is soon after joining.
+    files: Option<usize>,
+    bytes: Option<u64>,
+}
+
+impl JobView {
+    fn of(job: &Job, journal: &Journal) -> Self {
+        let first = &job.links[0];
+        let measured = *lock(&job.measured);
+        Self {
+            id: job.id,
+            name: first.saved.then(|| first.name.clone()),
+            source: ends::describe(&first.source, journal),
+            destination: ends::describe(&first.destination, journal),
+            exchange: job.links.len() > 1,
+            removes_originals: job
+                .links
+                .iter()
+                .any(|link| link.source_policy != SourcePolicy::Keep),
+            files: measured.map(|(files, _)| files),
+            bytes: measured.map(|(_, bytes)| bytes),
+        }
+    }
+}
+
+/// What is running and what waits behind it, in order.
+#[derive(Debug, Clone, Serialize)]
+struct QueueView {
+    running: Option<JobView>,
+    waiting: Vec<JobView>,
+}
+
+fn queue_view(state: &App) -> QueueView {
+    // Waiting first: the worker takes a job off the list and only then marks
+    // it running, so reading in the other order can miss it altogether. This
+    // way it is at worst seen in both places, and dropped from the second.
+    let waiting = state.queue.waiting_list();
+    let running = lock(&state.running_job).clone();
+    let running_id = running.as_ref().map(|job| job.id);
+    QueueView {
+        running: running.map(|job| JobView::of(&job, &state.journal)),
+        waiting: waiting
+            .iter()
+            .filter(|job| Some(job.id) != running_id)
+            .map(|job| JobView::of(job, &state.journal))
+            .collect(),
+    }
+}
+
+/// Tell the window the queue changed. Fired on every change, so it never has
+/// to poll.
+fn announce_queue(app: &AppHandle) {
+    let _ = app.emit("transfer://queue", queue_view(&app.state::<App>()));
 }
 
 /// A link as the window shows it.
@@ -1827,7 +1922,7 @@ fn overlapping_names(legs: &[Leg]) -> Vec<String> {
 }
 
 #[tauri::command]
-fn start_transfer(request: TransferRequest, app: AppHandle) -> Result<String, String> {
+fn start_transfer(request: TransferRequest, app: AppHandle) -> Result<Accepted, String> {
     start_transfer_inner(request, app).inspect_err(|error| {
         // Also in the log, so a terminal run or a bug report carries the
         // reason without anyone having to read it off the screen.
@@ -1835,7 +1930,7 @@ fn start_transfer(request: TransferRequest, app: AppHandle) -> Result<String, St
     })
 }
 
-fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<String, String> {
+fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<Accepted, String> {
     if request.legs.is_empty() {
         return Err("nothing is selected".to_string());
     }
@@ -1899,16 +1994,7 @@ fn start_transfer_inner(request: TransferRequest, app: AppHandle) -> Result<Stri
         names.push(name);
     }
 
-    let accepted = spawn_run(&app, names)?;
-    // The count of files is what the dialog reports; whether this joined a run
-    // already going is separate and reaches the window through `queued`.
-    let _ = app.emit("transfer://queued", &accepted);
-    Ok(names_summary(&request))
-}
-
-fn names_summary(request: &TransferRequest) -> String {
-    let total: usize = request.legs.iter().map(|l| l.names.len()).sum();
-    format!("{total}")
+    spawn_run(&app, names)
 }
 
 #[tauri::command]
@@ -2244,20 +2330,29 @@ fn run_link(name: String, app: AppHandle) -> Result<Accepted, String> {
     spawn_run(&app, vec![name])
 }
 
-/// Run each leg in turn on one worker thread, reporting a single combined result.
+/// Queue a transfer, starting the worker if none is running.
 ///
-/// Sequential rather than parallel: two legs of an exchange can touch the same
-/// names, and running them at once would race. Each leg is its own link, so each
-/// is journaled and resumable on its own terms.
+/// One worker takes transfers in the order they arrived, and each transfer's
+/// legs one after the other: two legs of an exchange can touch the same names,
+/// and running them at once would race. Each leg is its own link, so each is
+/// journaled and resumable on its own terms.
 fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
     let state = app.state::<App>();
 
     // Resolved before anything is queued, so a bad name is refused here rather
     // than halfway through a run that has already started moving files.
-    let mut wanted = VecDeque::with_capacity(links.len());
+    let mut wanted = Vec::with_capacity(links.len());
     for name in &links {
-        wanted.push_back(state.journal.link_by_name(name).map_err(describe)?);
+        wanted.push(state.journal.link_by_name(name).map_err(describe)?);
     }
+    if wanted.is_empty() {
+        return Err("nothing to transfer".into());
+    }
+    let job = Arc::new(Job {
+        id: state.next_job.fetch_add(1, Ordering::Relaxed) + 1,
+        links: wanted,
+        measured: Mutex::new(None),
+    });
 
     let _gate = lock(&state.gate);
     if state.syncing.queue.is_running() {
@@ -2268,14 +2363,14 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
     // That is the whole correctness argument: a worker only ever clears
     // `running` while holding this same lock, so it cannot decide it has
     // finished in the window between this push and this check.
-    if !state.queue.submit(wanted) {
-        // A worker is already going and will reach these. The caller has to be
-        // told, because the window blanks its progress list when a transfer
-        // starts, and doing that here would wipe the live view of the run
-        // these files just joined.
+    if !state.queue.submit([Arc::clone(&job)]) {
+        let waiting = state.queue.waiting();
+        announce_queue(app);
+        measure_later(app, job.clone());
         return Ok(Accepted {
             started: false,
-            waiting: state.queue.waiting(),
+            waiting,
+            job: job.id,
         });
     }
 
@@ -2296,53 +2391,45 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
         let _guard = RunGuard(worker.clone());
         let mut resolver = WindowResolver::new(worker.clone(), replies, ConflictAction::Quarantine);
         let mut progress = EventProgress::new(worker.clone());
-        let mut total = Summary::default();
-        let mut failure = None;
 
         // `next` is what ends the run: it hands back `None` only after it has
         // recorded that this worker is finished, under the lock that a
         // submission takes to decide whether to start one.
-        while let Some(link) = state.queue.next() {
-            // Per link rather than per run: a queue that can grow has no
-            // meaningful "first link" whose conflict rule speaks for the rest.
-            resolver.follow_conflict_rule(link.on_conflict);
-
-            let ends = backend_for(&link.source, &state.journal).and_then(|source| {
-                backend_for(&link.destination, &state.journal).map(|dest| (source, dest))
-            });
-            let (source, destination) = match ends {
-                Ok(pair) => pair,
-                Err(message) => {
-                    failure = Some(message);
-                    break;
-                }
-            };
-            let mut transfer = Transfer::new(
-                &link,
-                source.as_ref(),
-                destination.as_ref(),
-                &state.journal,
-                &mut resolver,
-                &mut progress,
-            )
-            .cancellable(Arc::clone(&cancel));
-            let ceiling = state.at_once_ceiling.load(Ordering::Relaxed);
-            if ceiling > 0 {
-                transfer = transfer.parallel(ceiling);
+        while let Some(job) = state.queue.next() {
+            // Stop means the queue as well, including a Stop pressed between
+            // two transfers.
+            if cancel.asked() {
+                break;
             }
+            *lock(&state.running_job) = Some(Arc::clone(&job));
+            // Every file event from here to this job's `done` or `error` is
+            // this job's, which is how the window keeps each in its own row.
+            let _ = worker.emit("transfer://job", JobView::of(&job, &state.journal));
+            announce_queue(&worker);
 
-            match transfer.run() {
-                Ok(summary) => {
-                    let stop = summary.cancelled || summary.destination_lost;
-                    accumulate(&mut total, summary);
-                    if stop {
-                        break;
-                    }
-                }
-                Err(error) => {
-                    failure = Some(describe(error));
-                    break;
-                }
+            let (total, failure) = run_job(&job, &state, &mut resolver, &mut progress, &cancel);
+
+            *lock(&state.running_job) = None;
+            let _ = match failure {
+                Some(message) => worker.emit(
+                    "transfer://error",
+                    JobFailed {
+                        job: job.id,
+                        message,
+                    },
+                ),
+                None => worker.emit(
+                    "transfer://done",
+                    JobDone {
+                        job: job.id,
+                        summary: SummaryView::from(&total),
+                    },
+                ),
+            };
+            // A failure, or a far side that vanished, is that transfer's: the
+            // next one may be going somewhere else entirely, so it still runs.
+            if total.cancelled || cancel.asked() {
+                break;
             }
         }
 
@@ -2350,27 +2437,142 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
         // well. Leaving work behind would have the next unrelated Move quietly
         // run whatever Stop was pressed on.
         state.queue.clear();
-
-        let _ = match failure {
-            Some(message) => worker.emit("transfer://error", message),
-            None => worker.emit("transfer://done", SummaryView::from(&total)),
-        };
+        announce_queue(&worker);
     });
 
+    announce_queue(app);
     Ok(Accepted {
         started: true,
         waiting: 0,
+        job: job.id,
     })
 }
 
-/// What happened to a submission: a new run, or work added to one in flight.
+/// Every leg of one transfer, in turn. The combined total, and the reason it
+/// ended early if it did.
+fn run_job(
+    job: &Job,
+    state: &App,
+    resolver: &mut WindowResolver,
+    progress: &mut EventProgress,
+    cancel: &Arc<Stop>,
+) -> (Summary, Option<String>) {
+    let mut total = Summary::default();
+    for link in &job.links {
+        // Per link rather than per transfer: each leg carries its own rule.
+        resolver.follow_conflict_rule(link.on_conflict);
+
+        let ends = backend_for(&link.source, &state.journal).and_then(|source| {
+            backend_for(&link.destination, &state.journal).map(|dest| (source, dest))
+        });
+        let (source, destination) = match ends {
+            Ok(pair) => pair,
+            Err(message) => return (total, Some(message)),
+        };
+        let mut transfer = Transfer::new(
+            link,
+            source.as_ref(),
+            destination.as_ref(),
+            &state.journal,
+            resolver,
+            progress,
+        )
+        .cancellable(Arc::clone(cancel));
+        let ceiling = state.at_once_ceiling.load(Ordering::Relaxed);
+        if ceiling > 0 {
+            transfer = transfer.parallel(ceiling);
+        }
+
+        match transfer.run() {
+            Ok(summary) => {
+                let stop = summary.cancelled || summary.destination_lost;
+                accumulate(&mut total, summary);
+                if stop {
+                    break;
+                }
+            }
+            Err(error) => return (total, Some(describe(error))),
+        }
+    }
+    (total, None)
+}
+
+/// Count a waiting transfer's files on a thread of its own, and tell the
+/// window. A count that fails leaves the size unknown, which is all it costs.
+fn measure_later(app: &AppHandle, job: Arc<Job>) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        let state = app.state::<App>();
+        let mut files = 0;
+        let mut bytes = 0;
+        for link in &job.links {
+            let counted = backend_for(&link.source, &state.journal).and_then(|source| {
+                let chosen = state.journal.files_for(link.id).map_err(describe)?;
+                let only = (!chosen.is_empty()).then_some(chosen);
+                tungstate_transfer::measure(source.as_ref(), only.as_deref()).map_err(describe)
+            });
+            match counted {
+                Ok((n, size)) => {
+                    files += n;
+                    bytes += size;
+                }
+                Err(error) => {
+                    tracing::debug!(%error, job = job.id, "could not count a waiting transfer");
+                    return;
+                }
+            }
+        }
+        *lock(&job.measured) = Some((files, bytes));
+        announce_queue(&app);
+    });
+}
+
+/// What happened to a submission: a new run, or a place in the queue.
 #[derive(Debug, Serialize)]
 struct Accepted {
     /// True when this call started the worker, which is when the window may
     /// clear the progress it is showing.
     started: bool,
-    /// How much is queued behind the file being moved right now.
+    /// Transfers waiting, this one included, behind the one running.
     waiting: usize,
+    /// This transfer, as the queue and its events name it.
+    job: u64,
+}
+
+/// One transfer's totals, when it ends.
+#[derive(Debug, Clone, Serialize)]
+struct JobDone {
+    job: u64,
+    #[serde(flatten)]
+    summary: SummaryView,
+}
+
+/// One transfer that could not carry on.
+#[derive(Debug, Clone, Serialize)]
+struct JobFailed {
+    job: u64,
+    message: String,
+}
+
+/// Transfers waiting to run, and the one running.
+#[tauri::command]
+fn transfer_queue(state: State<'_, App>) -> QueueView {
+    queue_view(&state)
+}
+
+/// Take a transfer out of the queue before it starts. `false` when it has
+/// already started or finished, since there is then nothing to take out.
+#[tauri::command]
+fn remove_from_queue(job: u64, app: AppHandle) -> bool {
+    let removed = app
+        .state::<App>()
+        .queue
+        .remove(|waiting| waiting.id == job)
+        .is_some();
+    if removed {
+        announce_queue(&app);
+    }
+    removed
 }
 
 /// Releases the "a transfer is running" flag however the worker thread ends.
@@ -2385,6 +2587,7 @@ impl Drop for RunGuard {
     fn drop(&mut self) {
         let state = self.0.state::<App>();
         state.conflicts.close();
+        *lock(&state.running_job) = None;
         state.queue.stand_down();
     }
 }
@@ -2477,6 +2680,8 @@ fn main() {
             watcher: Arc::clone(&watcher),
             thumbs,
             queue: RunQueue::new(),
+            running_job: Mutex::new(None),
+            next_job: AtomicU64::new(0),
             at_once_ceiling: AtomicUsize::new(0),
             syncing: sync::Syncing::default(),
             following: following::Following::default(),
@@ -2488,6 +2693,8 @@ fn main() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            transfer_queue,
+            remove_from_queue,
             governed,
             govern_folder,
             forget_folder,
@@ -2950,6 +3157,45 @@ mod tests {
         // Still the worker until it says otherwise, so a Move arriving now
         // does not start a second one alongside the one winding down.
         assert!(!queue.submit(["d"]));
+    }
+
+    #[test]
+    fn the_waiting_list_is_in_the_order_things_will_run() {
+        let queue = RunQueue::new();
+        queue.submit(["a", "b", "c"]);
+        assert_eq!(queue.waiting_list(), ["a", "b", "c"]);
+        assert_eq!(queue.next(), Some("a"));
+        // The one taken is running, not waiting.
+        assert_eq!(queue.waiting_list(), ["b", "c"]);
+    }
+
+    #[test]
+    fn a_waiting_transfer_can_be_taken_out_and_the_rest_keep_their_order() {
+        let queue = RunQueue::new();
+        queue.submit(["a", "b", "c", "d"]);
+        assert_eq!(queue.next(), Some("a"));
+
+        assert_eq!(queue.remove(|item| *item == "c"), Some("c"));
+        assert_eq!(queue.waiting_list(), ["b", "d"]);
+        // Already running, or never there: nothing to take out.
+        assert_eq!(queue.remove(|item| *item == "a"), None);
+        assert_eq!(queue.remove(|item| *item == "z"), None);
+
+        assert_eq!(queue.next(), Some("b"));
+        assert_eq!(queue.next(), Some("d"));
+        assert_eq!(queue.next(), None);
+    }
+
+    #[test]
+    fn taking_out_the_last_waiting_transfer_leaves_the_worker_to_finish() {
+        // Removing is not stopping: the worker still owns the queue until it
+        // finds it empty, so a Move arriving now does not start a second one.
+        let queue = RunQueue::new();
+        queue.submit(["a", "b"]);
+        assert_eq!(queue.next(), Some("a"));
+        assert_eq!(queue.remove(|item| *item == "b"), Some("b"));
+        assert!(!queue.submit(["c"]));
+        assert_eq!(queue.next(), Some("c"));
     }
 
     #[test]

@@ -406,6 +406,22 @@ pub fn preview(
     Ok(preview)
 }
 
+/// How much a run would take on, as files and bytes, asking only the source.
+///
+/// For a transfer waiting its turn. The destination is left alone because the
+/// run ahead is using it, and an extra connection opened just to size the
+/// queue could be the one the far side refuses.
+///
+/// # Errors
+/// The source cannot be listed.
+pub fn measure(source: &dyn Backend, only: Option<&[PathBuf]>) -> Result<(usize, u64)> {
+    let files = match only {
+        Some(chosen) => gather(source, chosen)?,
+        None => walk::files(source)?,
+    };
+    Ok((files.len(), files.iter().map(|file| file.size).sum()))
+}
+
 /// Expand a chosen set into the files it covers.
 ///
 /// A path that cannot be read is skipped rather than failing the run. On a

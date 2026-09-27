@@ -1,57 +1,18 @@
-<!-- A transfer while it happens, and what it did when it stops.
-     Every engine string reaches a class through `lib/tone.ts`, never directly:
-     bind `row.state` to `class` and a new outcome renders with no rule at all. -->
+<!-- The transfer queue: the one running with its files, the ones waiting
+     behind it, and the ones that have finished, each in its own row. -->
 <script setup lang="ts">
-import { computed } from "vue";
-import { useTable } from "../../lib/table";
-import SortHead from "../../ui/SortHead.vue";
-import TableTools from "../../ui/TableTools.vue";
-import { useTransfer } from "../../state/useTransfer";
-import { bytes } from "../../lib/format";
-import { toneOfOutcome } from "../../lib/tone";
+import { computed, ref } from "vue";
+import { useTransfer, type Ran } from "../../state/useTransfer";
+import { bytes, ordinal, shortPath } from "../../lib/format";
+import { files, inLine, sent } from "../../lib/counts";
+import type { JobView } from "../../engine/types";
+import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
 import StopPair from "../../ui/StopPair.vue";
 import Empty from "../../ui/Empty.vue";
+import Ledger from "./Ledger.vue";
 
 const t = useTransfer();
-
-/** Plain words for an engine outcome. A word this map does not know is shown
- *  as itself rather than silently blanked. */
-const WORD: Record<string, string> = {
-  waiting: "waiting",
-  live: "copying",
-  checking: "checking it arrived",
-  transferred: "verified",
-  already_present: "already there",
-  "already-present": "already there",
-  quarantined: "set aside",
-  skipped: "left here",
-  failed: "failed",
-};
-const word = (state: string) => WORD[state] ?? state;
-
-// A lookup, not an interpolated class: `check-css.mjs` cannot follow a
-// computed name, and an unfollowable one is how a state ends up undrawn.
-const DOT = {
-  plain: "t-plain",
-  live: "t-live",
-  ok: "t-ok",
-  hold: "t-hold",
-  bad: "t-bad",
-} as const;
-const dot = (state: string) => DOT[toneOfOutcome(state)];
-
-// Arrival order until a header is clicked: a live run reads top to bottom.
-const table = useTable(t.rows, {
-  columns: [
-    { key: "path", value: (r) => r.path },
-    { key: "state", value: (r) => word(r.state) },
-    { key: "size", value: (r) => r.size },
-  ],
-  text: (r) => r.path,
-  facets: [{ key: "state", label: "State", of: (r) => word(r.state) }],
-  sort: { key: "", dir: 1 },
-});
 
 /** Bytes that have arrived and been verified. On a move this is also the space
  *  freed on this machine, which is the number the whole product exists for.
@@ -66,6 +27,36 @@ const moved = computed(() =>
     .reduce((n, r) => n + r.size, 0),
 );
 const planned = computed(() => t.rows.value.length);
+/** From the job event, or from the queue if this window opened mid-run. */
+const now = computed(() => t.current.value ?? t.queue.value.running);
+const waiting = computed(() => t.queue.value.waiting);
+
+const route = (job: JobView) =>
+  job.source
+    ? `${shortPath(job.source)} ${job.exchange ? "⇄" : "→"} ${shortPath(job.destination)}`
+    : "A transfer";
+const verb = (job: JobView) => (job.exchange ? "Exchange" : job.removes_originals ? "Move" : "Copy");
+const size = (job: JobView) =>
+  job.files === null ? "counting…" : `${files(inLine({ ...job, files: job.files }))}, ${bytes(job.bytes ?? 0)}`;
+
+/** One line for how a transfer ended. The full account is in its notice. */
+function outcome(run: Ran): string {
+  const s = run.summary;
+  if (!s) return "Could not carry on";
+  if (s.destination_lost) return "The far side disappeared";
+  if (s.cancelled) return "Stopped";
+  const done = `${run.job.removes_originals ? "Moved" : "Copied"} ${files(sent(s))}, ${bytes(s.bytes)}`;
+  return s.failed ? `${done}. ${s.failed} failed` : done;
+}
+const troubled = (run: Ran) => !run.summary || run.summary.failed > 0 || run.summary.destination_lost;
+
+/** Which finished transfer is open. Unless one was chosen, the newest is,
+ *  while nothing else is running: it is the one just watched. */
+const chosen = ref<number | null>(null);
+const open = computed(() =>
+  chosen.value ?? (t.running.value ? null : t.finished.value[0]?.job.id ?? null),
+);
+const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
 </script>
 
 <template>
@@ -76,119 +67,131 @@ const planned = computed(() => t.rows.value.length);
       Cleaned up {{ bytes(Number(t.cleaned.value)) }} of part-copied files. The originals are untouched.
     </Notice>
 
-    <div class="run-readout" v-if="planned">
-      <span class="run-mass num">{{ bytes(moved) }}</span>
-      <span class="run-of">moved</span>
-      <span class="run-of">
-        <b class="num">{{ t.settled.value }}</b> of <b class="num">{{ planned }}</b> files
-      </span>
-      <span class="run-at" v-if="t.atOnce.value">{{ t.atOnce.value }} at a time</span>
-      <span class="run-at" v-if="t.queued.value">{{ t.queued.value }} queued behind this</span>
-      <span class="run-spacer"></span>
-      <StopPair v-if="t.running.value" :stopping="t.stopping.value" :halting="t.halting.value" @stop="t.cancel()" @now="t.stopNow()" />
-    </div>
+    <Empty
+      v-if="!t.running.value && !waiting.length && !t.finished.value.length"
+      art="no-runs"
+      line="Nothing running. Tick some files in the browser and press Copy or Move."
+    />
 
-    <Empty v-if="!planned && !t.summary.value" art="no-runs" line="Nothing running. Tick some files in the browser and press Copy or Move." />
-
-    <template v-if="planned">
-      <TableTools :table="table" placeholder="Filter by name" />
-      <div class="run-sorts">
-        <span>Sort by</span>
-        <SortHead :table="table" column="path">name</SortHead>
-        <SortHead :table="table" column="state">state</SortHead>
-        <SortHead :table="table" column="size" numeric>size</SortHead>
+    <section class="run-now" v-if="now">
+      <div class="run-head">
+        <h2 class="path run-route">{{ route(now) }}</h2>
+        <span class="run-verb">{{ verb(now) }}</span>
+        <span class="run-spacer"></span>
+        <StopPair :stopping="t.stopping.value" :halting="t.halting.value" @stop="t.cancel()" @now="t.stopNow()" />
       </div>
-    </template>
-    <div class="run-ledger" v-if="planned">
-      <p class="run-nomatch" v-if="!table.shown.value.length">Nothing here matches that.</p>
-      <div class="run-line" v-for="row in table.shown.value" :key="row.path">
-        <span class="run-dot" :class="dot(row.state)"></span>
-        <span class="path run-file">{{ row.path }}</span>
-        <span class="run-word">{{ word(row.state) }}</span>
-        <span class="run-detail" v-if="row.detail">{{ row.detail }}</span>
-        <span class="num run-size">{{ bytes(row.size) }}</span>
-        <span class="run-bar" v-if="row.state === 'live' || row.state === 'checking'">
-          <i :style="{ width: (row.size ? (row.done / row.size) * 100 : 0) + '%' }"></i>
+      <div class="run-readout" v-if="planned">
+        <span class="run-mass num">{{ bytes(moved) }}</span>
+        <span class="run-of">moved</span>
+        <span class="run-of">
+          <b class="num">{{ t.settled.value }}</b> of <b class="num">{{ planned }}</b> files
         </span>
+        <span class="run-at" v-if="t.atOnce.value">{{ t.atOnce.value }} at a time</span>
       </div>
-    </div>
+      <p class="run-quiet" v-else>Working out what to send…</p>
+      <Ledger v-if="planned" :rows="t.rows.value" />
+    </section>
 
-    <div class="run-summary" v-if="t.summary.value">
-      <Notice :tone="t.summary.value.failed || t.summary.value.destination_lost ? 'bad' : 'plain'">
-        <template v-if="t.summary.value.destination_lost">
-          The far side disappeared part-way through. Nothing was deleted that had not arrived.
-        </template>
-        <template v-else-if="t.summary.value.cancelled">Stopped when you asked.</template>
-        <template v-else>Finished.</template>
-        Moved {{ t.summary.value.transferred }} files, {{ bytes(t.summary.value.bytes) }}.
-        <template v-if="t.summary.value.already_present">
-          {{ t.summary.value.already_present }} were already there.
-        </template>
-        <template v-if="t.summary.value.quarantined">
-          {{ t.summary.value.quarantined }} set aside for you.
-        </template>
-        <template v-if="t.summary.value.skipped">
-          {{ t.summary.value.skipped }} left here.
-        </template>
-        <template v-if="t.summary.value.failed">
-          {{ t.summary.value.failed }} could not be moved; their originals are untouched.
-        </template>
-        <template v-if="t.summary.value.pruned">
-          {{ t.summary.value.pruned }} source director{{ t.summary.value.pruned === 1 ? "y" : "ies" }}
-          removed, because the move emptied {{ t.summary.value.pruned === 1 ? "it" : "them" }}.
-        </template>
-        <template v-if="t.summary.value.recovered">
-          {{ t.summary.value.recovered }} unfinished operation{{ t.summary.value.recovered === 1 ? "" : "s" }}
-          from an earlier run {{ t.summary.value.recovered === 1 ? "was" : "were" }} cleaned up first.
-        </template>
-      </Notice>
-      <ul class="run-failures" v-if="t.summary.value.failures.length">
-        <li v-for="fail in t.summary.value.failures" :key="fail.path">
-          <span class="path">{{ fail.path }}</span>
-          <span class="run-why">{{ fail.reason }}</span>
-        </li>
-      </ul>
-    </div>
+    <section class="run-list" v-if="waiting.length">
+      <div class="run-list-head">
+        <h3>Waiting</h3>
+        <span class="run-quiet">Stopping the transfer above clears these too.</span>
+      </div>
+      <div class="run-row" v-for="(job, i) in waiting" :key="job.id">
+        <span class="run-place num">{{ ordinal(i + 2) }}</span>
+        <span class="path run-row-route">{{ route(job) }}</span>
+        <span class="run-row-what">{{ verb(job) }} · {{ size(job) }}</span>
+        <Button look="link" :busy="t.unqueuing(job.id)" @click="t.unqueue(job.id)">Remove</Button>
+      </div>
+    </section>
+
+    <section class="run-list" v-if="t.finished.value.length">
+      <div class="run-list-head"><h3>Recently finished</h3></div>
+      <template v-for="run in t.finished.value" :key="run.job.id">
+        <div class="run-row">
+          <span class="run-dot" :class="troubled(run) ? 't-bad' : 't-ok'"></span>
+          <span class="path run-row-route">{{ route(run.job) }}</span>
+          <span class="run-row-what">{{ outcome(run) }}</span>
+          <Button look="link" @click="toggle(run.job.id)">{{ open === run.job.id ? "Hide" : "Details" }}</Button>
+        </div>
+        <div class="run-open" v-if="open === run.job.id">
+          <Notice tone="bad" v-if="run.problem">{{ run.problem }}</Notice>
+          <Notice v-if="run.summary" :tone="run.summary.failed || run.summary.destination_lost ? 'bad' : 'plain'">
+            <template v-if="run.summary.destination_lost">
+              The far side disappeared part-way through. Nothing was deleted that had not arrived.
+            </template>
+            <template v-else-if="run.summary.cancelled">Stopped when you asked.</template>
+            <template v-else>Finished.</template>
+            {{ run.job.removes_originals ? "Moved" : "Copied" }} {{ files(sent(run.summary)) }}, {{ bytes(run.summary.bytes) }}.
+            <template v-if="run.summary.already_present">
+              {{ run.summary.already_present }} were already there.
+            </template>
+            <template v-if="run.summary.quarantined">
+              {{ run.summary.quarantined }} set aside for you.
+            </template>
+            <template v-if="run.summary.skipped">
+              {{ run.summary.skipped }} left here.
+            </template>
+            <template v-if="run.summary.failed">
+              {{ run.summary.failed }} could not be moved; their originals are untouched.
+            </template>
+            <template v-if="run.summary.pruned">
+              {{ run.summary.pruned }} source director{{ run.summary.pruned === 1 ? "y" : "ies" }}
+              removed, because the move emptied {{ run.summary.pruned === 1 ? "it" : "them" }}.
+            </template>
+            <template v-if="run.summary.recovered">
+              {{ run.summary.recovered }} unfinished operation{{ run.summary.recovered === 1 ? "" : "s" }}
+              from an earlier run {{ run.summary.recovered === 1 ? "was" : "were" }} cleaned up first.
+            </template>
+          </Notice>
+          <ul class="run-failures" v-if="run.summary?.failures.length">
+            <li v-for="fail in run.summary.failures" :key="fail.path">
+              <span class="path">{{ fail.path }}</span>
+              <span class="run-why">{{ fail.reason }}</span>
+            </li>
+          </ul>
+          <Ledger v-if="run.rows.length" :rows="run.rows" />
+        </div>
+      </template>
+    </section>
   </div>
 </template>
 
 <style scoped>
-.run-wrap { display: flex; flex-direction: column; gap: var(--s3); min-height: 0; }
+.run-wrap { display: flex; flex-direction: column; gap: var(--s5); min-height: 0; overflow-y: auto; }
 
+.run-now { display: flex; flex-direction: column; gap: var(--s3); }
+.run-head { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
+.run-route { font-size: var(--body); font-weight: 600; margin: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.run-verb { font-size: var(--small); color: var(--text-quiet); }
+.run-spacer { flex: 1; }
 .run-readout { display: flex; align-items: baseline; gap: var(--s5); }
 .run-mass { font-size: 30px; font-weight: 500; letter-spacing: -0.02em; }
 .run-of { font-size: var(--small); color: var(--text-quiet); }
 .run-of b { color: var(--text); font-weight: 600; }
 .run-at { font-size: var(--fine); color: var(--text-faint); }
-.run-spacer { flex: 1; }
+.run-quiet { font-size: var(--fine); color: var(--text-faint); margin: 0; }
 
-.run-ledger { flex: 1; overflow-y: auto; min-height: 0; }
-.run-sorts { display: flex; gap: var(--s3); align-items: baseline; font-size: var(--fine); color: var(--text-faint); margin: 0 0 var(--s2); }
-.run-sorts :deep(button) { width: auto; text-decoration: underline; text-underline-offset: 2px; }
-.run-nomatch { font-size: var(--small); color: var(--text-quiet); }
-.run-line {
+.run-list { display: flex; flex-direction: column; }
+.run-list-head { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s2); }
+.run-list-head h3 { font-size: var(--small); font-weight: 600; margin: 0; }
+.run-row {
   display: grid;
-  grid-template-columns: 9px minmax(0, 1fr) 118px 88px;
-  gap: var(--s2);
+  grid-template-columns: 36px minmax(0, 1fr) auto auto;
+  gap: var(--s3);
   align-items: center;
-  padding: 5px 0;
-  font-size: var(--fine);
+  padding: var(--s2) 0;
+  font-size: var(--small);
   border-bottom: var(--bw) solid var(--rule);
 }
-.run-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
-.t-plain { background: var(--text-faint); }
-.t-live { background: var(--accent); }
+.run-place { color: var(--text-faint); font-size: var(--fine); }
+.run-row-route { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; }
+.run-row-what { color: var(--text-quiet); }
+.run-dot { width: 7px; height: 7px; border-radius: 50%; justify-self: center; }
 .t-ok { background: var(--ok); }
-.t-hold { background: var(--hold); }
 .t-bad { background: var(--bad); }
-.run-file { color: var(--text-quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; }
-.run-word { color: var(--text-faint); }
-.run-detail { grid-column: 2 / -1; color: var(--text-faint); }
-.run-size { text-align: right; color: var(--text-faint); }
-.run-bar { grid-column: 1 / -1; height: 2px; background: var(--rule); border-radius: 1px; overflow: hidden; }
-.run-bar i { display: block; height: 100%; background: var(--accent); }
+.run-open { display: flex; flex-direction: column; gap: var(--s2); padding: var(--s3) 0 var(--s4); }
 
-.run-summary { display: flex; flex-direction: column; gap: var(--s2); }
 .run-failures { list-style: none; margin: 0; padding: 0; font-size: var(--fine); }
 .run-failures li { display: flex; gap: var(--s3); padding: 3px 0; color: var(--text-quiet); }
 .run-why { color: var(--bad); margin-left: auto; }

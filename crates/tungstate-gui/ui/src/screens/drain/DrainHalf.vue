@@ -100,12 +100,14 @@ onMounted(async () => {
   }
 });
 
+/** Start, or join the queue. A queued transfer leaves you where you were,
+ *  picking the next files, and says where it is in line. */
 async function send(request: TransferRequest) {
   setup.value = null;
-  t.clearRun();
-  where.value = "runs";
   try {
-    await transfers.start(request);
+    const accepted = await transfers.start(request);
+    t.accepted(accepted);
+    if (accepted.started) where.value = "runs";
     await linkApi.list();
   } catch (e) {
     problem.value = String(e);
@@ -133,6 +135,10 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
     </nav>
 
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
+    <Notice v-if="t.placed.value && where !== 'runs'">
+      {{ t.placed.value.line }}
+      <Button look="link" @click="where = 'runs'">See the queue</Button>
+    </Notice>
     <Notice tone="hold" v-if="t.stranded.value.length" class="dh-unfinished">
       {{ t.stranded.value.length === 1 ? "A transfer" : `${t.stranded.value.length} transfers` }}
       stopped part-way.

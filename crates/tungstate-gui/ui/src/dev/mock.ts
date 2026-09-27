@@ -6,6 +6,7 @@
 // what this exists to avoid. Only mock.html imports this file.
 
 import { mockIPC } from "@tauri-apps/api/mocks";
+import { emit } from "@tauri-apps/api/event";
 import fx from "./fixture.json";
 import type * as T from "../engine/types";
 import "../styles/tokens.css";
@@ -206,6 +207,7 @@ mockIPC((cmd, args) => {
       return { overlapping: [], fresh: 3, same_size: 1, clashes: 1, too_recent: 0, bytes: 629_145_600, removes_originals: true,
         items: listings[`${DEMO}/nas/incoming`].entries.map((e, i) => ({ path: e.path, size: e.size, outcome: ["move", "move", "move", "check", "clash"][i] ?? "move", existing: null, towards: "forward" })) };
     case "interrupted": return [];
+    case "transfer_queue": return { running: null, waiting: [] };
     case "list_syncs": return syncList;
     case "following_state":
       if (sceneName === "sync-following" || sceneName === "sync-held") {
@@ -244,7 +246,7 @@ mockIPC((cmd, args) => {
     case "plugin:event|listen": return 1;
     default: return null;
   }
-});
+}, { shouldMockEvents: sceneName.startsWith("drain-queue") });
 
 /** A scan's answer, built from the fixture's real paths and sizes. */
 function found(root: string) {
@@ -421,6 +423,15 @@ async function tab(n: number) {
   await tick();
 }
 
+/** A transfer in the queue, as the engine lists it. */
+const queued = (id: number, source: string, destination: string, moves: boolean, files: number | null, bytes: number | null, exchange = false): T.JobView => ({
+  id, name: null, source, destination, exchange, removes_originals: moves, files, bytes,
+});
+const summary = (over: Partial<T.Summary>): T.Summary => ({
+  transferred: 0, already_present: 0, skipped: 0, quarantined: 0, failed: 0, bytes: 0,
+  recovered: 0, pruned: 0, cancelled: false, destination_lost: false, failures: [], ...over,
+});
+
 const scenes: Record<string, () => unknown> = {
   home: () => {},
   "folder-start": async () => { nav.go("folder"); await f.listRegistered(); },
@@ -452,6 +463,7 @@ const scenes: Record<string, () => unknown> = {
     nav.go("drain");
     await tab(1);
     const files = listings[`${DEMO}/nas/incoming`].entries.slice(0, 4);
+    t.current.value = queued(1, `${DEMO}/to-drain`, `${DEMO}/nas/incoming`, true, 4, 1_258_291_200);
     t.shape.value = { removes_originals: true, at_once: 2 };
     t.atOnce.value = 2;
     t.live.value = files[0]?.path ?? null;
@@ -461,6 +473,75 @@ const scenes: Record<string, () => unknown> = {
       done: i === 0 ? Math.round(e.size * 0.62) : i === 1 ? e.size : 0,
       checked: i === 1 ? Math.round(e.size * 0.3) : 0,
     }));
+  },
+  // Two transfers, the second started while the first runs, replayed as the
+  // engine emits them. `&step=` stops the replay at 1 (first running),
+  // 2 (second pressed, back on Files), 3 (on Runs: one running, one waiting),
+  // 4 (second reached), 5 (both finished).
+  "drain-queue-replay": async () => {
+    const upTo = Number(params.get("step") ?? "5");
+    const say = async (event: string, payload: unknown) => { await emit(event, payload); await tick(); };
+    const videos = queued(1, `${DEMO}/to-drain`, `${DEMO}/nas/incoming`, true, 2, 629_145_600);
+    const photos = queued(2, `${DEMO}/photos-by-nothing`, `${DEMO}/nas/photos`, false, 3, 10_100_000);
+    nav.go("drain");
+    await tab(1);
+    await say("transfer://queue", { running: videos, waiting: [] });
+    await say("transfer://job", videos);
+    await say("transfer://began", { removes_originals: true, at_once: 2 });
+    await say("transfer://planned", [{ path: "clip-1.mov", size: 209_715_200 }, { path: "clip-2.mov", size: 419_430_400 }]);
+    await say("transfer://started", { path: "clip-1.mov", size: 209_715_200 });
+    await say("transfer://finished", { path: "clip-1.mov", outcome: "transferred", detail: null });
+    await say("transfer://started", { path: "clip-2.mov", size: 419_430_400 });
+    await say("transfer://advanced", { path: "clip-2.mov", done: 150_000_000, total: 419_430_400 });
+    if (upTo < 2) return;
+    // Move pressed on the Files tab while the first runs.
+    await tab(0);
+    t.accepted({ started: false, waiting: 1, job: 2 });
+    await say("transfer://queue", { running: videos, waiting: [photos] });
+    await say("transfer://advanced", { path: "clip-2.mov", done: 300_000_000, total: 419_430_400 });
+    if (upTo < 3) return;
+    await tab(1);
+    if (upTo < 4) return;
+    await say("transfer://finished", { path: "clip-2.mov", outcome: "transferred", detail: null });
+    await say("transfer://done", { job: 1, ...summary({ transferred: 2, bytes: 629_145_600 }) });
+    await say("transfer://queue", { running: photos, waiting: [] });
+    await say("transfer://job", photos);
+    await say("transfer://began", { removes_originals: false, at_once: 2 });
+    await say("transfer://planned", [{ path: "IMG_0001.jpg", size: 3_100_000 }, { path: "IMG_0002.jpg", size: 2_800_000 }, { path: "IMG_0003.jpg", size: 4_200_000 }]);
+    await say("transfer://started", { path: "IMG_0001.jpg", size: 3_100_000 });
+    await say("transfer://advanced", { path: "IMG_0001.jpg", done: 1_900_000, total: 3_100_000 });
+    if (upTo < 5) return;
+    await say("transfer://finished", { path: "IMG_0001.jpg", outcome: "transferred", detail: null });
+    for (const [p, n] of [["IMG_0002.jpg", 2_800_000], ["IMG_0003.jpg", 4_200_000]] as const) {
+      await say("transfer://started", { path: p, size: n });
+      await say("transfer://finished", { path: p, outcome: "transferred", detail: null });
+    }
+    await say("transfer://done", { job: 2, ...summary({ transferred: 3, bytes: 10_100_000 }) });
+    await say("transfer://queue", { running: null, waiting: [] });
+  },
+  // A full queue: one running, three waiting (one still being counted), and
+  // two finished, one of which failed part-way.
+  "drain-queue": async () => {
+    // After the run scene: the store's own first `transfer_queue` answer
+    // lands meanwhile and would overwrite a queue set before it.
+    await scenes["drain-run"]!();
+    await tick();
+    const running = queued(4, `${DEMO}/to-drain`, `${DEMO}/nas/incoming`, true, 4, 1_258_291_200);
+    t.queue.value = {
+      running,
+      waiting: [
+        queued(5, `${DEMO}/photos-by-nothing`, `${DEMO}/nas/photos`, false, 212, 1_503_238_553),
+        { ...queued(6, `${DEMO}/messy-downloads`, "nas:archive/2026", true, null, null), name: "downloads-to-nas" },
+        queued(7, `${DEMO}/to-drain`, `${DEMO}/nas/incoming`, false, 12, 88_080_384, true),
+      ],
+    };
+    t.finished.value = [
+      { job: queued(3, `${DEMO}/real-shape-media`, "nas:media", true, 9, 2_147_483_648), rows: [], at: Date.now(),
+        summary: summary({ transferred: 8, failed: 1, bytes: 1_932_735_283, failures: [{ path: "2024/talk.mp4", reason: "the far side refused the write: permission denied" }] }), problem: null },
+      { job: queued(2, `${DEMO}/photos-by-nothing`, `${DEMO}/nas/photos`, false, 40, 96_468_992), rows: [], at: Date.now(),
+        summary: summary({ transferred: 40, bytes: 96_468_992 }), problem: null },
+    ];
+    t.current.value = running;
   },
   history: () => nav.go("history"),
   "dupes-start": () => nav.go("dupes"),
@@ -562,11 +643,14 @@ const scenes: Record<string, () => unknown> = {
   "drain-done": async () => {
     nav.go("drain");
     await tab(1);
-    t.summary.value = {
-      transferred: 3, already_present: 1, skipped: 0, quarantined: 1, failed: 1,
-      bytes: 629_145_600, recovered: 2, pruned: 0, cancelled: false, destination_lost: false,
-      failures: [{ path: "talk.mp4", reason: "the far side refused the write: permission denied" }],
-    };
+    t.finished.value = [{
+      job: queued(1, `${DEMO}/to-drain`, `${DEMO}/nas/incoming`, true, 6, 629_145_600),
+      rows: [], at: Date.now(), problem: null,
+      summary: summary({
+        transferred: 3, already_present: 1, quarantined: 1, failed: 1, bytes: 629_145_600, recovered: 2,
+        failures: [{ path: "talk.mp4", reason: "the far side refused the write: permission denied" }],
+      }),
+    }];
   },
   "drain-deaf": async () => {
     nav.go("drain");

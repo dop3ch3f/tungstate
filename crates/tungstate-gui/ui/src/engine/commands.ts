@@ -105,8 +105,11 @@ export const transfers = {
   rememberPanes: (panes: { left: string | null; right: string | null }) =>
     invoke<void>("remember_panes", { panes }),
   preview: (request: T.TransferRequest) => invoke<T.Preview>("preview_transfer", { request }),
-  /** Returns the link name it ran under. */
-  start: (request: T.TransferRequest) => invoke<string>("start_transfer", { request }),
+  /** Started, or placed in the queue behind the one running. */
+  start: (request: T.TransferRequest) => invoke<T.Accepted>("start_transfer", { request }),
+  queue: () => invoke<T.QueueView>("transfer_queue"),
+  /** False when it had already started, so there was nothing to take out. */
+  removeFromQueue: (job: number) => invoke<boolean>("remove_from_queue", { job }),
   cancel: () => invoke<void>("cancel_run"),
   stopNow: () => invoke<void>("stop_now"),
   setAtOnce: (files: number) => invoke<void>("set_at_once", { files }),

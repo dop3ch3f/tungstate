@@ -20,6 +20,13 @@ export function bytes(n: number): string {
  *  `counts.ts`, which checks where the number came from. */
 export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
 
+/** `1st`, `2nd`, `11th`, `22nd`: a place in line. The teens are all `th`. */
+export function ordinal(n: number): string {
+  const teen = n % 100 >= 11 && n % 100 <= 13;
+  const suffix = teen ? "th" : ({ 1: "st", 2: "nd", 3: "rd" } as Record<number, string>)[n % 10] ?? "th";
+  return `${n}${suffix}`;
+}
+
 /**
  * Shorten a path from the left, keeping the part that identifies it.
  *

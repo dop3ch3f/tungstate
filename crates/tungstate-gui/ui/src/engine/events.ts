@@ -22,7 +22,10 @@ export const watchEvents = {
 };
 
 export const transferEvents = {
-  queued: on<T.Accepted>("transfer://queued"),
+  /** What is running and what waits, on every change. */
+  queue: on<T.QueueView>("transfer://queue"),
+  /** A transfer starting. Every file event until its `done` or `error` is its. */
+  job: on<T.JobView>("transfer://job"),
   began: on<T.Began>("transfer://began"),
   planned: on<T.PlannedFile[]>("transfer://planned"),
   advanced: on<T.Advanced>("transfer://advanced"),
@@ -32,8 +35,8 @@ export const transferEvents = {
   finished: on<T.Finished>("transfer://finished"),
   conflict: on<T.ConflictAsk>("transfer://conflict"),
   identical: on<T.IdenticalAsk>("transfer://identical"),
-  done: on<T.Summary>("transfer://done"),
-  error: on<string>("transfer://error"),
+  done: on<T.JobDone>("transfer://done"),
+  error: on<T.JobFailed>("transfer://error"),
 };
 
 /** A sync's run: the same file events a transfer sends, under `sync://`, and

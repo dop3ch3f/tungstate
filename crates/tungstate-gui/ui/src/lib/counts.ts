@@ -16,8 +16,8 @@
 // refuses it, on every platform CI runs on.
 
 import type {
-  Cleared, DupeRow, Found, MemberPreview, Notice, Outcome, PastRun, PastSync, PreviewView,
-  PutBackDone, ScanProgress, SyncLeg, SyncPreview, SyncRan, SyncUndone, TidyDone,
+  Cleared, DupeRow, Found, JobView, MemberPreview, Notice, Outcome, PastRun, PastSync, PreviewView,
+  PutBackDone, ScanProgress, Summary, SyncLeg, SyncPreview, SyncRan, SyncUndone, TidyDone,
 } from "../engine/types";
 
 declare const isFileCount: unique symbol;
@@ -161,6 +161,12 @@ export const emptied = (o: Outcome): DirCount => o.removed as DirCount;
  * preview that omitted them would be the one screen that dropped them.
  */
 export const dirsCounted = (n: number): DirCount => n as DirCount;
+
+/** Files a transfer verified at the far side. Not `already_present`. */
+export const sent = (summary: Summary): FileCount => seal(summary.transferred);
+
+/** Files a waiting transfer will take on, once counted. */
+export const inLine = (job: JobView & { files: number }): FileCount => seal(job.files);
 
 /** `n file`/`n files`, without the parenthesised plural the CLI used to print. */
 export const files = (n: FileCount): string => `${n} ${n === 1 ? "file" : "files"}`;

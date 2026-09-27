@@ -50,7 +50,7 @@ window knows which one it wants to say.
 
 Three commands return a **name** rather than prose, which is data and is fine:
 `reset_storage` and `restore_archive` return the archive the previous state was
-put under; `start_transfer` returns the link name it ran under. `rules_text`
+put under. `rules_text`
 returns a policy file, which is text because it *is* text.
 
 ### 2. The command line and the window compute the same answer
@@ -108,6 +108,21 @@ not one per sweep (slice 9).
 **Transfers** — `browse`, `places`, `preview_transfer`, `start_transfer`,
 `cancel_run`, `stop_now`, `list_links`, `create_link`, `run_link`,
 `remove_link`, `preview_link`, `set_at_once`.
+
+Transfers are a queue, like downloads (polish pass, 2026-09-27). One runs and
+the rest wait in the order they were asked for. `start_transfer`, `run_link`
+and `resume_interrupted` return `Accepted { started, waiting, job }`, where
+`waiting` counts the transfers behind the running one, this one included.
+`transfer_queue` returns `{ running, waiting }` as `JobView`s (route, move or
+copy, exchange, and `files`/`bytes` once counted from the source alone), and
+`remove_from_queue(job)` takes a waiting one out, answering `false` if it had
+already started. `transfer://queue` carries the same listing on every change.
+`transfer://job` announces each transfer as it starts, and every file event
+after it (`began`, `planned`, `started`, `advanced`, `checking`, `finished`)
+is that transfer's until its `transfer://done` (the totals plus `job`) or
+`transfer://error` (`{ job, message }`). A transfer that fails, or whose far
+side disappears, is its own: the next one still runs. Stop is the exception
+and clears the queue.
 
 **Syncs** — `list_syncs`, `make_sync`, `change_sync`, `add_sync_member`,
 `remove_sync_member`, `remove_sync`, `preview_sync`, `run_sync`, `stop_sync`,

@@ -909,6 +909,21 @@ fn a_preview_changes_absolutely_nothing() {
 }
 
 #[test]
+fn measuring_counts_the_chosen_files_and_asks_nothing_of_the_destination() {
+    let rig = Rig::new(SourcePolicy::Delete);
+    rig.write_source("a.mp4", b"aaaa");
+    rig.write_source("sub/b.mp4", b"bbbbbb");
+    rig.write_source("left-out.mp4", b"cc");
+
+    assert_eq!(measure(&rig.source, None).unwrap(), (3, 12));
+    let chosen = [PathBuf::from("a.mp4"), PathBuf::from("sub")];
+    assert_eq!(measure(&rig.source, Some(&chosen)).unwrap(), (2, 10));
+    // A chosen file already moved is the drain working, not a fault.
+    let gone = [PathBuf::from("a.mp4"), PathBuf::from("moved-already.mp4")];
+    assert_eq!(measure(&rig.source, Some(&gone)).unwrap(), (1, 4));
+}
+
+#[test]
 fn a_preview_distinguishes_a_clash_from_a_same_size_file() {
     let rig = Rig::new(SourcePolicy::Delete);
     rig.write_source("same.mp4", b"1234");

@@ -370,8 +370,32 @@ export interface Preview {
  *  window must not clear the progress it is showing. */
 export interface Accepted {
   started: boolean;
+  /** Transfers waiting behind the running one, this one included. */
   waiting: number;
+  /** This transfer, as the queue and its events name it. */
+  job: number;
 }
+
+/** A transfer in the queue. `files` and `bytes` are null until counted. */
+export interface JobView {
+  id: number;
+  /** The saved pair's name; a one-off transfer from the browser has none. */
+  name: string | null;
+  source: string;
+  destination: string;
+  exchange: boolean;
+  removes_originals: boolean;
+  files: number | null;
+  bytes: number | null;
+}
+
+export interface QueueView {
+  running: JobView | null;
+  waiting: JobView[];
+}
+
+export type JobDone = Summary & { job: number };
+export interface JobFailed { job: number; message: string }
 
 export interface Failure {
   path: string;

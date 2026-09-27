@@ -11,6 +11,7 @@ import Empty from "../../ui/Empty.vue";
 import Sheet from "../../ui/Sheet.vue";
 import PairForm from "./PairForm.vue";
 import { useBusy } from "../../state/useBusy";
+import { useTransfer } from "../../state/useTransfer";
 
 const props = defineProps<{ places: Place[] }>();
 const emit = defineEmits<{ ran: [] }>();
@@ -78,12 +79,14 @@ function says(field: keyof typeof CHOICES, token: string): string {
 // A second Run while the first is being handed over would queue the pair
 // twice, so each link's actions wait for the one before.
 const doing = useBusy();
+const transfer = useTransfer();
 
 const run = (name: string) =>
   doing.run(name, async () => {
     try {
-      await links.run(name);
-      emit("ran");
+      const accepted = await links.run(name);
+      transfer.accepted(accepted);
+      if (accepted.started) emit("ran");
     } catch (e) {
       problem.value = String(e);
     }
