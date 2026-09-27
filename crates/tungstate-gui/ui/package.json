@@ -8,7 +8,7 @@
     "build": "node scripts/check-css.mjs && vue-tsc --noEmit && vite build",
     "preview": "vite preview",
     "check": "node scripts/check-css.mjs",
-    "test": "node --experimental-strip-types --test scripts/*.test.mjs"
+    "test": "node --experimental-strip-types --import ./scripts/resolve-ts.mjs --test scripts/*.test.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2",

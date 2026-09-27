@@ -94,11 +94,15 @@ async function look(path: string) {
 
 /** Open a folder that is already governed, straight to its preview. */
 async function open(path: string) {
+  // The folder changes only once its own preview is in, so a second click
+  // while one loads can never show one folder's plan under another's name.
+  const view = await run("Working out what would move", () => folders.preview(path));
+  if (!view) return;
   root.value = path;
   tidied.value = null;
   putBackCount.value = null;
-  await refresh();
-  if (preview.value) phase.value = "previewing";
+  preview.value = view;
+  phase.value = "previewing";
 }
 
 async function refresh() {
