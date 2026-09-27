@@ -35,7 +35,7 @@ ours, with names such as `plugin:updater|check`.
 
 `capabilities/default.json` lists what the window may call. Anything not in
 the list is refused, which is the lesson of alpha.1: an empty list meant the
-window could not even listen for events. This slice adds four entries:
+window could not even listen for events. This slice adds three entries:
 
 - `core:window:allow-set-theme`, so the title bar follows the theme;
 - `updater:default`, to check for and download an update;
