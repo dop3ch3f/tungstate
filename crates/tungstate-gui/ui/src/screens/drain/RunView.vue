@@ -9,8 +9,8 @@ import TableTools from "../../ui/TableTools.vue";
 import { useTransfer } from "../../state/useTransfer";
 import { bytes } from "../../lib/format";
 import { toneOfOutcome } from "../../lib/tone";
-import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
+import StopPair from "../../ui/StopPair.vue";
 import Empty from "../../ui/Empty.vue";
 
 const t = useTransfer();
@@ -85,8 +85,7 @@ const planned = computed(() => t.rows.value.length);
       <span class="run-at" v-if="t.atOnce.value">{{ t.atOnce.value }} at a time</span>
       <span class="run-at" v-if="t.queued.value">{{ t.queued.value }} queued behind this</span>
       <span class="run-spacer"></span>
-      <Button v-if="t.running.value && !t.stopping.value" @click="t.cancel()">Stop after these files</Button>
-      <Button v-else-if="t.running.value && !t.halting.value" look="danger" @click="t.stopNow()">Stop now</Button>
+      <StopPair v-if="t.running.value" :stopping="t.stopping.value" :halting="t.halting.value" @stop="t.cancel()" @now="t.stopNow()" />
     </div>
 
     <Empty v-if="!planned && !t.summary.value" art="no-runs" line="Nothing running. Tick some files in the browser and press Copy or Move." />

@@ -10,6 +10,7 @@ import { missed } from "../../lib/syncwords";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
+import StopPair from "../../ui/StopPair.vue";
 import Working from "../../ui/Working.vue";
 import SyncUndoneNotice from "./SyncUndoneNotice.vue";
 
@@ -74,8 +75,7 @@ async function putBack() {
       </span>
       <span class="rn-leg" v-if="s.leg.value && !ran">{{ s.leg.value.from }} → {{ s.leg.value.to }}</span>
       <span class="rn-gap"></span>
-      <Button v-if="!ran && !s.stopping.value" @click="s.stop()">Stop after these files</Button>
-      <Button v-else-if="!ran && !s.halting.value" look="danger" @click="s.stopNow()">Stop now</Button>
+      <StopPair v-if="!ran" :stopping="s.stopping.value" :halting="s.halting.value" @stop="s.stop()" @now="s.stopNow()" />
     </div>
 
     <Working v-if="!ran && !s.rows.value.length" what="Setting things aside and renaming first" note="then each pair of folders is copied in turn" />

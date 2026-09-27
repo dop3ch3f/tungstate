@@ -290,11 +290,21 @@ export function useSync() {
     },
     async stop() {
       stopping.value = true;
-      await syncs.stop(false);
+      try {
+        await syncs.stop(false);
+      } catch (e) {
+        stopping.value = false;
+        problem.value = reason(e);
+      }
     },
     async stopNow() {
       halting.value = true;
-      await syncs.stop(true);
+      try {
+        await syncs.stop(true);
+      } catch (e) {
+        halting.value = false;
+        problem.value = reason(e);
+      }
     },
     async putBack(name: string, plan: number) {
       busy.value = plan;

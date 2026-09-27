@@ -209,11 +209,21 @@ export function useTransfer() {
     },
     async cancel() {
       stopping.value = true;
-      await transfers.cancel();
+      try {
+        await transfers.cancel();
+      } catch (e) {
+        stopping.value = false;
+        problem.value = String(e);
+      }
     },
     async stopNow() {
       halting.value = true;
-      await transfers.stopNow();
+      try {
+        await transfers.stopNow();
+      } catch (e) {
+        halting.value = false;
+        problem.value = String(e);
+      }
     },
     async setAtOnce(files: number) {
       await transfers.setAtOnce(files);
