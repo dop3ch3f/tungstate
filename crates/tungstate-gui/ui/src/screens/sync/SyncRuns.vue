@@ -99,10 +99,10 @@ const table = useTable(toRef(props, "runs"), {
   gap: var(--s3);
   align-items: center;
 }
-.sr-head { font-size: var(--fine); color: var(--text-faint); padding: 5px var(--s2); border-bottom: var(--bw) solid var(--edge); }
+.sr-head { font-size: var(--fine); color: var(--text-faint); padding: 5px var(--s2); border-bottom: var(--bw) solid var(--rule); }
 .sr-head > :nth-child(n + 3) { justify-self: end; }
 .sr-rows { list-style: none; margin: 0; padding: 0; }
-.sr-row { padding: 8px var(--s2); border-bottom: var(--bw) solid var(--edge); font-size: var(--small); }
+.sr-row { padding: 8px var(--s2); border-bottom: var(--bw) solid var(--rule); font-size: var(--small); }
 .sr-row > :nth-child(n + 3) { justify-self: end; text-align: right; }
 .sr-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
 .sr-back .sr-dot { background: var(--text-faint); }

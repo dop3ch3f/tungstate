@@ -150,7 +150,7 @@ async function remove(name: string) {
   gap: var(--s4);
   align-items: start;
   padding: var(--s3) 0;
-  border-bottom: var(--bw) solid var(--edge);
+  border-bottom: var(--bw) solid var(--rule);
 }
 @container (max-width: 680px) {
   .cx-row { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }

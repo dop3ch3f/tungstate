@@ -132,7 +132,7 @@ async function putBack() {
   align-items: center;
   padding: 5px 0;
   font-size: var(--fine);
-  border-bottom: var(--bw) solid var(--edge);
+  border-bottom: var(--bw) solid var(--rule);
 }
 .rn-dot { width: 7px; height: 7px; border-radius: 50%; }
 .rn-plain { background: var(--text-faint); }
@@ -143,7 +143,7 @@ async function putBack() {
 .rn-file { color: var(--text-quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .rn-word { color: var(--text-faint); }
 .rn-size { text-align: right; color: var(--text-faint); }
-.rn-bar { grid-column: 1 / -1; height: 2px; background: var(--edge); border-radius: 1px; overflow: hidden; }
+.rn-bar { grid-column: 1 / -1; height: 2px; background: var(--rule); border-radius: 1px; overflow: hidden; }
 .rn-bar i { display: block; height: 100%; background: var(--accent); }
 .rn-missed { list-style: none; margin: 0; padding: 0; font-size: var(--fine); }
 .rn-missed li { display: flex; gap: var(--s3); padding: 3px 0; color: var(--text-quiet); }

@@ -343,7 +343,12 @@ function found(root: string) {
 
 const params = new URLSearchParams(location.search);
 const scene = params.get("scene") ?? "home";
-document.documentElement.dataset.theme = params.get("theme") ?? "retro";
+{
+  // `?theme=` takes a Settings choice, so every theme can be photographed.
+  const { wear } = await import("../state/useTheme");
+  const { choiceOf, resolve } = await import("../lib/theme");
+  wear(resolve(choiceOf(params.get("theme") ?? "retro"), false));
+}
 
 const { createApp } = await import("vue");
 const { default: App } = await import("../App.vue");

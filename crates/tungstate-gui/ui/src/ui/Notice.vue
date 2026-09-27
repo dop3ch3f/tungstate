@@ -35,13 +35,16 @@ const TONE = { plain: "said-plain", hold: "said-hold", bad: "said-bad" } as cons
 /* Retro: a warning is a yellow bar with a black outline. */
 :global([data-theme="retro"] .said-hold) {
   background: var(--warn-bar);
-  color: var(--text);
-  border: var(--bw) solid var(--edge);
+  color: var(--warn-ink);
+  /* A link inside is read on yellow too, whichever tone the theme is. */
+  --text: var(--warn-ink);
+  --text-quiet: var(--warn-ink);
+  border: var(--bw) solid var(--warn-ink);
   border-radius: var(--radius);
   padding: var(--s2) var(--s3) var(--s2) 28px;
   box-shadow: var(--lift);
 }
-:global([data-theme="retro"] .said-hold::before) { left: var(--s2); top: 9px; border-radius: 2px; background: var(--text); color: var(--warn-bar); }
+:global([data-theme="retro"] .said-hold::before) { left: var(--s2); top: 9px; border-radius: 2px; background: var(--warn-ink); color: var(--warn-bar); }
 :global([data-theme="retro"] .said) { border-left-width: var(--bw); }
 
 .said-hold::before {

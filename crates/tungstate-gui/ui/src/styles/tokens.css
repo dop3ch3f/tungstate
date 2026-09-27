@@ -59,6 +59,15 @@
   --surface-raised: var(--raw-raised);
   --edge: var(--raw-edge);
   --edge-strong: var(--raw-edge-strong);
+  /* A line between rows, as against the frame of a window or a button. */
+  --rule: var(--edge);
+  /* The fill of whatever is chosen: the section you are in, a tab, a card. */
+  --chosen: var(--panel);
+  --chosen-ink: var(--text);
+  /* The outline of a chosen card; the section's colour after dark. */
+  --chosen-edge: var(--edge);
+  /* How strongly a file with no picture shows its kind's colour. */
+  --blank: 0.22;
   --sheet: var(--raw-panel);
   /* Inside a section's window. The stage itself, except in retro. */
   --window-bg: var(--raw-window);
@@ -102,6 +111,8 @@
   --kind-folder: var(--raw-kind-folder);
 
   --hold: var(--raw-amber);
+  /* Text on retro's yellow warning bar, which stays yellow after dark. */
+  --warn-ink: var(--text);
   --ok: var(--raw-green);
   --bad: var(--raw-rust);
 
@@ -141,9 +152,11 @@
 [data-half="drain"] { --control: var(--raw-blue); --control-ink: var(--raw-white); }
 [data-half="sync"] { --control: var(--raw-teal); --control-ink: var(--raw-fluoresce-ink); }
 
-/* Themes, chosen by `data-theme` on <html>. Retro ships as the default (see
-   main.ts); graphite, the :root values above, and paper are kept for a theme
-   switch in settings, which is on the backlog in docs/SYLLABUS.md. */
+/* Themes, chosen by `data-theme` on <html>, with `data-tone` for retro's
+   light and dark (lib/theme.ts). Graphite is the :root values above.
+   `color-scheme` gives scrollbars and native controls the matching palette. */
+:root { color-scheme: dark; }
+[data-theme="paper"], [data-theme="retro"] { color-scheme: light; }
 
 /* Premium light: warm paper, ink, hairlines. Colour only in the tiles. */
 [data-theme="paper"] {
@@ -235,3 +248,54 @@
 [data-theme="retro"] [data-half="drain"] { --control: #1d4aff; --control-ink: #ffffff; }
 [data-theme="retro"] [data-half="sync"] { --control: #0f9ba0; --control-ink: #ffffff; }
 
+/* Retro after dark: the same outlines and hard shadows on a warm charcoal
+   desk. Everything the shapes need is inherited from retro above; only the
+   palette changes. The warning bar stays yellow, so its text stays dark. */
+[data-theme="retro"][data-tone="dark"] {
+  color-scheme: dark;
+  /* Depth runs as it does in the light: a dark desk, windows lighter on it,
+     title bars lighter still. Outlines are cream at full weight, as the
+     light theme's are black, and the hard shadow is a black slab. What you
+     have chosen is a raised dark button in a cream outline, not a bright
+     chip, so the brightest thing on screen stays the content. */
+  --field: #1c1b18;
+  --rail: #1f1e1b;
+  --surface: #1c1b18;
+  --panel: #2a2924;
+  --surface-hover: #33322c;
+  --surface-raised: #34332c;
+  --chosen: #4d4b42;
+  --edge: #c9c4b0;
+  --edge-strong: #ddd8c4;
+  --rule: #3a3934;
+  --sheet: #2a2924;
+  --window-bg: #2a2924;
+  --veil: rgba(0, 0, 0, 0.55);
+  --text: #eeede6;
+  --text-quiet: #c2c1b6;
+  --text-faint: #9a998e;
+  --disabled: #7a786d;
+  --lift: 3px 3px 0 #000000;
+  --lift-panel: 5px 5px 0 #000000;
+  --blank: 0.4;
+  --tint-home: #f7a501;
+  --tint-home-ink: #151515;
+  --tint-folder: #ff6420;
+  --tint-drain: #4a72ff;
+  --tint-history: #8a8980;
+  --tint-dupes: #43b06a;
+  --tint-sync: #1fb3b8;
+  --accent: #6b8cff;
+  --accent-soft: rgba(107, 140, 255, 0.16);
+  --accent-ink: #0c0f1c;
+  --control: #f7a501;
+  --control-ink: #151515;
+  --warn-bar: #f5c842;
+  --warn-ink: #151515;
+  --hold: #f0b43c;
+  --ok: #5cc485;
+  --bad: #ff6f52;
+}
+[data-theme="retro"][data-tone="dark"] [data-half="folder"] { --control: #ff6420; --control-ink: #ffffff; --chosen-edge: #ff6420; }
+[data-theme="retro"][data-tone="dark"] [data-half="drain"] { --control: #4a72ff; --control-ink: #ffffff; --chosen-edge: #4a72ff; }
+[data-theme="retro"][data-tone="dark"] [data-half="sync"] { --control: #1fb3b8; --control-ink: #0b1a1b; --chosen-edge: #1fb3b8; }

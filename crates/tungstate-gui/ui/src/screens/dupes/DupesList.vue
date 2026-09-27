@@ -109,7 +109,7 @@ function toggle(row: DupeRow) {
 .sorts :deep(button) { width: auto; text-decoration: underline; text-underline-offset: 2px; }
 .nomatch { font-size: var(--small); color: var(--text-quiet); }
 .dl { overflow-y: auto; padding-right: var(--s2); }
-.group { border-bottom: var(--bw) solid var(--edge); }
+.group { border-bottom: var(--bw) solid var(--rule); }
 .head {
   display: flex;
   align-items: center;
@@ -140,7 +140,7 @@ function toggle(row: DupeRow) {
   border-radius: var(--radius);
   background: var(--surface-raised);
 }
-.blank { display: block; opacity: 0.22; }
+.blank { display: block; opacity: var(--blank); }
 .k-image { background: var(--kind-image); }
 .k-video { background: var(--kind-video); }
 .k-audio { background: var(--kind-audio); }

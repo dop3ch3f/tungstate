@@ -26,7 +26,7 @@ button, .chrome { user-select: none; }
 
 /* Form controls, drawn once so no screen falls back to the browser's own. */
 input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
-select, input[type="text"], input[type="password"], input[type="number"], input:not([type]) {
+select, input[type="text"], input[type="search"], input[type="password"], input[type="number"], input:not([type]) {
   font: inherit;
   font-size: var(--small);
   color: var(--text);

@@ -197,8 +197,8 @@ h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin:
    edge is one. Specific enough to beat `.rows` below whatever the order. */
 :global([data-theme="retro"] .pb > .rows:first-child) { border-top: none; margin-top: 0; }
 
-.rows { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: var(--bw) solid var(--edge); flex: 1; }
-.rows li { border-bottom: var(--bw) solid var(--edge); }
+.rows { list-style: none; margin: var(--s3) 0 0; padding: 0; border-top: var(--bw) solid var(--rule); flex: 1; }
+.rows li { border-bottom: var(--bw) solid var(--rule); }
 .row {
   display: flex;
   align-items: baseline;

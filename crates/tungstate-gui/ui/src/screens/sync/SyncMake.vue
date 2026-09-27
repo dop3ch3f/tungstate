@@ -160,8 +160,8 @@ async function make() {
 .mk { display: flex; flex-direction: column; gap: var(--s4); max-width: 820px; }
 .mk-title { font-size: var(--title); font-weight: 700; margin: 0; }
 .mk-block h2 { font-size: var(--small); font-weight: 700; margin: 0 0 var(--s2); }
-.mk-places { list-style: none; margin: 0 0 var(--s2); padding: 0; border-top: var(--bw) solid var(--edge); }
-.mk-place { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: var(--s3); align-items: center; padding: 6px 0; border-bottom: var(--bw) solid var(--edge); }
+.mk-places { list-style: none; margin: 0 0 var(--s2); padding: 0; border-top: var(--bw) solid var(--rule); }
+.mk-place { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: var(--s3); align-items: center; padding: 6px 0; border-bottom: var(--bw) solid var(--rule); }
 .mk-end { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small); }
 .mk-name { font-size: var(--small); }
 .mk-none { font-size: var(--small); color: var(--text-faint); margin: 0 0 var(--s2); }

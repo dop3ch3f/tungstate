@@ -243,8 +243,8 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
   box-shadow: 2px 0 0 var(--edge);
 }
 :global([data-theme="retro"] .dh-tabs .dh-on) {
-  background: var(--panel);
-  color: var(--text);
+  background: var(--chosen);
+  color: var(--chosen-ink);
   font-weight: 700;
 }
 .dh-badge { color: var(--accent); font-size: 9px; vertical-align: 2px; }

@@ -345,8 +345,8 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   box-shadow: 2px 0 0 var(--edge);
 }
 :global([data-theme="retro"] .views .von) {
-  background: var(--panel);
-  color: var(--text);
+  background: var(--chosen);
+  color: var(--chosen-ink);
   font-weight: 700;
 }
 .howmany { font-variant-numeric: tabular-nums; opacity: 0.7; margin-left: 2px; }
@@ -401,10 +401,10 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   padding: var(--s1) 0;
   font-size: var(--fine);
   color: var(--text-quiet);
-  border-bottom: var(--bw) solid var(--edge);
+  border-bottom: var(--bw) solid var(--rule);
 }
 .becomes { font-size: var(--fine); color: var(--text-faint); }
-.mhead { display: flex; gap: var(--s5); font-size: var(--fine); color: var(--text-faint); padding: 4px 0; border-bottom: var(--bw) solid var(--edge); }
+.mhead { display: flex; gap: var(--s5); font-size: var(--fine); color: var(--text-faint); padding: 4px 0; border-bottom: var(--bw) solid var(--rule); }
 :global([data-theme="retro"] .mhead) { background: var(--surface-raised); color: var(--text); font-weight: 700; font-family: var(--font-mono); padding: 5px var(--s2); }
 .to { color: var(--text); }
 .reason { color: var(--text-faint); margin-left: auto; }

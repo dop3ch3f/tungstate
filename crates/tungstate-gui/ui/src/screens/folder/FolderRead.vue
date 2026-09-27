@@ -170,7 +170,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   column-gap: var(--s4);
   padding: 0 var(--s3) 7px;
   margin: 0 calc(var(--s3) * -1);
-  border-bottom: var(--bw) solid var(--edge);
+  border-bottom: var(--bw) solid var(--rule);
   font-size: var(--fine);
   color: var(--text-faint);
   white-space: nowrap;
@@ -189,12 +189,12 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   color: var(--text);
   font-weight: 700;
   padding: 5px var(--s3);
-  border-bottom: var(--bw) solid var(--edge);
+  border-bottom: var(--bw) solid var(--rule);
   text-transform: none;
   letter-spacing: 0;
   font-family: var(--font-mono);
 }
-:global([data-theme="retro"] .way) { border-bottom: var(--bw) solid var(--edge); border-radius: 0; }
+:global([data-theme="retro"] .way) { border-bottom: var(--bw) solid var(--rule); border-radius: 0; }
 .kway { text-align: left; }
 .knum { text-align: right; }
 

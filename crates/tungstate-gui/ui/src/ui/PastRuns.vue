@@ -104,10 +104,10 @@ const table = useTable(toRef(props, "runs"), {
   gap: var(--s3);
   align-items: center;
 }
-.pr-head { font-size: var(--fine); color: var(--text-faint); padding: 5px var(--s2); border-bottom: var(--bw) solid var(--edge); }
+.pr-head { font-size: var(--fine); color: var(--text-faint); padding: 5px var(--s2); border-bottom: var(--bw) solid var(--rule); }
 .pr-head > :nth-child(n + 3) { justify-self: end; }
 .pr-rows { list-style: none; margin: 0; padding: 0; }
-.pr-row { padding: 8px var(--s2); border-bottom: var(--bw) solid var(--edge); font-size: var(--small); }
+.pr-row { padding: 8px var(--s2); border-bottom: var(--bw) solid var(--rule); font-size: var(--small); }
 .pr-row > :nth-child(n + 3) { justify-self: end; text-align: right; }
 .pr-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
 .pr-back .pr-dot { background: var(--text-faint); }

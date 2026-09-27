@@ -173,7 +173,7 @@ const planned = computed(() => t.rows.value.length);
   align-items: center;
   padding: 5px 0;
   font-size: var(--fine);
-  border-bottom: var(--bw) solid var(--edge);
+  border-bottom: var(--bw) solid var(--rule);
 }
 .run-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-faint); }
 .t-plain { background: var(--text-faint); }
@@ -185,7 +185,7 @@ const planned = computed(() => t.rows.value.length);
 .run-word { color: var(--text-faint); }
 .run-detail { grid-column: 2 / -1; color: var(--text-faint); }
 .run-size { text-align: right; color: var(--text-faint); }
-.run-bar { grid-column: 1 / -1; height: 2px; background: var(--edge); border-radius: 1px; overflow: hidden; }
+.run-bar { grid-column: 1 / -1; height: 2px; background: var(--rule); border-radius: 1px; overflow: hidden; }
 .run-bar i { display: block; height: 100%; background: var(--accent); }
 
 .run-summary { display: flex; flex-direction: column; gap: var(--s2); }

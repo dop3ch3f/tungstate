@@ -73,8 +73,8 @@ async function putBack(run: PastSync) {
 .ss { display: flex; flex-direction: column; gap: var(--s4); }
 .ss-intro { font-size: var(--body); color: var(--text-quiet); margin: 0; max-width: 70ch; line-height: 1.55; }
 .ss-new { display: flex; }
-.ss-list { list-style: none; margin: 0; padding: 0; border-top: var(--bw) solid var(--edge); }
-.ss-list li { border-bottom: var(--bw) solid var(--edge); }
+.ss-list { list-style: none; margin: 0; padding: 0; border-top: var(--bw) solid var(--rule); }
+.ss-list li { border-bottom: var(--bw) solid var(--rule); }
 .ss-row {
   display: grid;
   grid-template-columns: 160px minmax(0, 1fr) auto;

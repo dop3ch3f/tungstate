@@ -74,7 +74,7 @@ function lookAt(sync: SyncView) {
 <style scoped>
 .la { display: flex; flex-direction: column; }
 .la-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
-.la-one { display: flex; flex-direction: column; gap: var(--s1); padding-bottom: var(--s3); border-bottom: var(--bw) solid var(--edge); font-size: var(--small); align-items: flex-start; }
+.la-one { display: flex; flex-direction: column; gap: var(--s1); padding-bottom: var(--s3); border-bottom: var(--bw) solid var(--rule); font-size: var(--small); align-items: flex-start; }
 .la-way { color: var(--text-quiet); }
 .la-what { color: var(--text-faint); font-size: var(--fine); }
 .la-foot { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s4); }

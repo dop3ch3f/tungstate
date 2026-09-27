@@ -110,5 +110,5 @@ function exact(on: boolean) {
 .sy-more-body { display: grid; gap: var(--s3); margin-top: var(--s3); max-width: 60ch; }
 .sy-field { display: flex; flex-direction: column; gap: 5px; font-size: var(--small); }
 .sy-field span { font-weight: 600; }
-:global([data-theme="retro"] .sy-card.sy-on) { box-shadow: inset 0 0 0 var(--bw) var(--edge), var(--lift); background: var(--panel); }
+:global([data-theme="retro"] .sy-card.sy-on) { box-shadow: inset 0 0 0 var(--bw) var(--chosen-edge), var(--lift); background: var(--panel); }
 </style>

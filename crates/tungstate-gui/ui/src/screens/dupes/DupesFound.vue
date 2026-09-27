@@ -168,7 +168,7 @@ async function go() {
   gap: var(--s3);
   flex: 1;
   min-height: 0;
-  border-top: var(--bw) solid var(--edge);
+  border-top: var(--bw) solid var(--rule);
   padding-top: var(--s3);
 }
 .wide { grid-template-columns: 190px minmax(280px, 1fr) minmax(260px, 0.85fr); }
@@ -181,7 +181,7 @@ async function go() {
   align-items: center;
   gap: var(--s4);
   padding-top: var(--s3);
-  border-top: var(--bw) solid var(--edge);
+  border-top: var(--bw) solid var(--rule);
 }
 .foot-sum { flex: 1; font-size: var(--small); color: var(--text-quiet); margin: 0; }
 .foot-note { color: var(--text-faint); }

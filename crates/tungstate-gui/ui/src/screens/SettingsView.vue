@@ -1,11 +1,13 @@
 <!-- Settings. For now, what Tungstate remembers: export it, import it, start
      fresh, and bring back anything archived. None of this touches your files;
-     it only changes what the app remembers about them. A theme switch joins
-     this screen later (docs/SYLLABUS.md, 15+). -->
+     it only changes what the app remembers about them. Also how the window
+     looks. -->
 <script setup lang="ts">
 import { onMounted, ref, shallowRef } from "vue";
 import { storage } from "../engine/commands";
 import { useWatch } from "../state/useWatch";
+import { useTheme } from "../state/useTheme";
+import { THEMES } from "../lib/theme";
 import type { ArchiveView } from "../engine/types";
 import { bytes } from "../lib/format";
 import { ask } from "../ui/useDialog";
@@ -19,6 +21,7 @@ const problem = ref<string | null>(null);
 const said = ref<string | null>(null);
 const busy = ref(false);
 const w = useWatch();
+const look = useTheme();
 
 async function load() {
   try {
@@ -110,6 +113,16 @@ const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
       <div class="head"><Tile of="settings" :size="26" /><h1>Settings</h1></div>
 
       <section class="st-sec">
+        <h2>Appearance</h2>
+        <div class="st-themes" role="radiogroup" aria-label="Appearance">
+          <label class="st-switch" v-for="t in THEMES" :key="t.id">
+            <input type="radio" name="theme" :value="t.id" :checked="look.choice.value === t.id" @change="look.choose(t.id)" />
+            <span>{{ t.label }}<em>{{ t.note }}</em></span>
+          </label>
+        </div>
+      </section>
+
+      <section class="st-sec">
         <h2>Keeping folders in order</h2>
         <label class="st-switch">
           <input
@@ -185,6 +198,8 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .st-sec h2 { font-size: var(--body); font-weight: 600; margin: 0; }
 .st-switch { display: flex; align-items: flex-start; gap: var(--s2); font-size: var(--small); max-width: 66ch; }
 .st-switch em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.5; margin-top: 3px; }
+.st-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--s3); max-width: 66ch; }
+.st-switch input[type="radio"] { accent-color: var(--accent); margin: 2px 0 0; }
 .st-why { font-size: var(--small); color: var(--text-quiet); margin: 0; max-width: 70ch; line-height: 1.5; }
 .st-do { display: flex; gap: var(--s2); }
 .st-row {
@@ -193,7 +208,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   gap: var(--s3);
   align-items: center;
   padding: var(--s2) 0;
-  border-bottom: var(--bw) solid var(--edge);
+  border-bottom: var(--bw) solid var(--rule);
 }
 .st-who { display: flex; flex-direction: column; min-width: 0; }
 .st-when { font-size: var(--small); font-weight: 600; }

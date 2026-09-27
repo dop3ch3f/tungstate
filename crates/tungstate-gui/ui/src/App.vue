@@ -157,8 +157,8 @@ const WHERE = {
 /* Retro: the section you are in is a raised, outlined button. The outline is
    an inset shadow so the row does not grow by two borders when chosen. */
 :global([data-theme="retro"] .dest.here) {
-  background: var(--panel);
-  color: var(--text);
+  background: var(--chosen);
+  color: var(--chosen-ink);
   font-weight: 700;
   box-shadow: inset 0 0 0 var(--bw) var(--edge), var(--lift);
 }
