@@ -67,17 +67,36 @@ const cleaned = ref<string | null>(null);
 let attached = false;
 const unlisten: UnlistenFn[] = [];
 
+/** The running ledger's rows by path. A drain of 10,000 photographs sends
+ *  three events a file, and scanning the list for each froze the window. */
+const byPath = new Map<string, Row[]>();
+const add = (row: Row) => {
+  const same = byPath.get(row.path);
+  if (same) same.push(row);
+  else byPath.set(row.path, [row]);
+};
+
+// Rows change in place and are republished at most once a frame: once per
+// event redrew the whole ledger thousands of times a second.
+let republishing = false;
 const touch = () => {
-  rows.value = [...rows.value];
+  if (republishing) return;
+  republishing = true;
+  requestAnimationFrame(() => {
+    republishing = false;
+    rows.value = [...rows.value];
+  });
 };
 /** The row a file event is about. An exchange can list one name twice, once
  *  per direction, so the row in the expected state is preferred. */
-const find = (path: string, ...states: string[]) =>
-  rows.value.find((r) => r.path === path && states.includes(r.state)) ??
-  rows.value.find((r) => r.path === path);
+const find = (path: string, ...states: string[]) => {
+  const same = byPath.get(path);
+  return same?.find((r) => states.includes(r.state)) ?? same?.[0];
+};
 
 function beginLedger(job: JobView | null) {
   current.value = job;
+  byPath.clear();
   rows.value = [];
   live.value = null;
   shape.value = null;
@@ -129,10 +148,9 @@ export async function attachTransferStream() {
       // is waiting rather than growing a row at a time. Added to, not
       // replaced: the second leg of an exchange plans after the first ran.
       await transferEvents.planned((files) => {
-        rows.value = [
-          ...rows.value,
-          ...files.map((f) => ({ path: f.path, size: f.size, state: "waiting", detail: null, done: 0, checked: 0 })),
-        ];
+        const planned = files.map((f) => ({ path: f.path, size: f.size, state: "waiting", detail: null, done: 0, checked: 0 }));
+        planned.forEach(add);
+        rows.value = [...rows.value, ...planned];
       }),
       await transferEvents.started((e) => {
         live.value = e.path;
@@ -144,7 +162,9 @@ export async function attachTransferStream() {
         } else {
           // A file the plan did not mention, which happens when a conflict
           // lands it under another name. Better shown than dropped.
-          rows.value.push({ path: e.path, size: e.size, state: "live", detail: null, done: 0, checked: 0 });
+          const unplanned = { path: e.path, size: e.size, state: "live", detail: null, done: 0, checked: 0 };
+          add(unplanned);
+          rows.value.push(unplanned);
         }
         touch();
       }),
@@ -168,9 +188,7 @@ export async function attachTransferStream() {
         touch();
       }),
       await transferEvents.finished((e) => {
-        const row = rows.value.find(
-          (r) => r.path === e.path && (r.state === "live" || r.state === "checking"),
-        );
+        const row = byPath.get(e.path)?.find((r) => r.state === "live" || r.state === "checking");
         if (row) {
           row.state = e.outcome;
           row.detail = e.detail;

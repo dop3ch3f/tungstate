@@ -5,6 +5,7 @@
 import { engine } from "./fake-engine.mjs";
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { watch } from "vue";
 import { attachTransferStream, useTransfer } from "../src/state/useTransfer.ts";
 
 engine.answer = async (cmd) => (cmd === "transfer_queue" ? { running: null, waiting: [] } : null);
@@ -133,4 +134,22 @@ test("taking a transfer out of the queue asks the engine for that one", async ()
   const asked = engine.calls.find((c) => c.cmd === "remove_from_queue");
   assert.deepEqual(asked.args, { job: 12 });
   assert.equal(t.placed.value, null);
+});
+
+test("a burst of file events redraws the list once, not once per event", async () => {
+  // A drain of 10,000 small files froze the real window for half a minute:
+  // every event copied and redrew the whole list.
+  fresh();
+  engine.emit("transfer://job", job(200));
+  const names = Array.from({ length: 500 }, (_, i) => `f${i}.bin`);
+  engine.emit("transfer://planned", names.map((path) => ({ path, size: 1 })));
+  let redraws = 0;
+  const stop = watch(t.rows, () => redraws++, { flush: "sync" });
+  for (const name of names) sendOne(name, 1);
+  await new Promise((r) => setTimeout(r, 0));
+  stop();
+
+  assert.ok(redraws <= 1, `redrawn ${redraws} times`);
+  assert.equal(t.settled.value, 500);
+  assert.ok(t.rows.value.every((r) => r.state === "transferred"));
 });

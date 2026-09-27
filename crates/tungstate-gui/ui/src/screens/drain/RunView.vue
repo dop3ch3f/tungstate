@@ -89,7 +89,8 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
         <span class="run-at" v-if="t.atOnce.value">{{ t.atOnce.value }} at a time</span>
       </div>
       <p class="run-quiet" v-else>Working out what to send…</p>
-      <Ledger v-if="planned" :rows="t.rows.value" />
+      <!-- Its own scroll, so the queue below stays in sight during a long run. -->
+      <div class="run-files" v-if="planned"><Ledger :rows="t.rows.value" /></div>
     </section>
 
     <section class="run-list" v-if="waiting.length">
@@ -171,6 +172,7 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
 .run-of b { color: var(--text); font-weight: 600; }
 .run-at { font-size: var(--fine); color: var(--text-faint); }
 .run-quiet { font-size: var(--fine); color: var(--text-faint); margin: 0; }
+.run-files { max-height: 42vh; overflow-y: auto; }
 
 .run-list { display: flex; flex-direction: column; }
 .run-list-head { display: flex; align-items: baseline; gap: var(--s3); margin-bottom: var(--s2); }
