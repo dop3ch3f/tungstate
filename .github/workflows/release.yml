@@ -199,6 +199,11 @@ jobs:
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Signs the update files the installed app downloads (not the
+          # installers: that is Apple's and Microsoft's signing, which this
+          # project does not have). The public half is in tauri.conf.json.
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           projectPath: crates/tungstate-gui
           args: ${{ matrix.args }}
@@ -206,10 +211,27 @@ jobs:
           # release is described by one set of notes.
           includeUpdaterJson: false
 
+      # Both Macs name their update `Tungstate.app.tar.gz`; one release holds
+      # both, so each is named for its build before it leaves the runner.
+      - name: Name the macOS update for its build
+        if: startsWith(matrix.os, 'macos')
+        shell: bash
+        run: |
+          set -euo pipefail
+          for f in target/*/release/bundle/macos/Tungstate.app.tar.gz; do
+            dir=$(dirname "$f")
+            mv "$f" "$dir/Tungstate_${{ matrix.label }}.app.tar.gz"
+            mv "$f.sig" "$dir/Tungstate_${{ matrix.label }}.app.tar.gz.sig"
+          done
+
       - uses: actions/upload-artifact@v4
         with:
           name: desktop-${{ matrix.label }}
           path: |
+            target/*/release/bundle/macos/*.app.tar.gz
+            target/*/release/bundle/macos/*.app.tar.gz.sig
+            target/release/bundle/nsis/*.exe.sig
+            target/release/bundle/appimage/*.AppImage.sig
             target/release/bundle/dmg/*.dmg
             target/release/bundle/nsis/*.exe
             target/release/bundle/msi/*.msi
@@ -239,7 +261,7 @@ jobs:
           find artifacts -type f \
             \( -name '*.tar.gz' -o -name '*.zip' -o -name '*.sha256' \
                -o -name '*.dmg' -o -name '*.msi' -o -name '*.exe' \
-               -o -name '*.AppImage' -o -name '*.deb' \) \
+               -o -name '*.AppImage' -o -name '*.deb' -o -name '*.sig' \) \
             -exec cp {} release/ \;
           ls -la release
 
@@ -254,6 +276,8 @@ jobs:
           set -euo pipefail
           missing=""
           for pattern in '*.dmg' '*-setup.exe' '*.AppImage' '*.deb' \
+                         '*macos-arm64.app.tar.gz.sig' '*macos-x86_64.app.tar.gz.sig' \
+                         '*-setup.exe.sig' '*.AppImage.sig' \
                          '*macos-arm64.tar.gz' '*macos-x86_64.tar.gz' \
                          '*linux-x86_64.tar.gz' '*windows-x86_64.zip'; do
             # `ls` on the glob rather than `compgen -G`: the builtin is bash
@@ -269,14 +293,33 @@ jobs:
           echo "all platforms present"
         shell: bash
 
+      # What every installed copy reads to learn of this version. Only a tag
+      # writes one: installed apps follow numbered releases, never `rolling`.
+      - uses: actions/setup-node@v4
+        if: github.ref_type == 'tag'
+        with:
+          node-version: 22
+      - name: Write latest.json
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          set -euo pipefail
+          # checkout leaves a tag lightweight, which would lose its message.
+          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git tag -l --format='%(contents)' "$GITHUB_REF_NAME" > notes.txt
+          node crates/tungstate-gui/ui/scripts/updater-json.mjs release "$GITHUB_REF_NAME" notes.txt > release/latest.json
+          cat release/latest.json
+
       - name: Publish the release
         if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: release/*
-          # Anything with a hyphen in the version is a prerelease, so
-          # v0.1.0-alpha.1 never shows up as "Latest release".
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # Never a prerelease, alpha or not: the app finds its updates at
+          # `releases/latest`, which GitHub points only at a full release.
+          # `rolling` is a prerelease, so it can never take that place.
+          prerelease: false
+          make_latest: true
           generate_release_notes: true
           body_path: .github/RELEASE_NOTES_HEADER.md
           fail_on_unmatched_files: true

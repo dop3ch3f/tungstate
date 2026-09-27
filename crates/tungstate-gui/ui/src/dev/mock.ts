@@ -167,6 +167,13 @@ mockIPC((cmd, args) => {
   if (bare && ["governed", "list_links", "list_connections", "recent", "history", "whereis", "archives", "interrupted", "past_tidies", "past_cleanups", "recent_scans", "list_syncs", "past_syncs"].includes(cmd)) {
     return [];
   }
+  if (cmd === "plugin:app|version") return "0.1.0-alpha.4";
+  if (cmd === "plugin:updater|check") {
+    return sceneName.startsWith("update")
+      ? { rid: 1, currentVersion: "0.1.0-alpha.4", version: "0.1.0-alpha.5", date: null, rawJson: {},
+          body: "Syncs kept in step while the app is open.\nDark mode, and a theme choice in Settings.\nButtons that show they are working." }
+      : null;
+  }
   // A call that never answers, to photograph a button while it waits.
   if (sceneName === "links-busy" && cmd === "run_link") return new Promise(() => {});
   switch (cmd) {
@@ -358,6 +365,7 @@ const { useTransfer } = await import("../state/useTransfer");
 const { ask } = await import("../ui/useDialog");
 const { useDupes } = await import("../state/useDupes");
 const { useSync } = await import("../state/useSync");
+const { useUpdate } = await import("../state/useUpdate");
 
 createApp(App).mount("#app");
 
@@ -634,6 +642,19 @@ const scenes: Record<string, () => unknown> = {
     sy.busy.value = 31;
   },
   "links-busy": async () => { nav.go("drain"); await tab(2); await tick(); document.querySelectorAll<HTMLButtonElement>(".lk-do button")[1]?.click(); },
+  "update-ready": async () => {
+    nav.go("settings");
+    await tick();
+    useUpdate().showing.value = true;
+  },
+  "update-waiting": async () => {
+    await tick();
+    const u = useUpdate();
+    u.showing.value = true;
+    u.step.value = "waiting";
+    u.waitingFor.value = "transfer";
+  },
+  "update-settings": async () => { nav.go("settings"); },
   "sync-launch": () => {},
   "sync-following": () => syncAt(0),
   "sync-held": () => syncAt(0),

@@ -8,6 +8,8 @@ import { storage } from "../engine/commands";
 import { useWatch } from "../state/useWatch";
 import { useTheme } from "../state/useTheme";
 import { THEMES } from "../lib/theme";
+import { useUpdate } from "../state/useUpdate";
+import { getVersion } from "@tauri-apps/api/app";
 import type { ArchiveView } from "../engine/types";
 import { bytes } from "../lib/format";
 import { ask } from "../ui/useDialog";
@@ -22,6 +24,8 @@ const said = ref<string | null>(null);
 const busy = ref(false);
 const w = useWatch();
 const look = useTheme();
+const up = useUpdate();
+const version = ref<string | null>(null);
 
 async function load() {
   try {
@@ -31,6 +35,7 @@ async function load() {
   }
 }
 onMounted(() => {
+  void getVersion().then((v) => (version.value = v)).catch(() => {});
   void load();
   void w.load();
 });
@@ -148,6 +153,21 @@ const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
         <p class="st-why" v-else-if="w.on.value">
           Nothing to watch yet. Add a folder under Organize.
         </p>
+      </section>
+
+      <section class="st-sec">
+        <h2>This version</h2>
+        <p class="st-why">
+          Tungstate {{ version ?? "" }}.
+          <template v-if="up.ready.value">Version {{ up.ready.value.version }} is ready.</template>
+          <template v-else-if="up.checkedAt.value">It is the newest, as of {{ new Date(up.checkedAt.value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}.</template>
+          It looks for a newer one when it opens and once a day, and asks before installing anything.
+        </p>
+        <Notice tone="bad" v-if="up.problem.value && !up.showing.value">{{ up.problem.value }}</Notice>
+        <div class="st-do">
+          <Button look="primary" v-if="up.ready.value" @click="up.showing.value = true">Update and restart…</Button>
+          <Button :busy="up.checking.value" @click="up.look()">Look for updates</Button>
+        </div>
       </section>
 
       <section class="st-sec">

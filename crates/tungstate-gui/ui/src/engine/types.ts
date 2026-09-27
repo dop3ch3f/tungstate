@@ -681,3 +681,6 @@ export interface FollowingView {
   /** Syncs that stopped to ask, by name. */
   held: string[];
 }
+
+/** What restarting into an update would cut short. */
+export type Blocker = "transfer" | "sync";

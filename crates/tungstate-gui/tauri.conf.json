@@ -43,6 +43,18 @@
     "longDescription": "Move files between machines durably, and keep folders organised.",
     "macOS": {
       "signingIdentity": "-"
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDY5NkNFOUNGRDdCOEY3QTQKUldTazk3alh6K2xzYWNZY0REMGttMXQ1MG5jQ0s4N082blZsOHg1bFJpZzRsK3NDZzhtcUFES3gK",
+      "endpoints": [
+        "https://github.com/dop3ch3f/tungstate/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
     }
   }
 }

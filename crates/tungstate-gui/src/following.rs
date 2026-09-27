@@ -78,7 +78,8 @@ impl Following {
         }
     }
 
-    fn halt(&self) {
+    /// Stop the loop, if one is running, and forget what it said.
+    pub fn halt(&self) {
         if let Some(handle) = lock(&self.handle).take() {
             handle.stop();
         }

@@ -153,3 +153,12 @@ export const storage = {
   pickSaveFile: (suggested: string) => invoke<string | null>("pick_save_file", { suggested }),
   pickOpenFile: () => invoke<string | null>("pick_open_file"),
 };
+
+export const updates = {
+  /** `null` when nothing is writing files, and then syncs kept in step are
+   *  stopped too, so nothing starts behind the restart. Otherwise what is
+   *  running, which the window waits for. */
+  readyToRestart: () => invoke<T.Blocker | null>("ready_to_restart"),
+  /** The restart is off: keep syncs in step again. */
+  notRestarting: () => invoke<void>("not_restarting"),
+};

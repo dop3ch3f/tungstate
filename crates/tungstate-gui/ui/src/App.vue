@@ -18,6 +18,8 @@ import SyncHalf from "./screens/sync/SyncHalf.vue";
 import SyncLaunch from "./screens/sync/SyncLaunch.vue";
 import HistoryView from "./screens/HistoryView.vue";
 import SettingsView from "./screens/SettingsView.vue";
+import UpdateSheet from "./screens/UpdateSheet.vue";
+import { startLooking, useUpdate } from "./state/useUpdate";
 import DialogHost from "./ui/DialogHost.vue";
 import Mark from "./ui/Mark.vue";
 import Tile from "./ui/Tile.vue";
@@ -26,6 +28,7 @@ import Window from "./ui/Window.vue";
 const nav = useNav();
 const t = useTransfer();
 const sy = useSync();
+const up = useUpdate();
 /** Whether the open section's window fills the stage. Kept across sections. */
 const max = ref(false);
 
@@ -41,6 +44,7 @@ onMounted(() => {
   // What the watcher did before this screen existed: the loop starts when the
   // window does, so by the time anybody looks there may already be a record.
   void useWatch().load();
+  startLooking();
 });
 onUnmounted(() => {
   detachTransferStream();
@@ -81,6 +85,9 @@ const WHERE = {
       <button class="waits" v-if="sy.followingNow.value.held.length" title="A sync is waiting for you" @click="nav.go('sync')">
         ● {{ sy.followingNow.value.held.length === 1 ? "A sync is waiting for you" : `${sy.followingNow.value.held.length} syncs are waiting for you` }}
       </button>
+      <button class="waits news" v-if="up.ready.value" @click="up.showing.value = true">
+        ● Version {{ up.ready.value.version }} is ready
+      </button>
       <button class="dest" :class="{ here: nav.view.value === 'settings' }" @click="nav.go('settings')">
         <Tile of="settings" :size="22" />
         Settings
@@ -107,6 +114,7 @@ const WHERE = {
       </Window>
     </main>
 
+    <UpdateSheet />
     <DialogHost />
     <SyncLaunch />
   </div>
@@ -165,6 +173,8 @@ const WHERE = {
 .gap { flex: 1; }
 .live { color: var(--accent); font-size: 9px; padding: var(--s2); }
 .waits { font: inherit; font-size: var(--fine); color: var(--hold); font-weight: 700; background: none; border: none; text-align: left; padding: var(--s2); cursor: pointer; }
+/* News, not a warning: an update is waiting to be taken, nothing is stuck. */
+.waits.news { color: var(--accent); }
 
 .stage { flex: 1; position: relative; min-width: 0; }
 </style>

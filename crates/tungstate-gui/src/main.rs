@@ -730,6 +730,47 @@ fn resume_following(name: String, state: State<'_, App>, app: AppHandle) {
     let _ = app.emit("sync://following", state.following.view());
 }
 
+/// What would be cut short by restarting into an update, as data: the window
+/// words it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+enum Blocker {
+    Transfer,
+    Sync,
+}
+
+/// Whether anything that writes files is running. Generic so a test can hand
+/// it two bare queues rather than a whole app.
+fn blocker<A, B>(transfers: &RunQueue<A>, syncs: &RunQueue<B>) -> Option<Blocker> {
+    if transfers.is_running() {
+        Some(Blocker::Transfer)
+    } else if syncs.is_running() {
+        Some(Blocker::Sync)
+    } else {
+        None
+    }
+}
+
+/// Clear the way to restart into an update: `null` when nothing is writing,
+/// and then syncs kept in step are stopped too, so no run starts behind the
+/// restart. Checked and stopped under the gate every run takes, so nothing
+/// slips in between the two.
+#[tauri::command]
+fn ready_to_restart(state: State<'_, App>) -> Option<Blocker> {
+    let _gate = lock(&state.gate);
+    let busy = blocker(&state.queue, &state.syncing.queue);
+    if busy.is_none() {
+        state.following.halt();
+    }
+    busy
+}
+
+/// The update did not happen after all: keep syncs in step again.
+#[tauri::command]
+fn not_restarting(app: AppHandle) {
+    following::restart(&app);
+}
+
 /// What a run would do, changing nothing. Reads every member, so async.
 #[tauri::command(async)]
 fn preview_sync(
@@ -2424,6 +2465,10 @@ fn main() {
         // Closing stops the drain, which is safe: the operation stays
         // `intended`, and the next launch offers to finish or clear it.
         .plugin(tauri_plugin_dialog::init())
+        // Updates come from the latest tagged release, signed by a key whose
+        // public half is in tauri.conf.json; the window asks before any.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(App {
             journal,
             conflicts: ConflictChannel::default(),
@@ -2473,6 +2518,8 @@ fn main() {
             put_back_sync,
             following_state,
             resume_following,
+            ready_to_restart,
+            not_restarting,
             undo_duplicates,
             watch_state,
             set_watching,
@@ -2934,6 +2981,22 @@ mod tests {
         );
         queue.stand_down();
         assert!(queue.claim(), "free again once it stands down");
+    }
+
+    #[test]
+    fn an_update_waits_while_a_transfer_or_a_sync_is_writing() {
+        let transfers: RunQueue<u8> = RunQueue::new();
+        let syncs: RunQueue<u8> = RunQueue::new();
+        assert_eq!(blocker(&transfers, &syncs), None);
+        // A sync kept in step claims the queue rather than submitting to it.
+        assert!(syncs.claim());
+        assert_eq!(blocker(&transfers, &syncs), Some(Blocker::Sync));
+        assert!(transfers.submit([1]));
+        assert_eq!(blocker(&transfers, &syncs), Some(Blocker::Transfer));
+        assert_eq!(transfers.next(), Some(1));
+        assert_eq!(transfers.next(), None);
+        syncs.stand_down();
+        assert_eq!(blocker(&transfers, &syncs), None, "free once both are done");
     }
 
     #[test]

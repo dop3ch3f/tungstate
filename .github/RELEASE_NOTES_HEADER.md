@@ -36,6 +36,11 @@ chmod +x tungstate && ./tungstate --version
 
 Pick the `arm64` macOS build for Apple silicon and `x86_64` for Intel.
 
+**Updates.** From 0.1.0-alpha.4 the desktop app looks for a newer release when
+it opens and once a day, and asks before installing it. Install alpha.4 or
+later by hand once; after that, Settings or the line on the sidebar does it.
+The `.deb` does not update itself: download the next one when it is out.
+
 ## What works today
 
 A durable drain: move files from one place to another, verify each one before
