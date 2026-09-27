@@ -8,6 +8,8 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use notify::EventKind;
+
 use super::*;
 
 /// A governed folder with the given mode, and no waiting.
@@ -183,6 +185,66 @@ fn an_event_about_the_root_itself_is_not_news() {
 
     note(
         Path::new("/f/holiday.jpg"),
+        &roots,
+        &resolved,
+        &Echoes::default(),
+        now,
+        &mut schedule,
+    );
+    assert!(!schedule.is_empty(), "a file arriving should stir it");
+}
+
+#[test]
+fn reading_a_file_is_not_a_change_but_writing_one_is() {
+    use notify::event::{AccessKind, AccessMode, CreateKind, DataChange, ModifyKind};
+    assert!(!changes(EventKind::Access(AccessKind::Open(
+        AccessMode::Any
+    ))));
+    assert!(!changes(EventKind::Access(AccessKind::Close(
+        AccessMode::Read
+    ))));
+    assert!(changes(EventKind::Create(CreateKind::File)));
+    assert!(changes(EventKind::Modify(ModifyKind::Data(
+        DataChange::Any
+    ))));
+    assert!(changes(EventKind::Any));
+}
+
+#[test]
+fn a_file_being_read_does_not_wake_its_folder() {
+    // inotify reports opens, so every survey's own reads came back as news
+    // about the folder it had just surveyed, and it was surveyed again.
+    use notify::event::{AccessKind, AccessMode, CreateKind};
+    let folder = Watched {
+        name: "demo".to_string(),
+        root: "/f".into(),
+        networked: false,
+    };
+    let resolved = vec![("/f".to_string(), &folder)];
+    let roots = vec!["/f".to_string()];
+    let now = Instant::now();
+    let event = |kind| {
+        DebouncedEvent::new(
+            notify::Event::new(kind).add_path("/f/holiday.jpg".into()),
+            now,
+        )
+    };
+
+    let mut schedule = Schedule::default();
+    let read = [event(EventKind::Access(AccessKind::Open(AccessMode::Read)))];
+    take_in(
+        &read,
+        &roots,
+        &resolved,
+        &Echoes::default(),
+        now,
+        &mut schedule,
+    );
+    assert!(schedule.is_empty(), "reading a file stirred its folder");
+
+    let written = [event(EventKind::Create(CreateKind::File))];
+    take_in(
+        &written,
         &roots,
         &resolved,
         &Echoes::default(),

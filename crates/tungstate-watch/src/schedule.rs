@@ -8,6 +8,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::time::{Duration, Instant};
 
+use notify::EventKind;
+
 /// Folders waiting to be looked at, and when.
 #[derive(Debug, Default)]
 pub struct Schedule {
@@ -134,4 +136,12 @@ pub fn is_ours(path: &Path, root: &str) -> bool {
         tungstate_core::snapshot::RESERVED.contains(&name.as_ref())
             || name.starts_with(tungstate_backend::local::PROBE_PREFIX)
     })
+}
+
+/// Whether an event may mean a file changed. On Linux a survey's or a run's
+/// own reads arrive as `Access`, and would wake the folder they just read; a
+/// save always comes with a create or modify as well.
+#[must_use]
+pub fn changes(kind: EventKind) -> bool {
+    !matches!(kind, EventKind::Access(_))
 }

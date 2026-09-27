@@ -21,7 +21,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use notify::RecursiveMode;
-use notify_debouncer_full::new_debouncer;
+use notify_debouncer_full::{DebouncedEvent, new_debouncer};
 use tungstate_backend::local::LocalBackend;
 use tungstate_core::policy::{Mode, Policy};
 use tungstate_journal::Journal;
@@ -30,7 +30,7 @@ mod schedule;
 #[cfg(test)]
 mod tests;
 
-pub use schedule::{Echoes, Schedule, is_ours, root_of};
+pub use schedule::{Echoes, Schedule, changes, is_ours, root_of};
 
 /// Where a folder's rules live, relative to its root.
 const POLICY_RELATIVE: &str = ".tungstate/policy.toml";
@@ -223,18 +223,7 @@ pub fn watch(
             match batch {
                 Ok(seen) => {
                     let now = Instant::now();
-                    for event in seen {
-                        // FSEvents coalesced more than it could report and
-                        // says only "look again under here". Events were lost,
-                        // so nothing narrower than the whole folder will do.
-                        if event.need_rescan() {
-                            stir_all(&event.paths, &resolved, now, &mut schedule);
-                            continue;
-                        }
-                        for path in &event.paths {
-                            note(path, &roots, &resolved, &echoes, now, &mut schedule);
-                        }
-                    }
+                    take_in(&seen, &roots, &resolved, &echoes, now, &mut schedule);
                 }
                 // The platform gave up on some events. Waiting for the hourly
                 // sweep would be correct and an hour late, so look now.
@@ -274,6 +263,32 @@ pub fn sweep(folders: &[Watched], journal: &Journal, told: &mut dyn FnMut(&Notic
     let mut echoes = Echoes::default();
     for folder in folders {
         look(folder, journal, Because::Swept, &mut echoes, told);
+    }
+}
+
+/// One batch of events, each turned into a deadline or dropped.
+fn take_in(
+    seen: &[DebouncedEvent],
+    roots: &[String],
+    resolved: &[(String, &Watched)],
+    echoes: &Echoes,
+    now: Instant,
+    schedule: &mut Schedule,
+) {
+    for event in seen {
+        // FSEvents coalesced more than it could report and says only "look
+        // again under here". Events were lost, so nothing narrower than the
+        // whole folder will do.
+        if event.need_rescan() {
+            stir_all(&event.paths, resolved, now, schedule);
+            continue;
+        }
+        if !changes(event.kind) {
+            continue;
+        }
+        for path in &event.paths {
+            note(path, roots, resolved, echoes, now, schedule);
+        }
     }
 }
 
