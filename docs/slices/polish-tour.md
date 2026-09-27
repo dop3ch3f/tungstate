@@ -192,3 +192,28 @@ TypeScript type is written: `Summary & { job: number }`.
 In the harness, `?scene=drain-queue-replay&step=1..5` replays the whole
 two-transfer sequence as the engine emits it, and `?scene=drain-queue` shows a
 full queue.
+
+### Found in the real window
+
+Driving the real window afterwards found what the harness could not. A
+transfer of 10,000 small files froze the window for about half a minute while
+the files themselves arrived fine. Every file event scanned the list for its
+row, copied the whole list and redrew every row, three times per file. That is
+quadratic, and it predated the queue.
+
+- Rows are found through a `Map` from path to rows (`byPath`), which is O(1)
+  instead of a scan.
+- `touch()` republishes the list at most once per animation frame. Rows are
+  changed in place, so nothing is lost between frames.
+- The ledger draws at most 200 rows (`lib/inview.ts`). In arrival order it
+  shows the ones where the run is working, and a line says how many there are
+  in all. A filter or a sort starts from the top.
+
+The regression test counts how often the list is republished during a burst of
+1,000 events. It saw 1,000 before the fix and one after. Timing would have been
+flaky; a count is not. It was checked again by hand at 100,000 files: the
+window stayed responsive, Remove took a waiting transfer out, and Stop ended the
+run and cleared the queue.
+
+The same session found that a pair run twice reported "Copied 0 files, 0 B"
+when every file was already there. The one-line result now says so.
