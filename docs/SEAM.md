@@ -141,6 +141,14 @@ pressed Run, and an error that repeats is sent once.
 
 **Connections** — add, list, update, test, remove, set a password.
 
+**Updates** (slice 9f) — the updater and process plugins answer `check`,
+`download`, `install` and `restart` themselves. The engine adds one question:
+`ready_to_restart` returns `null` when nothing is writing files, and then stops
+keeping syncs in step, or `"transfer"` or `"sync"` for what the restart must
+wait for. `not_restarting` starts syncs kept in step again when an update
+fails after that. The theme is not in the seam: it is the window's own choice,
+kept in the window's storage.
+
 **Storage** — `archives`, `reset_storage`, `restore_archive`, `forget_archive`,
 `export_storage`, `import_storage`.
 
