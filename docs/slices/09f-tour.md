@@ -196,6 +196,26 @@ One thing it found: run from `/tmp`, the updater refuses, because `/tmp` is a
 symlink on macOS and Tauri will not replace a program reached through one.
 From `/private/tmp`, or `/Applications`, it works.
 
+## 9b. The window, driven by hand, for 9d and 9e
+
+This used a throwaway journal and two folders standing for the laptop and the
+NAS, with a sync made from the terminal and set to keep in step:
+
+- **The opening run** carried the file already there.
+- **A save** arrived in one run. The run showed up in the list by itself, and
+  the screen stayed where it was.
+- **A deletion** held the sync. The yellow notice and "A sync is waiting for
+  you" on the sidebar both appeared. "Look at it" showed the removal and the
+  blast limit asking for a yes; ticked and run, the file was set aside.
+- **Keeping in step resumed** on its own: the next save arrived.
+
+It found one more bug, fixed in its own commit with a test: **a background
+run's progress wrote itself into the result screen of the run before**. Its
+file and bytes appeared above that run's summary and pushed Put it back down
+the page. Progress now counts only while a run somebody pressed is being
+watched. The fake engine behind the tests can now send events, which is how
+the test replays it.
+
 ## 10. What is checked
 
 - **Rust:** `an_update_waits_while_a_transfer_or_a_sync_is_writing`.
@@ -220,3 +240,5 @@ From `/private/tmp`, or `/Applications`, it works.
   signs them.
 - **The restart waiting on a real transfer** was checked against the fake
   engine, not in the window.
+- **A day of use.** The window was driven through one sync's life, not left
+  open through an afternoon of exports.
