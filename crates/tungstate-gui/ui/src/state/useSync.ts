@@ -70,15 +70,23 @@ const touch = () => (rows.value = [...rows.value]);
 const find = (path: string) =>
   rows.value.find((r) => r.path === path && r.leg === (leg.value?.index ?? 0));
 
+/** A run somebody pressed and is watching. Progress belongs to it alone: a
+ *  run kept in step also sends progress, and it must not write itself into
+ *  a screen showing another run, or its result. */
+const watching = () => phase.value === "running" && !ran.value;
+
 export async function attachSyncStream() {
   if (attached) return;
   attached = true;
   try {
     unlisten.push(
-      await syncEvents.leg((e) => (leg.value = { index: e.index, from: e.from, to: e.to })),
+      await syncEvents.leg((e) => {
+        if (watching()) leg.value = { index: e.index, from: e.from, to: e.to };
+      }),
       // Each leg plans its own files; they join the ledger rather than
       // replacing it, so the whole run reads top to bottom.
       await syncEvents.planned((files) => {
+        if (!watching()) return;
         const index = leg.value?.index ?? 0;
         rows.value = [
           ...rows.value,
@@ -86,6 +94,7 @@ export async function attachSyncStream() {
         ];
       }),
       await syncEvents.started((e) => {
+        if (!watching()) return;
         const row = find(e.path);
         if (row) {
           row.state = "live";
@@ -94,6 +103,7 @@ export async function attachSyncStream() {
         }
       }),
       await syncEvents.advanced((e) => {
+        if (!watching()) return;
         const row = find(e.path);
         if (!row) return;
         row.state = "live";
@@ -101,6 +111,7 @@ export async function attachSyncStream() {
         touch();
       }),
       await syncEvents.checking((e) => {
+        if (!watching()) return;
         const row = find(e.path);
         if (!row) return;
         row.state = "checking";
@@ -108,6 +119,7 @@ export async function attachSyncStream() {
         touch();
       }),
       await syncEvents.finished((e) => {
+        if (!watching()) return;
         const row = rows.value.find(
           (r) => r.path === e.path && (r.state === "live" || r.state === "checking"),
         );
