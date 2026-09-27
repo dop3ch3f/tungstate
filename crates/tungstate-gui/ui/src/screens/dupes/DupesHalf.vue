@@ -69,6 +69,7 @@ onMounted(() => d.loadAction());
           <Button
             v-if="d.cleared.value.reversible"
             look="primary"
+            :busy="d.puttingBack()"
             @click="d.putBack()"
           >Put it back</Button>
           <Button @click="d.again()">Look somewhere else</Button>

@@ -9,6 +9,7 @@
 
 import { computed, ref, shallowRef } from "vue";
 import { folders } from "../engine/commands";
+import { painted } from "./useBusy";
 import type { FolderView, Learned, Outcome, PreviewView, TidyDone } from "../engine/types";
 
 /** Where the person is in the one flow this half has. */
@@ -25,18 +26,6 @@ const putBackCount = ref<number | null>(null);
 const busy = ref<string | null>(null);
 const problem = ref<string | null>(null);
 
-/** Wait for the screen to be drawn, but never for long.
- *
- *  Two animation frames is "Vue has flushed and the browser has painted". A
- *  hidden or minimised window stops sending frames altogether, so the wait is
- *  raced with a timer: without it, a tidy started and then minimised would sit
- *  on a promise that never settles and the call would never be made. */
-const painted = () =>
-  new Promise<void>((resolve) => {
-    const done = () => resolve();
-    requestAnimationFrame(() => requestAnimationFrame(done));
-    setTimeout(done, 80);
-  });
 
 /** Run an engine call, keeping the one error slot and the one busy slot
  *  honest. Errors cross as bare sentences, so there is nothing to unwrap. */
@@ -93,10 +82,16 @@ async function look(path: string) {
 }
 
 /** Open a folder that is already governed, straight to its preview. */
+/** The folder whose preview is on its way, so its row can say so. */
+const opening = ref<string | null>(null);
+
 async function open(path: string) {
+  if (busy.value) return;
+  opening.value = path;
   // The folder changes only once its own preview is in, so a second click
   // while one loads can never show one folder's plan under another's name.
   const view = await run("Working out what would move", () => folders.preview(path));
+  opening.value = null;
   if (!view) return;
   root.value = path;
   tidied.value = null;
@@ -119,15 +114,17 @@ async function refresh() {
 async function choose(layout: string) {
   const path = root.value;
   if (!path) return;
-  const ok = await run("Giving the folder its rules", async () => {
+  // One call from the click to the preview: between separate calls the
+  // button came back to life, and a second click tried to give rules twice.
+  const done = await run("Giving the folder its rules", async () => {
     await folders.govern(path);
     await folders.giveRules(path, layout);
-    return true;
+    return { list: await folders.governed(), view: await folders.preview(path) };
   });
-  if (!ok) return;
-  await listRegistered();
-  await refresh();
-  if (preview.value) phase.value = "previewing";
+  if (!done) return;
+  registered.value = done.list;
+  preview.value = done.view;
+  phase.value = "previewing";
 }
 
 async function tidy() {
@@ -175,6 +172,7 @@ export function useFolders() {
   return {
     phase,
     root,
+    opening,
     registered,
     learned,
     outcomes,

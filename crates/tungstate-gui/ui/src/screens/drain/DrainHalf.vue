@@ -137,8 +137,8 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
       {{ t.stranded.value.length === 1 ? "A transfer" : `${t.stranded.value.length} transfers` }}
       stopped part-way.
       <template v-for="run in t.stranded.value" :key="run.link">
-        <Button look="link" @click="t.resume(run.link); where = 'runs'">Pick up {{ run.link }}</Button>
-        <Button look="link" @click="t.discard(run.link)">Clean it up</Button>
+        <Button look="link" :busy="t.settling(run.link)" @click="t.resume(run.link); where = 'runs'">Pick up {{ run.link }}</Button>
+        <Button look="link" :busy="t.settling(run.link)" @click="t.discard(run.link)">Clean it up</Button>
       </template>
     </Notice>
 

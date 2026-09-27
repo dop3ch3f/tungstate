@@ -73,7 +73,7 @@ const table = useTable(toRef(props, "runs"), {
             <span class="num">{{ bytes(run.bytes) }}</span>
             <span class="pr-when">{{ when(run.applied_at) }}</span>
             <span class="pr-act">
-              <Button v-if="run.undoable" look="link" @click="emit('putBack', run)">
+              <Button v-if="run.undoable" look="link" :busy="props.busy === run.plan" @click="emit('putBack', run)">
                 {{ props.busy === run.plan ? "Putting back…" : "Put back" }}
               </Button>
               <span v-else class="pr-state">{{ state(run) }}</span>

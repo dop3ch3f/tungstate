@@ -316,6 +316,7 @@ export function useSync() {
       }
     },
     async putBack(name: string, plan: number) {
+      if (busy.value != null) return;
       busy.value = plan;
       problem.value = null;
       try {

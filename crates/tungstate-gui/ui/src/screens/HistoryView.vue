@@ -7,6 +7,7 @@ import { onMounted, ref, shallowRef } from "vue";
 import { history } from "../engine/commands";
 import { bytes, shortPath, when } from "../lib/format";
 import { toneOfStatus } from "../lib/tone";
+import { latest } from "../lib/latest";
 import type { Op } from "../engine/types";
 import Button from "../ui/Button.vue";
 import Tile from "../ui/Tile.vue";
@@ -36,15 +37,25 @@ async function recent() {
 }
 onMounted(recent);
 
+// A second Look before the first answers wins, whichever returns first.
+const asks = latest();
+const looking = ref(false);
+
 async function look() {
   const target = asked.value.trim();
   if (!target) return recent();
   searched.value = true;
+  looking.value = true;
+  const ticket = asks.take();
   try {
-    ops.value = isDigest(target) ? await history.whereis(target) : await history.ofPath(target);
+    const found = isDigest(target) ? await history.whereis(target) : await history.ofPath(target);
+    if (asks.stale(ticket)) return;
+    ops.value = found;
     problem.value = null;
   } catch (e) {
-    problem.value = String(e);
+    if (!asks.stale(ticket)) problem.value = String(e);
+  } finally {
+    if (!asks.stale(ticket)) looking.value = false;
   }
 }
 
@@ -95,7 +106,7 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
           class="h-in"
           placeholder="a path, or a file's fingerprint"
         />
-        <Button>Look</Button>
+        <Button :busy="looking">Look</Button>
         <Button look="link" v-if="searched" @click="asked = ''; recent()">Show everything recent</Button>
       </form>
       <p class="h-mode" v-if="asked.trim()">

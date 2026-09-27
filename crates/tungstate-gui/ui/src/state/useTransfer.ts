@@ -6,6 +6,7 @@
 import { computed, ref, shallowRef } from "vue";
 import { transfers } from "../engine/commands";
 import { transferEvents, type UnlistenFn } from "../engine/events";
+import { useBusy } from "./useBusy";
 import type {
   Accepted, Began, ConflictAsk, IdenticalAsk, InterruptedRun, Summary,
 } from "../engine/types";
@@ -167,26 +168,32 @@ function clearRun() {
   atOnce.value = null;
 }
 
-async function resume(link: string) {
-  clearRun();
-  try {
-    await transfers.resume(link);
-  } catch (e) {
-    problem.value = String(e);
-  }
-  await refreshStranded();
-}
+// Keyed by link: the notice stays up until the list of stopped runs is read
+// again, and a second click in that time would pick the same run up twice.
+const doing = useBusy();
 
-async function discard(link: string) {
-  try {
-    const freed = await transfers.discard(link);
-    problem.value = null;
-    cleaned.value = String(freed);
-  } catch (e) {
-    problem.value = String(e);
-  }
-  await refreshStranded();
-}
+const resume = (link: string) =>
+  doing.run(link, async () => {
+    clearRun();
+    try {
+      await transfers.resume(link);
+    } catch (e) {
+      problem.value = String(e);
+    }
+    await refreshStranded();
+  });
+
+const discard = (link: string) =>
+  doing.run(link, async () => {
+    try {
+      const freed = await transfers.discard(link);
+      problem.value = null;
+      cleaned.value = String(freed);
+    } catch (e) {
+      problem.value = String(e);
+    }
+    await refreshStranded();
+  });
 
 /** Files settled, out of files planned. Both counts of files, and neither is
  *  a count of operations. */
@@ -197,6 +204,8 @@ export function useTransfer() {
   return {
     rows, live, shape, atOnce, queued, summary, conflict, identical,
     stranded, stopping, halting, problem, deaf, cleaned,
+    /** A stopped run being picked up or cleaned up. */
+    settling: (link: string) => doing.busy(link),
     settled, running,
     refreshStranded, clearRun, resume, discard,
     async answerConflict(action: string, applyToAll: boolean) {

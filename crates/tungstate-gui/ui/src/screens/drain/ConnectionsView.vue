@@ -11,6 +11,7 @@ import Empty from "../../ui/Empty.vue";
 import Sheet from "../../ui/Sheet.vue";
 import Field from "../../ui/Field.vue";
 import ConnectionForm from "./ConnectionForm.vue";
+import { useBusy } from "../../state/useBusy";
 
 const emit = defineEmits<{ changed: []; browse: [location: string] }>();
 const form = ref<{ editing: Connection | null } | null>(null);
@@ -37,20 +38,25 @@ async function saved(name: string) {
   await check(name); // proving it works is why anyone opened the form
 }
 
+const doing = useBusy();
+
 async function savePassword() {
   const target = changing.value;
   if (!target) return;
-  try {
-    await connections.setPassword(target.name, newSecret.value);
-    changing.value = null;
-    newSecret.value = "";
-    await check(target.name);
-  } catch (e) {
-    problem.value = String(e);
-  }
+  await doing.run("password", async () => {
+    try {
+      await connections.setPassword(target.name, newSecret.value);
+      changing.value = null;
+      newSecret.value = "";
+    } catch (e) {
+      problem.value = String(e);
+    }
+  });
+  if (!changing.value) await check(target.name);
 }
 
 async function check(name: string) {
+  if (probes.value[name] === "checking") return;
   probes.value = { ...probes.value, [name]: "checking" };
   try {
     const got = await connections.test(name);
@@ -81,13 +87,15 @@ async function remove(name: string) {
     ],
   });
   if (answer.id !== "yes") return;
-  try {
-    await connections.remove(name);
-    await load();
-    emit("changed");
-  } catch (e) {
-    problem.value = String(e);
-  }
+  await doing.run(`remove:${name}`, async () => {
+    try {
+      await connections.remove(name);
+      await load();
+      emit("changed");
+    } catch (e) {
+      problem.value = String(e);
+    }
+  });
 }
 </script>
 
@@ -112,11 +120,11 @@ async function remove(name: string) {
         <span class="cx-warn" v-if="c.rootless">{{ c.rootless }}</span>
       </div>
       <div class="cx-do">
-        <Button @click="check(c.name)">Check</Button>
+        <Button :busy="probes[c.name] === 'checking'" @click="check(c.name)">Check</Button>
         <Button @click="emit('browse', `${c.name}:`)">Browse</Button>
         <Button @click="form = { editing: c }">Edit</Button>
         <Button v-if="c.scheme !== 'fs'" @click="changing = c; newSecret = ''">Password</Button>
-        <Button look="danger" @click="remove(c.name)">Remove</Button>
+        <Button look="danger" :busy="doing.busy(`remove:${c.name}`)" @click="remove(c.name)">Remove</Button>
       </div>
     </div>
 
@@ -128,7 +136,7 @@ async function remove(name: string) {
       </Field>
       <div class="cx-qf">
         <Button @click="changing = null; newSecret = ''">Cancel</Button>
-        <Button look="primary" :disabled="!newSecret" @click="savePassword()">Save it</Button>
+        <Button look="primary" :disabled="!newSecret" :busy="doing.busy('password')" @click="savePassword()">Save it</Button>
       </div>
     </Sheet>
   </div>

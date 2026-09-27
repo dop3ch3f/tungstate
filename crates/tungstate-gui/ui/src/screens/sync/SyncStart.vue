@@ -23,6 +23,7 @@ const STEPS = [
 onMounted(() => void s.load());
 
 async function putBack(run: PastSync) {
+  if (s.busy.value != null) return;
   const answer = await ask({
     title: `Put back this run of ${run.sync}?`,
     why: "Copies it made are set aside again, and anything it set aside goes back where it was, on every folder.",

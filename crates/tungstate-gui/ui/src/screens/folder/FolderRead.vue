@@ -128,6 +128,7 @@ const shape = computed(() => {
           <Button
             look="primary"
             :disabled="!chosen || !!mine"
+            :busy="!!f.busy.value"
             @click="chosen && f.choose(chosen)"
           >{{ chosen && !mine ? `Give this folder the ${chosen} rules` : "Give this folder these rules" }}</Button>
           <span class="safe">You will see every move before anything happens.</span>

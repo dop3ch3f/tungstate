@@ -10,6 +10,7 @@ import { dupeEvents, type UnlistenFn } from "../engine/events";
 import type { Claim, Cleared, DupeKind, DupeRow, Found, ScanProgress } from "../engine/types";
 import { useTable } from "../lib/table";
 import { tickedAcross } from "../lib/counts";
+import { useBusy } from "./useBusy";
 
 export type Phase = "start" | "scanning" | "found" | "clearing" | "done";
 
@@ -339,15 +340,18 @@ async function putBack() {
   const done = cleared.value;
   if (!target || !done || !done.reversible) return;
   problem.value = null;
-  try {
-    const files = await dupes.putBack(target, done.plan);
-    cleared.value = null;
-    phase.value = "start";
-    putBackCount.value = files;
-  } catch (e) {
-    problem.value = String(e);
-  }
+  await doing.run("put-back", async () => {
+    try {
+      const files = await dupes.putBack(target, done.plan);
+      cleared.value = null;
+      phase.value = "start";
+      putBackCount.value = files;
+    } catch (e) {
+      problem.value = String(e);
+    }
+  });
 }
+const doing = useBusy();
 
 /** How many files the last Put it back moved, for the sentence that says so. */
 const putBackCount = ref<number | null>(null);
@@ -390,6 +394,7 @@ export function useDupes() {
     chooseAction,
     putBack,
     putBackCount,
+    puttingBack: () => doing.busy("put-back"),
     again: () => {
       phase.value = "start";
       cleared.value = null;

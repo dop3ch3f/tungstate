@@ -10,6 +10,7 @@ import Notice from "../../ui/Notice.vue";
 import Empty from "../../ui/Empty.vue";
 import Sheet from "../../ui/Sheet.vue";
 import PairForm from "./PairForm.vue";
+import { useBusy } from "../../state/useBusy";
 
 const props = defineProps<{ places: Place[] }>();
 const emit = defineEmits<{ ran: [] }>();
@@ -74,14 +75,19 @@ function says(field: keyof typeof CHOICES, token: string): string {
   return found ? found[1] : token;
 }
 
-async function run(name: string) {
-  try {
-    await links.run(name);
-    emit("ran");
-  } catch (e) {
-    problem.value = String(e);
-  }
-}
+// A second Run while the first is being handed over would queue the pair
+// twice, so each link's actions wait for the one before.
+const doing = useBusy();
+
+const run = (name: string) =>
+  doing.run(name, async () => {
+    try {
+      await links.run(name);
+      emit("ran");
+    } catch (e) {
+      problem.value = String(e);
+    }
+  });
 
 async function remove(link: Link) {
   const answer = await ask({
@@ -93,12 +99,14 @@ async function remove(link: Link) {
     ],
   });
   if (answer.id !== "yes") return;
-  try {
-    await links.remove(link.name);
-    await load();
-  } catch (e) {
-    problem.value = String(e);
-  }
+  await doing.run(link.name, async () => {
+    try {
+      await links.remove(link.name);
+      await load();
+    } catch (e) {
+      problem.value = String(e);
+    }
+  });
 }
 </script>
 
@@ -129,9 +137,9 @@ async function remove(link: Link) {
       </ul>
       <div class="lk-do">
         <Button @click="preview(link.name)">Preview</Button>
-        <Button @click="run(link.name)">Run</Button>
+        <Button :busy="doing.busy(link.name)" @click="run(link.name)">Run</Button>
         <Button @click="showSetAside(link.name)">Set aside</Button>
-        <Button look="danger" @click="remove(link)">Remove</Button>
+        <Button look="danger" :disabled="doing.busy(link.name)" @click="remove(link)">Remove</Button>
       </div>
     </div>
 

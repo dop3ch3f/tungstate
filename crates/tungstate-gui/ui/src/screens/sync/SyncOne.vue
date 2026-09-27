@@ -15,6 +15,7 @@ import Sheet from "../../ui/Sheet.vue";
 import SyncRuns from "./SyncRuns.vue";
 import SyncSettings from "./SyncSettings.vue";
 import SyncUndoneNotice from "./SyncUndoneNotice.vue";
+import { useBusy } from "../../state/useBusy";
 
 const s = useSync();
 const sync = computed(() => s.current.value!);
@@ -30,6 +31,7 @@ const inside = ref("");
 const calledAs = ref("");
 const said = ref<string | null>(null);
 const problem = ref<string | null>(null);
+const doing = useBusy();
 
 const conflictWords = computed(() => CONFLICTS.find((c) => c.id === sync.value.on_conflict)?.label ?? sync.value.on_conflict);
 const role = (member: string) => {
@@ -51,16 +53,19 @@ function edit() {
 }
 
 async function saveSettings() {
-  if (!editing.value) return;
+  const form = editing.value;
+  if (!form) return;
   problem.value = null;
-  try {
-    s.current.value = await syncs.change(sync.value.name, editing.value);
-    editing.value = null;
-    said.value = "Saved. It applies from the next run.";
-    await s.load();
-  } catch (e) {
-    problem.value = reason(e);
-  }
+  await doing.run("save", async () => {
+    try {
+      s.current.value = await syncs.change(sync.value.name, form);
+      editing.value = null;
+      said.value = "Saved. It applies from the next run.";
+      await s.load();
+    } catch (e) {
+      problem.value = reason(e);
+    }
+  });
 }
 
 async function openAdding() {
@@ -72,7 +77,9 @@ async function openAdding() {
   }
 }
 
-async function addEnd(end: string) {
+/** Add a member. Under the "add" key, so a folder picked on this Mac and one
+ *  typed on a connection cannot both be added at once. */
+async function add(end: string) {
   problem.value = null;
   try {
     s.current.value = await syncs.addMember(sync.value.name, end, calledAs.value.trim() || null);
@@ -85,10 +92,12 @@ async function addEnd(end: string) {
   }
 }
 
-async function addHere() {
-  const picked = await folders.pick();
-  if (picked) await addEnd(picked);
-}
+const addEnd = (end: string) => doing.run("add", () => add(end));
+const addHere = () =>
+  doing.run("add", async () => {
+    const picked = await folders.pick();
+    if (picked) await add(picked);
+  });
 
 async function removeMember(member: string) {
   const answer = await ask({
@@ -100,12 +109,14 @@ async function removeMember(member: string) {
     ],
   });
   if (answer.id !== "go") return;
-  try {
-    s.current.value = await syncs.removeMember(sync.value.name, member);
-    await s.load();
-  } catch (e) {
-    problem.value = reason(e);
-  }
+  await doing.run(`take:${member}`, async () => {
+    try {
+      s.current.value = await syncs.removeMember(sync.value.name, member);
+      await s.load();
+    } catch (e) {
+      problem.value = reason(e);
+    }
+  });
 }
 
 async function removeSync() {
@@ -118,11 +129,13 @@ async function removeSync() {
     ],
   });
   if (answer.id !== "go") return;
-  try {
-    await s.remove(sync.value.name);
-  } catch (e) {
-    problem.value = reason(e);
-  }
+  await doing.run("remove", async () => {
+    try {
+      await s.remove(sync.value.name);
+    } catch (e) {
+      problem.value = reason(e);
+    }
+  });
 }
 
 async function forget() {
@@ -134,6 +147,7 @@ async function forget() {
 }
 
 async function putBack(run: PastSync) {
+  if (s.busy.value != null) return;
   const answer = await ask({
     title: `Put back this run of ${run.sync}?`,
     why: "Copies it made are set aside again, and anything it set aside goes back where it was, on every folder.",
@@ -168,6 +182,8 @@ async function putBack(run: PastSync) {
           class="so-drop"
           v-if="sync.members.length > 2 && !role(member.name)"
           @click="removeMember(member.name)"
+          :disabled="doing.busy(`take:${member.name}`)"
+          :aria-busy="doing.busy(`take:${member.name}`) || undefined"
           :title="`Take ${member.name} out`"
         >Take out</button>
       </li>
@@ -186,7 +202,7 @@ async function putBack(run: PastSync) {
       <Button @click="openAdding()">Add a folder…</Button>
       <Button @click="forgetting = true">Forget a file…</Button>
       <span class="so-gap"></span>
-      <Button look="danger" @click="removeSync()">Remove this sync</Button>
+      <Button look="danger" :busy="doing.busy('remove')" @click="removeSync()">Remove this sync</Button>
     </div>
 
     <Notice v-if="said">{{ said }}</Notice>
@@ -199,7 +215,7 @@ async function putBack(run: PastSync) {
       <SyncSettings v-model="editing" />
       <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
       <footer class="so-foot">
-        <Button look="primary" @click="saveSettings()">Save</Button>
+        <Button look="primary" :busy="doing.busy('save')" @click="saveSettings()">Save</Button>
         <Button look="link" @click="editing = null">Cancel</Button>
       </footer>
     </Sheet>
@@ -209,14 +225,14 @@ async function putBack(run: PastSync) {
         <input v-model="calledAs" />
       </Field>
       <div class="so-add">
-        <Button @click="addHere()">A folder on this Mac…</Button>
+        <Button :busy="doing.busy('add')" @click="addHere()">A folder on this Mac…</Button>
         <template v-if="saved.length">
           <select v-model="onConnection" aria-label="Connection">
             <option value="">or on a connection…</option>
             <option v-for="c in saved" :key="c.name" :value="c.name">{{ c.name }}</option>
           </select>
           <input v-if="onConnection" v-model="inside" placeholder="folder on it" aria-label="Folder on the connection" />
-          <Button v-if="onConnection" @click="addEnd(`${onConnection}:${inside.trim().replace(/^\/+/, '')}`)">Add</Button>
+          <Button v-if="onConnection" :busy="doing.busy('add')" @click="addEnd(`${onConnection}:${inside.trim().replace(/^\/+/, '')}`)">Add</Button>
         </template>
       </div>
       <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
@@ -260,6 +276,7 @@ async function putBack(run: PastSync) {
 .so-role { align-self: flex-start; font-size: var(--fine); font-weight: 700; color: var(--control-ink); background: var(--control); border-radius: var(--radius); padding: 1px 6px; }
 .so-status { font-size: var(--fine); color: var(--text-faint); }
 .so-paused { color: var(--hold); }
+.so-drop[aria-busy="true"] { cursor: progress; opacity: 0.6; }
 .so-drop { align-self: flex-start; font: inherit; font-size: var(--fine); color: var(--text-faint); background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
 .so-says { margin: 0; padding-left: 1.1em; font-size: var(--small); color: var(--text-quiet); line-height: 1.6; }
 .so-acts { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }

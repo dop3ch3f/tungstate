@@ -50,7 +50,7 @@ const copiedBytes = computed(() =>
 
 async function putBack() {
   const plan = ran.value?.plan;
-  if (plan == null || !s.current.value) return;
+  if (plan == null || !s.current.value || s.busy.value != null) return;
   const answer = await ask({
     title: "Put this run back?",
     why: "Copies it made are set aside again, and anything it set aside goes back where it was, on every folder.",
@@ -105,7 +105,7 @@ async function putBack() {
       <SyncUndoneNotice />
       <Notice tone="bad" v-if="s.problem.value">{{ s.problem.value }}</Notice>
       <footer class="rn-foot">
-        <Button look="primary" v-if="ran.plan != null && ran.reversible && !s.undone.value" @click="putBack()">
+        <Button look="primary" v-if="ran.plan != null && ran.reversible && !s.undone.value" :busy="s.busy.value === ran.plan" @click="putBack()">
           {{ s.busy.value === ran.plan ? "Putting back…" : "Put it back" }}
         </Button>
         <span class="rn-hint" v-else-if="ran.plan != null && !ran.reversible">This run deleted files outright, so it cannot be put back.</span>

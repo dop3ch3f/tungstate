@@ -167,6 +167,8 @@ mockIPC((cmd, args) => {
   if (bare && ["governed", "list_links", "list_connections", "recent", "history", "whereis", "archives", "interrupted", "past_tidies", "past_cleanups", "recent_scans", "list_syncs", "past_syncs"].includes(cmd)) {
     return [];
   }
+  // A call that never answers, to photograph a button while it waits.
+  if (sceneName === "links-busy" && cmd === "run_link") return new Promise(() => {});
   switch (cmd) {
     case "governed": return governed;
     case "learn_folder":
@@ -622,6 +624,11 @@ const scenes: Record<string, () => unknown> = {
     await sy.putBack("capcut", 31);
   },
   "sync-settings": async () => { await syncAt(0); await tick(); document.querySelectorAll<HTMLButtonElement>(".so-acts button")[1]?.click(); },
+  "sync-done-busy": async () => {
+    await scenes["sync-done"]();
+    sy.busy.value = 31;
+  },
+  "links-busy": async () => { nav.go("drain"); await tab(2); await tick(); document.querySelectorAll<HTMLButtonElement>(".lk-do button")[1]?.click(); },
   "sync-launch": () => {},
   "sync-following": () => syncAt(0),
   "sync-held": () => syncAt(0),

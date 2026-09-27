@@ -38,6 +38,7 @@ onMounted(() => {
 });
 
 async function putBack(run: PastRun) {
+  if (busy.value != null) return;
   const answer = await ask({
     title: `Put back ${files(ran(run))} in ${run.name}?`,
     why: "Each file goes back where it was before that tidy. Anything changed since is left alone and said so.",
@@ -90,6 +91,7 @@ const STEPS = [
           v-for="folder in f.registered.value"
           :key="folder.root"
           class="known-row"
+          :aria-busy="f.opening.value === folder.root || undefined"
           @click="folder.broken ? f.look(folder.root) : f.open(folder.root)"
         >
           <span class="known-name">{{ folder.name }}</span>
@@ -148,6 +150,9 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   cursor: pointer;
 }
 .known-row:hover { background: var(--surface-hover); }
+.known-row[aria-busy="true"] { cursor: progress; background: var(--surface-hover); }
+.known-row[aria-busy="true"] .known-name { animation: known-breathe 1.2s var(--ease) infinite; }
+@keyframes known-breathe { 0%, 100% { opacity: 0.45 } 50% { opacity: 1 } }
 .known-name { font-weight: 600; flex: none; }
 .known-path { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .known-state { flex: none; font-size: var(--fine); color: var(--bad); }

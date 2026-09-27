@@ -33,6 +33,7 @@ async function loadPast() {
 }
 
 async function putBack(run: PastRun) {
+  if (busy.value != null) return;
   const answer = await ask({
     title: `Put back ${files(ran(run))} in ${run.name}?`,
     why: "Each copy goes back where it was before it was set aside.",

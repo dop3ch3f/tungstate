@@ -8,6 +8,7 @@ import { bytes, kind, shortPath, when } from "../../lib/format";
 import type { Entry, Place } from "../../engine/types";
 import Notice from "../../ui/Notice.vue";
 import { useTable } from "../../lib/table";
+import { latest } from "../../lib/latest";
 
 const props = defineProps<{ start: string; active: boolean; places: Place[] }>();
 const emit = defineEmits<{
@@ -46,10 +47,16 @@ const weight = computed(() =>
 const allTicked = computed(() => shown.value.length > 0 && shown.value.every((e) => ticked.value.has(e.name)));
 const someTicked = computed(() => ticked.value.size > 0 && !allTicked.value);
 
+// Clicking up twice quickly reads two folders; only the last one asked for
+// may land, or the pane shows one folder under another's path.
+const reads = latest();
+
 async function load(to: string) {
   loading.value = true;
+  const ticket = reads.take();
   try {
     const listing = await transfers.browse(to);
+    if (reads.stale(ticket)) return;
     entries.value = listing.entries;
     parent.value = listing.parent;
     here.value = listing.path;
@@ -60,9 +67,9 @@ async function load(to: string) {
     emit("located", listing.path);
     push();
   } catch (e) {
-    problem.value = String(e);
+    if (!reads.stale(ticket)) problem.value = String(e);
   } finally {
-    loading.value = false;
+    if (!reads.stale(ticket)) loading.value = false;
   }
 }
 
