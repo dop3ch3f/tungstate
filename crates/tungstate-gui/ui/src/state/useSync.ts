@@ -14,6 +14,7 @@ import { syncEvents, type UnlistenFn } from "../engine/events";
 import type {
   FollowingView, PastSync, SyncAsk, SyncConflict, SyncPreview, SyncRan, SyncUndone, SyncView,
 } from "../engine/types";
+import { latest } from "../lib/latest";
 import { reason } from "../lib/syncwords";
 
 export type Phase = "list" | "make" | "one" | "reading" | "preview" | "running" | "done";
@@ -194,6 +195,8 @@ function ask(): SyncAsk | null {
   return { resolve };
 }
 
+const previews = latest();
+
 async function look() {
   if (!current.value) return;
   const name = current.value.name;
@@ -204,16 +207,22 @@ async function look() {
   else phase.value = "reading";
   problem.value = null;
   confirmed.value = false;
+  const ticket = previews.take();
   try {
-    preview.value = await syncs.preview(name, ask());
+    const answer = await syncs.preview(name, ask());
+    // A quicker second answer to a conflict previews again; only the newest
+    // matches what is chosen on screen, and its fingerprint is the one run.
+    if (previews.stale(ticket)) return;
+    preview.value = answer;
     const known = new Set(seen.value.map((c) => c.path));
-    seen.value = [...seen.value, ...preview.value.conflicts.filter((c) => !known.has(c.path))];
+    seen.value = [...seen.value, ...answer.conflicts.filter((c) => !known.has(c.path))];
     phase.value = "preview";
   } catch (e) {
+    if (previews.stale(ticket)) return;
     problem.value = reason(e);
     if (!again) phase.value = "one";
   } finally {
-    rechecking.value = false;
+    if (!previews.stale(ticket)) rechecking.value = false;
   }
 }
 
