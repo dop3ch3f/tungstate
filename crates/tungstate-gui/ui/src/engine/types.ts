@@ -453,9 +453,31 @@ export interface Connection {
   networked: boolean;
   /** Why every write will be refused, when it will. Null when it will not. */
   rootless: string | null;
+  /** What crosses the network unencrypted, as advice. Null when nothing does. */
+  clear: string | null;
+  /** Where it points, as a person would say it: "nas.local › media". */
+  place: string;
+  /** The last check, from the window or the command line. */
+  last_check: ConnectionCheck | null;
 }
 
-export type ConnectionForm = Omit<Connection, "encrypted" | "networked" | "rootless">;
+export interface ConnectionCheck {
+  /** Milliseconds since the Unix epoch. */
+  at: number;
+  ok: boolean;
+  note: string;
+}
+
+export type ConnectionForm = Pick<Connection, "name" | "scheme" | "host" | "port" | "username" | "root" | "options">;
+
+/** What still uses a connection. Pairs, syncs and unfinished transfers stop
+ *  Delete; history does not, and makes Delete retire it instead. */
+export interface ConnectionUses {
+  pairs: string[];
+  syncs: string[];
+  unfinished: string[];
+  history: number;
+}
 
 export interface Probe {
   entries: number;

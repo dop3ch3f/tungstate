@@ -5,12 +5,13 @@
 import { ref, computed, watch, onMounted } from "vue";
 import { transfers } from "../../engine/commands";
 import { bytes, kind, shortPath, when } from "../../lib/format";
-import type { Entry, Place } from "../../engine/types";
+import type { Entry } from "../../engine/types";
+import PlacePicker from "../../ui/PlacePicker.vue";
 import Notice from "../../ui/Notice.vue";
 import { useTable } from "../../lib/table";
 import { latest } from "../../lib/latest";
 
-const props = defineProps<{ start: string; active: boolean; places: Place[] }>();
+const props = defineProps<{ start: string; active: boolean }>();
 const emit = defineEmits<{
   focus: [];
   selection: [names: string[], total: number];
@@ -18,6 +19,9 @@ const emit = defineEmits<{
 }>();
 
 const here = ref(props.start);
+/** Whether the shared "Choose a place" sheet is open. A pane browses on its
+ *  own, so choosing a place opens it here rather than a folder inside it. */
+const going = ref(false);
 const draft = ref(props.start);
 const editing = ref(false);
 const entries = ref<Entry[]>([]);
@@ -129,12 +133,7 @@ const KIND: Record<string, string> = {
 <template>
   <section class="side" :class="{ lit: props.active }" @mousedown="emit('focus')">
     <header class="locline">
-      <select class="jump" @change="load(($event.target as HTMLSelectElement).value)">
-        <option value="">Go to…</option>
-        <option v-for="place in props.places" :key="place.path" :value="place.path">
-          {{ place.label }}
-        </option>
-      </select>
+      <button class="jump" @click="going = true">Go to…</button>
       <button class="up" :disabled="!parent" @click="parent && load(parent)" title="Up one">↑</button>
       <input
         class="path where-input"
@@ -147,6 +146,13 @@ const KIND: Record<string, string> = {
     </header>
 
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
+    <PlacePicker
+      v-if="going"
+      title="Go to"
+      :browse="false"
+      @dismiss="going = false"
+      @chosen="(at) => { going = false; load(at); }"
+    />
 
     <template v-else>
       <div class="sift" v-if="entries.length > 1">

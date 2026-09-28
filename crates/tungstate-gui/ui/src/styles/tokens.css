@@ -30,6 +30,7 @@
   /* Sync: teal, between home's blue and duplicates' green, and bluer than
      the green so the two never read as one. */
   --raw-teal: #2bb3b1;
+  --raw-raspberry: #e0527f;
   --raw-fluoresce: #7fd4ff;
   --raw-fluoresce-soft: rgba(127, 212, 255, 0.14);
   --raw-fluoresce-ink: #062030;
@@ -90,6 +91,7 @@
   --tint-history: var(--raw-slate);
   --tint-dupes: var(--raw-green);
   --tint-sync: var(--raw-teal);
+  --tint-connections: var(--raw-raspberry);
   --tint-ink: var(--raw-white);
   --tint-home-ink: var(--raw-fluoresce-ink);
 
@@ -151,6 +153,7 @@
 [data-half="folder"] { --control: var(--raw-plum); --control-ink: var(--raw-white); }
 [data-half="drain"] { --control: var(--raw-blue); --control-ink: var(--raw-white); }
 [data-half="sync"] { --control: var(--raw-teal); --control-ink: var(--raw-fluoresce-ink); }
+[data-half="connections"] { --control: var(--raw-raspberry); --control-ink: var(--raw-white); }
 
 /* Themes, chosen by `data-theme` on <html>, with `data-tone` for retro's
    light and dark (lib/theme.ts). Graphite is the :root values above.
@@ -184,6 +187,7 @@
   --tint-history: #8d8a83;
   --tint-dupes: #2f9e62;
   --tint-sync: #13918f;
+  --tint-connections: #c43d6b;
   --accent: #0a8fd1;
   --accent-soft: rgba(10, 143, 209, 0.12);
   --accent-ink: #ffffff;
@@ -196,6 +200,7 @@
 [data-theme="paper"] [data-half="folder"] { --control: #8a4fd6; }
 [data-theme="paper"] [data-half="drain"] { --control: #2f6bdf; }
 [data-theme="paper"] [data-half="sync"] { --control: #13918f; --control-ink: #ffffff; }
+[data-theme="paper"] [data-half="connections"] { --control: #c43d6b; --control-ink: #ffffff; }
 
 /* Retro OS, after PostHog: a cream desktop, windows with title bars, dark
    outlines, chunky buttons with a hard shadow, and three bold primaries. */
@@ -229,6 +234,7 @@
   --tint-history: #4a4d45;
   --tint-dupes: #2f8f4e;
   --tint-sync: #0f9ba0;
+  --tint-connections: #7b3fe4;
   --ok: #2f8f4e;
   --bad: #d23d1f;
   --radius: 4px;
@@ -247,6 +253,7 @@
 [data-theme="retro"] [data-half="folder"] { --control: #f54e00; --control-ink: #ffffff; }
 [data-theme="retro"] [data-half="drain"] { --control: #1d4aff; --control-ink: #ffffff; }
 [data-theme="retro"] [data-half="sync"] { --control: #0f9ba0; --control-ink: #ffffff; }
+[data-theme="retro"] [data-half="connections"] { --control: #7b3fe4; --control-ink: #ffffff; }
 
 /* Retro after dark: the same outlines and hard shadows on a warm charcoal
    desk. Everything the shapes need is inherited from retro above; only the
@@ -285,6 +292,7 @@
   --tint-history: #8a8980;
   --tint-dupes: #43b06a;
   --tint-sync: #1fb3b8;
+  --tint-connections: #9b6bff;
   --accent: #6b8cff;
   --accent-soft: rgba(107, 140, 255, 0.16);
   --accent-ink: #0c0f1c;
@@ -299,3 +307,4 @@
 [data-theme="retro"][data-tone="dark"] [data-half="folder"] { --control: #ff6420; --control-ink: #ffffff; --chosen-edge: #ff6420; }
 [data-theme="retro"][data-tone="dark"] [data-half="drain"] { --control: #4a72ff; --control-ink: #ffffff; --chosen-edge: #4a72ff; }
 [data-theme="retro"][data-tone="dark"] [data-half="sync"] { --control: #1fb3b8; --control-ink: #0b1a1b; --chosen-edge: #1fb3b8; }
+[data-theme="retro"][data-tone="dark"] [data-half="connections"] { --control: #9b6bff; --control-ink: #ffffff; --chosen-edge: #9b6bff; }

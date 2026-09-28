@@ -1,5 +1,12 @@
 <!-- The dialog shell: one veil, one card, focus kept inside it, Escape closes.
      Every question in the window renders through this. -->
+<script lang="ts">
+// Sheets open over sheets: a place picker over a form, a question over a
+// picker. Only the top one may answer the keyboard, or one Escape closes
+// every dialog on screen and two Tab traps fight over the focus.
+const open: object[] = [];
+</script>
+
 <script setup lang="ts">
 import { onMounted, onBeforeUnmount, ref, nextTick } from "vue";
 
@@ -20,7 +27,10 @@ const focusable = () =>
 
 /** Tab must not walk out of a modal dialog and start driving the window
    behind it, which is what all twelve of the hand-rolled ones allowed. */
+const me = {};
+
 function keydown(e: KeyboardEvent) {
+  if (open[open.length - 1] !== me) return;
   if (e.key === "Escape") {
     e.preventDefault();
     emit("dismiss");
@@ -41,6 +51,7 @@ function keydown(e: KeyboardEvent) {
 }
 
 onMounted(async () => {
+  open.push(me);
   restoreTo = document.activeElement as HTMLElement | null;
   await nextTick();
   // Not `focusable()[0]`: that is the title bar's minimise button, and a
@@ -49,6 +60,7 @@ onMounted(async () => {
   window.addEventListener("keydown", keydown);
 });
 onBeforeUnmount(() => {
+  open.splice(open.indexOf(me), 1);
   window.removeEventListener("keydown", keydown);
   restoreTo?.focus();
 });
@@ -96,8 +108,13 @@ onBeforeUnmount(() => {
   padding: 0;
   overflow: hidden;
   box-shadow: var(--lift-panel), var(--drop);
+  /* A tall form scrolls inside the card rather than running off the window
+     with its buttons. */
+  max-height: calc(100vh - var(--s6) * 2);
+  display: flex;
+  flex-direction: column;
 }
-.inside { padding: var(--s5) var(--s5) var(--s4); }
+.inside { padding: var(--s5) var(--s5) var(--s4); overflow-y: auto; min-height: 0; }
 .cap { padding: var(--s4) var(--s5) 0; }
 :global([data-theme="retro"] .cap) { padding: 6px 7px 6px var(--s3); }
 .panel-wide { width: min(580px, calc(100vw - var(--s6) * 2)); max-height: calc(100vh - var(--s6) * 2); overflow-y: auto; }

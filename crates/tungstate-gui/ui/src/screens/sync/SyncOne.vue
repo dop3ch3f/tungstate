@@ -3,8 +3,8 @@
      a preview. -->
 <script setup lang="ts">
 import { computed, ref, shallowRef } from "vue";
-import { connections, folders, syncs } from "../../engine/commands";
-import type { Connection, PastSync, SyncSettingsForm } from "../../engine/types";
+import { syncs } from "../../engine/commands";
+import type { PastSync, SyncSettingsForm } from "../../engine/types";
 import { exactlyInFull, following, reason, wayInFull, whenItRuns, CONFLICTS } from "../../lib/syncwords";
 import { useSync } from "../../state/useSync";
 import { ask } from "../../ui/useDialog";
@@ -12,6 +12,7 @@ import Button from "../../ui/Button.vue";
 import Field from "../../ui/Field.vue";
 import Notice from "../../ui/Notice.vue";
 import Sheet from "../../ui/Sheet.vue";
+import PlacePicker from "../../ui/PlacePicker.vue";
 import SyncRuns from "./SyncRuns.vue";
 import SyncSettings from "./SyncSettings.vue";
 import SyncUndoneNotice from "./SyncUndoneNotice.vue";
@@ -25,9 +26,8 @@ const editing = ref<SyncSettingsForm | null>(null);
 const adding = ref(false);
 const forgetting = ref(false);
 const forgetPath = ref("");
-const saved = shallowRef<Connection[]>([]);
-const onConnection = ref("");
-const inside = ref("");
+/** Whether the shared place picker is open over the Add sheet. */
+const choosing = ref(false);
 const calledAs = ref("");
 const said = ref<string | null>(null);
 const problem = ref<string | null>(null);
@@ -68,23 +68,18 @@ async function saveSettings() {
   });
 }
 
-async function openAdding() {
+function openAdding() {
   adding.value = true;
-  try {
-    saved.value = await connections.list();
-  } catch {
-    // A folder on this Mac can still be added.
-  }
 }
 
-/** Add a member. Under the "add" key, so a folder picked on this Mac and one
- *  typed on a connection cannot both be added at once. */
+/** Add a member. Under the "add" key, so a second pick while the first is
+ *  being added is not added twice. */
 async function add(end: string) {
   problem.value = null;
   try {
     s.current.value = await syncs.addMember(sync.value.name, end, calledAs.value.trim() || null);
     adding.value = false;
-    calledAs.value = inside.value = "";
+    calledAs.value = "";
     said.value = "Added. The next run fills it.";
     await s.load();
   } catch (e) {
@@ -93,11 +88,6 @@ async function add(end: string) {
 }
 
 const addEnd = (end: string) => doing.run("add", () => add(end));
-const addHere = () =>
-  doing.run("add", async () => {
-    const picked = await folders.pick();
-    if (picked) await add(picked);
-  });
 
 async function removeMember(member: string) {
   const answer = await ask({
@@ -225,16 +215,16 @@ async function putBack(run: PastSync) {
         <input v-model="calledAs" />
       </Field>
       <div class="so-add">
-        <Button :busy="doing.busy('add')" @click="addHere()">A folder on this Mac…</Button>
-        <template v-if="saved.length">
-          <select v-model="onConnection" aria-label="Connection">
-            <option value="">or on a connection…</option>
-            <option v-for="c in saved" :key="c.name" :value="c.name">{{ c.name }}</option>
-          </select>
-          <input v-if="onConnection" v-model="inside" placeholder="folder on it" aria-label="Folder on the connection" />
-          <Button v-if="onConnection" :busy="doing.busy('add')" @click="addEnd(`${onConnection}:${inside.trim().replace(/^\/+/, '')}`)">Add</Button>
-        </template>
+        <Button look="primary" :busy="doing.busy('add')" @click="choosing = true">Choose the folder…</Button>
       </div>
+      <PlacePicker
+        v-if="choosing"
+        of="sync"
+        :title="`A folder for ${sync.name}`"
+        choose="Add this folder"
+        @dismiss="choosing = false"
+        @chosen="(end) => { choosing = false; addEnd(end); }"
+      />
       <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
     </Sheet>
 

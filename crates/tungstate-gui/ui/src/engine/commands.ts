@@ -141,7 +141,15 @@ export const connections = {
   setPassword: (name: string, secret: string) =>
     invoke<void>("set_connection_password", { name, secret }),
   test: (name: string) => invoke<T.Probe>("test_connection", { name }),
-  remove: (name: string) => invoke<void>("remove_connection", { name }),
+  /** Check settings that are not saved yet. Without a secret, a saved
+   *  connection's own password is used. */
+  testSettings: (form: T.ConnectionForm, secret: string | null) =>
+    invoke<T.Probe>("test_settings", { form, secret }),
+  /** What would stop these settings working, one sentence each. */
+  problems: (form: T.ConnectionForm) => invoke<string[]>("settings_problems", { form }),
+  uses: (name: string) => invoke<T.ConnectionUses>("connection_uses", { name }),
+  /** Retired, rather than deleted, when History still names it. */
+  remove: (name: string) => invoke<"deleted" | "retired">("remove_connection", { name }),
 };
 
 export const storage = {

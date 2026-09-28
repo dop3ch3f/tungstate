@@ -18,6 +18,7 @@ import SyncHalf from "./screens/sync/SyncHalf.vue";
 import SyncLaunch from "./screens/sync/SyncLaunch.vue";
 import HistoryView from "./screens/HistoryView.vue";
 import SettingsView from "./screens/SettingsView.vue";
+import ConnectionsHalf from "./screens/connections/ConnectionsHalf.vue";
 import UpdateSheet from "./screens/UpdateSheet.vue";
 import { startLooking, useUpdate } from "./state/useUpdate";
 import DialogHost from "./ui/DialogHost.vue";
@@ -60,6 +61,7 @@ const WHERE = {
   sync: "Sync",
   dupes: "Duplicates",
   history: "History",
+  connections: "Connections",
 } as const;
 </script>
 
@@ -110,6 +112,7 @@ const WHERE = {
         <SyncHalf v-else-if="nav.view.value === 'sync'" />
         <DupesHalf v-else-if="nav.view.value === 'dupes'" />
         <HistoryView v-else-if="nav.view.value === 'history'" />
+        <ConnectionsHalf v-else-if="nav.view.value === 'connections'" />
         <SettingsView v-else />
       </Window>
     </main>

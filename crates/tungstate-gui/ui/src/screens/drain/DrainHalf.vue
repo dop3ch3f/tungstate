@@ -10,16 +10,19 @@ import type { Leg, Place, TransferRequest } from "../../engine/types";
 import Pane from "./Pane.vue";
 import RunView from "./RunView.vue";
 import LinksView from "./LinksView.vue";
-import ConnectionsView from "./ConnectionsView.vue";
+import { useConnections } from "../../state/useConnections";
+import { useNav } from "../../nav";
 import TransferSetup from "./TransferSetup.vue";
 import Button from "../../ui/Button.vue";
 import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 import Sheet from "../../ui/Sheet.vue";
 
-type Where = "files" | "runs" | "links" | "connections";
+type Where = "files" | "runs" | "links";
 const where = ref<Where>("files");
 const t = useTransfer();
+const nav = useNav();
+const cx = useConnections();
 
 const places = shallowRef<Place[]>([]);
 const leftStart = ref("/");
@@ -59,20 +62,6 @@ const route = computed(() => {
   return `${shortPath(leg.source)} → ${shortPath(leg.destination)}`;
 });
 
-/** Connections are places too, so adding or removing one changes the list. */
-async function loadPlaces() {
-  try {
-    places.value = await transfers.places();
-  } catch (e) {
-    problem.value = String(e);
-  }
-}
-
-/** Open a connection in the left pane, from the Connections tab. */
-function browse(location: string) {
-  leftStart.value = location;
-  where.value = "files";
-}
 
 // Which folders the panes were showing, kept for the next launch. Debounced,
 // so walking through folders quickly does not write the file on every step.
@@ -89,7 +78,7 @@ onMounted(async () => {
     places.value = await transfers.places();
     const home = places.value.find((p) => p.label === "Home")?.path ?? "/";
     const last = await transfers.lastPanes();
-    leftStart.value = last.left ?? places.value.find((p) => p.label === "Movies")?.path ?? home;
+    leftStart.value = opening ?? last.left ?? places.value.find((p) => p.label === "Movies")?.path ?? home;
     rightStart.value = last.right ?? places.value.find((p) => p.path.startsWith("/Volumes"))?.path ?? home;
     ready.value = true;
     await t.refreshStranded();
@@ -116,12 +105,19 @@ async function send(request: TransferRequest) {
   right.value?.reload();
 }
 
-const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections: "Connections" } as const;
+const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs" } as const;
+
+// Browse, pressed in the Connections section: the left pane opens there,
+// ahead of the folder it was last showing. Taken once, so coming back to
+// Transfer later starts as usual.
+const opening = cx.browseTo.value;
+cx.browseTo.value = null;
 </script>
 
 <template>
   <div class="dh">
     <div class="head"><Tile of="drain" :size="26" /><h1 class="dh-title">Move to another machine</h1></div>
+    <div class="dh-top">
     <nav class="dh-tabs">
       <button
         v-for="(label, key) in WHERE"
@@ -133,6 +129,8 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
         <span class="dh-badge" v-if="key === 'runs' && t.running.value">●</span>
       </button>
     </nav>
+    <Button look="link" @click="nav.go('connections')">Connections</Button>
+    </div>
 
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
     <Notice v-if="t.placed.value && where !== 'runs'">
@@ -151,12 +149,12 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
     <div class="dh-body" v-if="where === 'files'">
       <div class="dh-panes" v-if="ready">
         <Pane
-          ref="left" :start="leftStart" :places="places" :active="active === 'left'"
+          ref="left" :start="leftStart" :active="active === 'left'"
           @focus="active = 'left'" @located="leftPath = $event"
           @selection="(names, total) => { leftPicked = names; leftWeight = total }"
         />
         <Pane
-          ref="right" :start="rightStart" :places="places" :active="active === 'right'"
+          ref="right" :start="rightStart" :active="active === 'right'"
           @focus="active = 'right'" @located="rightPath = $event"
           @selection="(names, total) => { rightPicked = names; rightWeight = total }"
         />
@@ -171,8 +169,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
     </div>
 
     <div class="dh-body dh-pad" v-else-if="where === 'runs'"><RunView /></div>
-    <div class="dh-body dh-pad" v-else-if="where === 'links'"><LinksView :places="places" @ran="where = 'runs'" /></div>
-    <div class="dh-body dh-pad" v-else><ConnectionsView @changed="loadPlaces()" @browse="browse" /></div>
+    <div class="dh-body dh-pad" v-else><LinksView :places="places" @ran="where = 'runs'" /></div>
 
     <TransferSetup
       v-if="setup"
@@ -254,6 +251,7 @@ const WHERE = { files: "Files", runs: "Runs", links: "Saved pairs", connections:
   font-weight: 700;
 }
 .dh-badge { color: var(--accent); font-size: 9px; vertical-align: 2px; }
+.dh-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
 .dh-unfinished { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: baseline; }
 
 .dh-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s3); }

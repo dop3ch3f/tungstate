@@ -6,7 +6,7 @@
 // each row into one path so a 16-square icon is one element and not sixteen.
 
 export type Art =
-  | "home" | "folder" | "drain" | "sync" | "dupes" | "history" | "settings"
+  | "home" | "folder" | "drain" | "sync" | "dupes" | "history" | "connections" | "settings"
   | "no-folders" | "no-runs" | "no-pairs" | "no-connections" | "no-archives" | "nothing-found"
   | "no-history" | "no-syncs" | "in-step" | "conflict";
 
@@ -61,6 +61,16 @@ const SECTIONS: Record<string, string[]> = {
     ".x.....x",
     "xx....x.",
     ".xxxxx..",
+  ],
+  connections: [
+    "..x..x..",
+    "..x..x..",
+    ".xxxxxx.",
+    ".xoooox.",
+    ".xoooox.",
+    "..xxxx..",
+    "...xx...",
+    "...xx...",
   ],
   history: [
     "..xxxx..",

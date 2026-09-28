@@ -13,6 +13,7 @@ const TINT = {
   sync: "t-sync",
   dupes: "t-dupes",
   history: "t-history",
+  connections: "t-connections",
   settings: "t-history",
 } as const;
 </script>
@@ -44,4 +45,5 @@ const TINT = {
 .t-history { background: var(--tint-history); }
 .t-dupes { background: var(--tint-dupes); }
 .t-sync { background: var(--tint-sync); }
+.t-connections { background: var(--tint-connections); }
 </style>

@@ -3,7 +3,7 @@
 // Drawn rather than an icon font: three shapes do not justify a dependency,
 // and a path takes the colour of whatever it sits in.
 
-export type Section = "home" | "folder" | "drain" | "sync" | "dupes" | "history" | "settings";
+export type Section = "home" | "folder" | "drain" | "sync" | "dupes" | "history" | "connections" | "settings";
 
 export const ICON: Record<Section, string> = {
   home: "M2.5 7.5L8 3l5.5 4.5M4 6.5V13h8V6.5",
@@ -14,4 +14,6 @@ export const ICON: Record<Section, string> = {
   dupes: "M2.5 2.5h8v8h-8zM5.5 5.5h8v8h-8z",
   // Two arrows chasing each other round: things going both ways.
   sync: "M3 7a5 5 0 0 1 9-2.5M13 9a5 5 0 0 1-9 2.5M12.5 2v3h-3M3.5 14v-3h3",
+  // A plug: a place you connect to.
+  connections: "M6 2v3.5M10 2v3.5M4 5.5h8V8a4 4 0 0 1-8 0zM8 12v2.5",
 };

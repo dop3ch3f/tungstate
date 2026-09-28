@@ -2,9 +2,9 @@
      behaves. Checked by the same code the command line uses, so a refusal here
      is the refusal `tungstate sync add` would give, in plainer words. -->
 <script setup lang="ts">
-import { computed, onMounted, ref, shallowRef } from "vue";
-import { connections, folders, syncs } from "../../engine/commands";
-import type { Connection, SyncSettingsForm } from "../../engine/types";
+import { computed, ref } from "vue";
+import { syncs } from "../../engine/commands";
+import type { SyncSettingsForm } from "../../engine/types";
 import { WAYS, reason } from "../../lib/syncwords";
 import { shortPath } from "../../lib/format";
 import { useSync } from "../../state/useSync";
@@ -12,6 +12,7 @@ import Button from "../../ui/Button.vue";
 import Field from "../../ui/Field.vue";
 import Notice from "../../ui/Notice.vue";
 import SyncSettings from "./SyncSettings.vue";
+import PlacePicker from "../../ui/PlacePicker.vue";
 
 const s = useSync();
 
@@ -33,35 +34,22 @@ const settings = ref<SyncSettingsForm>({
   first_check: "full",
   launch: "no",
 });
-const saved = shallowRef<Connection[]>([]);
-const onConnection = ref("");
-const inside = ref("");
+/** Whether the shared place picker is open. */
+const choosing = ref(false);
 const problem = ref<string | null>(null);
 const making = ref(false);
 
-onMounted(async () => {
-  try {
-    saved.value = await connections.list();
-  } catch {
-    // Folders on this Mac still work without the list.
-  }
-});
 
 /** What a member will be called if the name is left empty: its folder's last
  *  part, or its connection's name. The engine chooses the same. */
 const called = (end: string) =>
   /^[A-Za-z0-9_-]{2,}:/.test(end) ? end.split(":")[0] : end.split(/[\\/]/).filter(Boolean).pop() ?? end;
 
-async function addHere() {
-  const picked = await folders.pick();
-  if (picked) places.value = [...places.value, { end: picked, name: "" }];
-}
-
-function addRemote() {
-  if (!onConnection.value) return;
-  const end = `${onConnection.value}:${inside.value.trim().replace(/^\/+/, "")}`;
+function addPlace(end: string) {
+  choosing.value = false;
+  // The same folder twice is one member, whichever way it was reached.
+  if (places.value.some((p) => p.end === end)) return;
   places.value = [...places.value, { end, name: "" }];
-  inside.value = "";
 }
 
 function drop(index: number) {
@@ -113,17 +101,16 @@ async function make() {
       </ol>
       <p class="mk-none" v-else>Two or more: a folder on this Mac, a mounted drive, or a place on a saved connection.</p>
       <div class="mk-add">
-        <Button @click="addHere()">Add a folder on this Mac…</Button>
-        <template v-if="saved.length">
-          <span class="mk-or">or on</span>
-          <select v-model="onConnection" aria-label="Connection">
-            <option value="">a connection…</option>
-            <option v-for="c in saved" :key="c.name" :value="c.name">{{ c.name }}</option>
-          </select>
-          <input v-if="onConnection" v-model="inside" placeholder="folder on it, e.g. capcut" aria-label="Folder on the connection" />
-          <Button v-if="onConnection" @click="addRemote()">Add</Button>
-        </template>
+        <Button @click="choosing = true">Add a folder…</Button>
       </div>
+      <PlacePicker
+        v-if="choosing"
+        of="sync"
+        title="A folder for this sync"
+        choose="Add this folder"
+        @dismiss="choosing = false"
+        @chosen="addPlace"
+      />
     </section>
 
     <section class="mk-block">
@@ -166,7 +153,6 @@ async function make() {
 .mk-name { font-size: var(--small); }
 .mk-none { font-size: var(--small); color: var(--text-faint); margin: 0 0 var(--s2); }
 .mk-add { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
-.mk-or { font-size: var(--small); color: var(--text-faint); }
 .mk-ways { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--s2); }
 .mk-way {
   position: relative;

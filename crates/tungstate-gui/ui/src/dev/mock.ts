@@ -199,9 +199,16 @@ mockIPC((cmd, args) => {
     case "stop_finding_duplicates": return null;
     case "clear_duplicates":
       return { files: 3, bytes: 41_943_040, plan: 7, reversible: true, dropped: 1, failed: [] };
-    case "list_connections":
-      return [{ name: "nas", scheme: "ftp", host: "nas.local", port: 21, username: "me", root: "/volume1/media", options: {}, encrypted: false, networked: true, rootless: null }];
+    case "list_connections": return savedConnections;
     case "test_connection": return { entries: 14, root: "/volume1/media", names: ["Movies", "Photos"], accepts_files: true };
+    case "test_settings": return { entries: 6, root: "media/backups", names: ["2024/", "2025/", "2026/", "CapCut/", "Photos/", "notes.txt"], accepts_files: true };
+    case "settings_problems":
+      return a.form?.scheme === "smb" && !a.form?.root ? ["the root has to start with the share's name, as in media/backups"] : [];
+    case "connection_uses":
+      return a.name === "office"
+        ? { pairs: ["videos-to-office"], syncs: ["capcut"], unfinished: [], history: 212 }
+        : { pairs: [], syncs: [], unfinished: [], history: 38 };
+    case "remove_connection": return "retired";
     case "archives": return [{ name: "2026-09-20T11-02-44", archived_at: Date.now() - 86_400_000, size: 184_320, links: 2, connections: 1, operations: 412 }];
     case "preview_link":
       return { overlapping: [], fresh: 3, same_size: 1, clashes: 1, too_recent: 0, bytes: 629_145_600, removes_originals: true,
@@ -242,7 +249,12 @@ mockIPC((cmd, args) => {
     case "put_back_sync": return { plan: 31, put_back: 2, taken_off: 5, parked_left: 0, revived: [{ member: "laptop", path: "2025/wedding-rough-cut.mp4" }] };
     case "places": return [{ label: "Demo", path: DEMO }, { label: "NAS", path: `${DEMO}/nas` }];
     case "last_panes": return { left: `${DEMO}/photos-by-nothing`, right: `${DEMO}/nas/incoming` };
-    case "browse": return listings[a.path] ?? { path: a.path, parent: null, entries: [] };
+    case "browse":
+      if (a.path === "area51:" || a.path === "area51:media") {
+        const dirs = a.path === "area51:" ? ["media", "backups", "photos-2019"] : ["CapCut", "Exports", "Family", "Plex"];
+        return { path: a.path, parent: a.path === "area51:" ? null : "area51:", entries: dirs.map((name) => ({ name, path: a.path === "area51:" ? `area51:${name}` : `${a.path}/${name}`, is_dir: true, size: 0, modified: null })) };
+      }
+      return listings[a.path] ?? { path: a.path, parent: null, entries: [] };
     case "plugin:event|listen": return 1;
     default: return null;
   }
@@ -416,12 +428,50 @@ function type(sel: string, text: string) {
 
 const tick = () => new Promise((r) => setTimeout(r, 60));
 const click = (sel: string) => document.querySelector<HTMLButtonElement>(sel)?.click();
+/** Press the button whose text starts with `label`, the last one if `last`. */
+function press(label: string, last = false) {
+  const all = Array.from(document.querySelectorAll<HTMLButtonElement>("button")).filter((b) => b.textContent?.trim().startsWith(label));
+  (last ? all[all.length - 1] : all[0])?.click();
+}
+function pressIn(scope: string, label: string) {
+  const within = document.querySelector(scope);
+  Array.from(within?.querySelectorAll<HTMLButtonElement>("button") ?? []).find((b) => b.textContent?.trim().startsWith(label))?.click();
+}
+/** Type into the open sheet's text boxes in order. */
+function fill(values: string[]) {
+  const boxes = Array.from(document.querySelectorAll<HTMLInputElement>(".panel input:not([type=checkbox])"));
+  values.forEach((v, i) => {
+    const box = boxes[i];
+    if (!box) return;
+    box.value = v;
+    box.dispatchEvent(new Event("input"));
+  });
+}
 /** Open one of the Transfer window's tabs by position, since its state is local. */
 async function tab(n: number) {
   await tick();
   document.querySelectorAll<HTMLButtonElement>(".dh-tabs button")[n]?.click();
   await tick();
 }
+
+/** Every kind of connection, each at a different point in its life. */
+const savedConnections: T.Connection[] = (() => {
+  const base = { port: null as number | null, encrypted: true, networked: true, rootless: null, clear: null as string | null, options: {} as Record<string, string>, last_check: null as T.ConnectionCheck | null };
+  const smbClear = "files cross the network unencrypted unless the server turns on SMB encryption. Your password is never sent as it is. Set encryption to required to refuse a server that will not encrypt.";
+  const list: T.Connection[] = [
+    { ...base, name: "area51", scheme: "smb", host: "area51.local", username: "me", root: "media", place: "area51.local › media",
+      options: { encryption: "required" }, last_check: { at: now - 40 * 60_000, ok: true, note: "6 things in media" } },
+    { ...base, name: "office", scheme: "smb", host: "files.office.lan", username: "ifeanyi", root: "projects/video", place: "files.office.lan › projects/video",
+      encrypted: false, clear: smbClear, last_check: { at: now - 3 * day, ok: true, note: "212 things in projects/video" } },
+    { ...base, name: "offsite", scheme: "ftps", host: "backup.example.net", port: 2121, username: "tungstate", root: "/home/tungstate", place: "backup.example.net › home/tungstate",
+      last_check: { at: now - 2 * 3_600_000, ok: false, note: "`offsite` refused the credentials it was given" } },
+    { ...base, name: "photos-b2", scheme: "s3", host: null, username: "0045a1b2c3", root: "2026", place: "bucket family-photos at s3.us-west-004.backblazeb2.com › 2026",
+      options: { bucket: "family-photos", endpoint: "https://s3.us-west-004.backblazeb2.com", region: "us-west-004" }, last_check: null },
+    { ...base, name: "usb-drive", scheme: "fs", host: null, username: null, root: "/Volumes/Samsung T7", place: "/Volumes/Samsung T7", networked: false,
+      last_check: { at: now - 5 * day, ok: true, note: "31 things in /Volumes/Samsung T7" } },
+  ];
+  return list;
+})();
 
 /** A transfer in the queue, as the engine lists it. */
 const queued = (id: number, source: string, destination: string, moves: boolean, files: number | null, bytes: number | null, exchange = false): T.JobView => ({
@@ -543,6 +593,50 @@ const scenes: Record<string, () => unknown> = {
     ];
     t.current.value = running;
   },
+  connections: async () => { nav.go("connections"); await tick(); },
+  "connections-add": async () => { nav.go("connections"); await tick(); press("Add a connection"); await tick(); },
+  "connections-add-smb": async () => {
+    await scenes["connections-add"]!();
+    press("A shared folder");
+    await tick();
+    fill(["area51", "area51.local", "media", "backups", "me", "hunter2"]);
+    await tick();
+    press("Check", true);
+    await tick(); await tick();
+  },
+  "connections-add-smb-problem": async () => {
+    await scenes["connections-add"]!();
+    press("A shared folder");
+    await tick();
+    fill(["area51", "area51.local", "", "", "me"]);
+    await tick();
+    press("Add it");
+    await tick(); await tick();
+  },
+  "connections-add-s3": async () => {
+    await scenes["connections-add"]!();
+    press("S3 storage");
+    await tick();
+    const service = document.querySelector<HTMLSelectElement>(".panel select");
+    if (service) { service.value = "b2"; service.dispatchEvent(new Event("change")); }
+    await tick();
+    fill(["photos-b2", "family-photos", "https://s3.us-west-004.backblazeb2.com", "us-west-004", "2026", "0045a1b2c3", "secret"]);
+    await tick();
+  },
+  "connections-edit": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:first-child", "Edit"); await tick(); },
+  "connections-delete-used": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:nth-child(2)", "Delete"); await tick(); await tick(); },
+  "connections-delete-retire": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:nth-child(3)", "Delete"); await tick(); await tick(); },
+  "picker-sync": async () => {
+    await scenes["sync-make"]!();
+    await tick();
+    press("Add a folder…");
+    await tick();
+    pressIn(".pp-places", "area51");
+    await tick();
+    pressIn(".pp-list", "media");
+    await tick();
+  },
+  "picker-pane": async () => { nav.go("drain"); await tick(); await tick(); press("Go to…"); await tick(); },
   history: () => nav.go("history"),
   "dupes-start": () => nav.go("dupes"),
   "dupes-scanning": async () => {
