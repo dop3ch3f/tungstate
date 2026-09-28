@@ -12,7 +12,7 @@
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
-use crate::{Journal, JournalError, Result, now_millis, query};
+use crate::{Journal, JournalError, Removal, Result, now_millis, query};
 
 /// Identifier for a configured connection.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -199,6 +199,40 @@ pub struct Connection {
     pub options: BTreeMap<String, String>,
     /// When it was created, in milliseconds since the Unix epoch.
     pub created_at: i64,
+    /// The last time it was checked, from either surface. `None` until then.
+    pub last_check: Option<Check>,
+}
+
+/// How a connection's last check went.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Check {
+    /// When, in milliseconds since the Unix epoch.
+    pub at: i64,
+    /// Whether it could be reached, and would take a file.
+    pub ok: bool,
+    /// What it found, or why not, as a short sentence.
+    pub note: String,
+}
+
+/// What still refers to a connection, as a person would name each.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Uses {
+    /// Saved pairs that start or end there.
+    pub pairs: Vec<String>,
+    /// Syncs with a member there.
+    pub syncs: Vec<String>,
+    /// Transfers that stopped part-way and could still be picked up.
+    pub unfinished: Vec<String>,
+    /// Past transfers History still names it in. These do not stop it going.
+    pub history: usize,
+}
+
+impl Uses {
+    /// Whether anything would break if the connection went.
+    #[must_use]
+    pub fn blocks_removal(&self) -> bool {
+        !(self.pairs.is_empty() && self.syncs.is_empty() && self.unfinished.is_empty())
+    }
 }
 
 /// The fields needed to create a connection.
@@ -499,7 +533,7 @@ impl Journal {
     pub fn connection_by_name(&self, name: &str) -> Result<Connection> {
         let conn = self.lock();
         conn.query_row(
-            "SELECT * FROM connections WHERE name = ?1",
+            "SELECT * FROM connections WHERE name = ?1 AND retired_at IS NULL",
             rusqlite::params![name],
             row_to_connection,
         )
@@ -559,7 +593,7 @@ impl Journal {
                 "UPDATE connections
                     SET scheme = ?2, host = ?3, port = ?4,
                         username = ?5, root = ?6, options = ?7
-                  WHERE name = ?1",
+                  WHERE name = ?1 AND retired_at IS NULL",
                 rusqlite::params![
                     name,
                     settings.scheme.as_str(),
@@ -610,7 +644,7 @@ impl Journal {
     pub fn connections(&self) -> Result<Vec<Connection>> {
         let conn = self.lock();
         let mut stmt = conn
-            .prepare("SELECT * FROM connections ORDER BY id")
+            .prepare("SELECT * FROM connections WHERE retired_at IS NULL ORDER BY id")
             .map_err(query("listing connections"))?;
         let rows = stmt
             .query_map([], row_to_connection)
@@ -618,6 +652,124 @@ impl Journal {
             .collect::<std::result::Result<Vec<_>, _>>()
             .map_err(query("listing connections"))?;
         Ok(rows)
+    }
+
+    /// Write down how a check of a connection went, whichever surface ran it.
+    ///
+    /// # Errors
+    /// [`JournalError::UnknownConnection`] if there is no such connection, or
+    /// [`JournalError::Query`] if the row cannot be written.
+    pub fn record_check(&self, name: &str, ok: bool, note: &str) -> Result<()> {
+        let conn = self.lock();
+        let changed = conn
+            .execute(
+                "UPDATE connections SET checked_at = ?2, check_ok = ?3, check_note = ?4
+                  WHERE name = ?1 AND retired_at IS NULL",
+                rusqlite::params![name, now_millis(), ok, note],
+            )
+            .map_err(query("recording a connection check"))?;
+        if changed == 0 {
+            return Err(JournalError::UnknownConnection(name.to_string()));
+        }
+        Ok(())
+    }
+
+    /// Everything that refers to a connection, named, so a removal can say
+    /// what it would break before anyone asks for it.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn connection_uses(&self, id: ConnectionId) -> Result<Uses> {
+        let conn = self.lock();
+        let names = |sql: &str, context: &'static str| -> Result<Vec<String>> {
+            let mut stmt = conn.prepare(sql).map_err(query(context))?;
+            stmt.query_map(rusqlite::params![id.0], |row| row.get(0))
+                .map_err(query(context))?
+                .collect::<std::result::Result<Vec<String>, _>>()
+                .map_err(query(context))
+        };
+        let pairs = names(
+            "SELECT name FROM links
+              WHERE (source_connection = ?1 OR dest_connection = ?1)
+                AND saved = 1 AND deleted_at IS NULL AND sync_id IS NULL
+              ORDER BY name",
+            "listing the saved pairs using a connection",
+        )?;
+        let syncs = names(
+            "SELECT DISTINCT syncs.name FROM syncs
+               JOIN sync_members ON sync_members.sync_id = syncs.id
+              WHERE sync_members.connection = ?1
+              ORDER BY syncs.name",
+            "listing the syncs using a connection",
+        )?;
+        // A one-off transfer's link, with work still marked as begun: the
+        // interrupted-run banner offers to finish it, and it needs the
+        // connection to do so.
+        let unfinished = names(
+            "SELECT DISTINCT links.name FROM links
+               JOIN ops ON ops.link_id = links.id
+              WHERE (links.source_connection = ?1 OR links.dest_connection = ?1)
+                AND ops.status = 'intended'
+                AND NOT (links.saved = 1 AND links.deleted_at IS NULL AND links.sync_id IS NULL)
+              ORDER BY links.name",
+            "listing the unfinished transfers using a connection",
+        )?;
+        let history: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM ops WHERE src_connection = ?1 OR dst_connection = ?1",
+                rusqlite::params![id.0],
+                |row| row.get(0),
+            )
+            .map_err(query("counting a connection's history"))?;
+        Ok(Uses {
+            pairs,
+            syncs,
+            unfinished,
+            history: usize::try_from(history).unwrap_or(usize::MAX),
+        })
+    }
+
+    /// Remove a connection, keeping any history that refers to it.
+    ///
+    /// Deleted outright when nothing ever referred to it. When only History
+    /// does, it is retired instead: the row stays so every past operation
+    /// still resolves, it drops out of every list, and its name is freed for
+    /// a new connection, as a retired saved pair's is.
+    ///
+    /// # Errors
+    /// [`JournalError::ConnectionInUse`] while a saved pair, a sync or an
+    /// unfinished transfer uses it (ask [`Journal::connection_uses`] which),
+    /// [`JournalError::UnknownConnection`] if there is no such connection, or
+    /// [`JournalError::Query`] if the rows cannot be written.
+    pub fn remove_connection(&self, name: &str) -> Result<Removal> {
+        let connection = self.connection_by_name(name)?;
+        if self.connection_uses(connection.id)?.blocks_removal() {
+            return Err(JournalError::ConnectionInUse(name.to_string()));
+        }
+        let conn = self.lock();
+        match conn.execute(
+            "DELETE FROM connections WHERE id = ?1",
+            rusqlite::params![connection.id.0],
+        ) {
+            Ok(_) => Ok(Removal::Deleted),
+            // Something still names it: History, or a link it once served.
+            // Exactly the case retiring exists for.
+            Err(rusqlite::Error::SqliteFailure(inner, _))
+                if inner.code == rusqlite::ErrorCode::ConstraintViolation =>
+            {
+                conn.execute(
+                    "UPDATE connections SET retired_at = ?2, name = name || '#' || id
+                      WHERE id = ?1",
+                    rusqlite::params![connection.id.0, now_millis()],
+                )
+                .map_err(query("retiring a connection"))?;
+                Ok(Removal::Retired)
+            }
+            Err(other) => Err(JournalError::Query {
+                context: "deleting a connection",
+                source: other,
+            }),
+        }
     }
 
     /// Delete a connection.
@@ -693,5 +845,15 @@ fn row_to_connection(row: &rusqlite::Row<'_>) -> rusqlite::Result<Connection> {
         root: row.get("root")?,
         options: decode_options(&options_raw),
         created_at: row.get("created_at")?,
+        last_check: match row.get::<_, Option<i64>>("checked_at")? {
+            Some(at) => Some(Check {
+                at,
+                ok: row.get::<_, Option<bool>>("check_ok")?.unwrap_or(false),
+                note: row
+                    .get::<_, Option<String>>("check_note")?
+                    .unwrap_or_default(),
+            }),
+            None => None,
+        },
     })
 }

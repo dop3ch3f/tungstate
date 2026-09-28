@@ -133,15 +133,29 @@ pub fn open(
     let Some(id) = endpoint.connection else {
         return Ok(Box::new(LocalBackend::new(endpoint.path.clone())));
     };
+    open_connection(&journal.connection_by_id(id)?, &endpoint.path, secrets)
+}
 
-    let connection = journal.connection_by_id(id)?;
+/// A backend for `link_end` inside `connection`, which need not be saved.
+///
+/// What [`open`] does once it has found the connection, and what checking a
+/// connection's settings before saving them needs: the form's values, with
+/// no journal row behind them yet.
+///
+/// # Errors
+/// As [`open`].
+pub fn open_connection(
+    connection: &Connection,
+    link_end: &std::path::Path,
+    secrets: &dyn SecretStore,
+) -> Result<Box<dyn Backend>> {
     #[cfg(feature = "smb")]
     if connection.scheme == Scheme::Smb {
-        return smb_backend(&connection, &endpoint.path, secrets);
+        return smb_backend(connection, link_end, secrets);
     }
-    let (operator, anchor) = operator_for(&connection, secrets)?;
-    let prefix = remote_key(&endpoint.path).map_err(|source| OpenError::EndPath {
-        path: endpoint.path.clone(),
+    let (operator, anchor) = operator_for(connection, secrets)?;
+    let prefix = remote_key(link_end).map_err(|source| OpenError::EndPath {
+        path: link_end.to_path_buf(),
         source,
     })?;
     // A folder reached through the local-filesystem adapter is on this
@@ -151,7 +165,7 @@ pub fn open(
         operator,
         prefix,
         anchor,
-        connection.name,
+        connection.name.clone(),
         networked,
     )))
 }
@@ -170,11 +184,9 @@ pub fn open(
 /// [`OpenError`] as [`open`], or if the root cannot be listed.
 pub fn probe(
     connection: &Connection,
-    journal: &Journal,
     secrets: &dyn SecretStore,
 ) -> Result<Vec<tungstate_backend::Entry>> {
-    let endpoint = Endpoint::remote(connection.id, PathBuf::new());
-    let backend = open(&endpoint, journal, secrets)?;
+    let backend = open_connection(connection, std::path::Path::new(""), secrets)?;
     match backend.read_dir(std::path::Path::new("")) {
         Ok(entries) => Ok(entries),
         Err(error) => Err(OpenError::Backend(classify(connection, error))),
@@ -203,15 +215,10 @@ pub fn probe(
 /// # Errors
 /// [`OpenError`] if the connection cannot be opened at all. A refused write is
 /// `Ok(false)`, not an error: it is an answer.
-pub fn probe_writable(
-    connection: &Connection,
-    journal: &Journal,
-    secrets: &dyn SecretStore,
-) -> Result<bool> {
+pub fn probe_writable(connection: &Connection, secrets: &dyn SecretStore) -> Result<bool> {
     use std::io::Write as _;
 
-    let endpoint = Endpoint::remote(connection.id, PathBuf::new());
-    let backend = open(&endpoint, journal, secrets)?;
+    let backend = open_connection(connection, std::path::Path::new(""), secrets)?;
     let name = PathBuf::from(format!(".tungstate-writable-{}", std::process::id()));
 
     let wrote = backend

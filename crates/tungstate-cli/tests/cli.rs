@@ -440,7 +440,88 @@ fn a_connection_a_link_uses_cannot_be_removed() {
         .args(["connection", "remove", "nas"])
         .assert()
         .failure()
-        .stderr(predicates::str::contains("still used by at least one link"));
+        .stderr(predicates::str::contains("still used"))
+        .stderr(predicates::str::contains("saved pairs: drain"));
+}
+
+#[test]
+fn a_connection_only_history_names_is_retired_and_its_name_can_be_used_again() {
+    let home = sandbox();
+    let root = home.path().join("store");
+    let source = home.path().join("from");
+    std::fs::create_dir_all(&root).unwrap();
+    std::fs::create_dir_all(&source).unwrap();
+    std::fs::write(source.join("a.txt"), b"a").unwrap();
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "fs", "--root"])
+        .arg(&root)
+        .assert()
+        .success();
+    sandboxed(&home)
+        .arg("link")
+        .arg("add")
+        .arg(&source)
+        .arg("nas:inbox")
+        .args(["--name", "drain", "--copy", "--cooldown", "0"])
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["link", "run", "drain"])
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["link", "remove", "drain"])
+        .assert()
+        .success();
+
+    sandboxed(&home)
+        .args(["connection", "remove", "nas"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(
+            "History still names it in 1 past operation",
+        ));
+    sandboxed(&home)
+        .args(["connection", "list"])
+        .assert()
+        .stdout(predicates::str::contains("no connections configured"));
+    // History still says where the file went.
+    sandboxed(&home)
+        .args(["log"])
+        .arg(source.join("a.txt"))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("nas"));
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "fs", "--root"])
+        .arg(&root)
+        .assert()
+        .success();
+}
+
+#[test]
+fn a_check_is_remembered_and_shown_in_the_list() {
+    let home = sandbox();
+    let root = home.path().join("store");
+    std::fs::create_dir_all(root.join("inbox")).unwrap();
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "fs", "--root"])
+        .arg(&root)
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["connection", "list"])
+        .assert()
+        .stdout(predicates::str::contains("checked").not());
+    sandboxed(&home)
+        .args(["connection", "test", "nas"])
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["connection", "list"])
+        .assert()
+        .stdout(predicates::str::contains("checked "))
+        .stdout(predicates::str::contains(": 1 thing in "));
 }
 
 #[test]

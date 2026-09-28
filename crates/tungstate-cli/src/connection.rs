@@ -492,8 +492,15 @@ fn list(journal: &Journal) -> ExitCode {
                 } else {
                     "  [UNENCRYPTED]"
                 };
+                let checked = connection.last_check.as_ref().map(|check| {
+                    format!(
+                        "\n    checked {}: {}",
+                        when(check.at),
+                        if check.ok { &check.note } else { "failed" }
+                    )
+                });
                 println!(
-                    "{}  {} {}{}  root={}{}",
+                    "{}  {} {}{}  root={}{}{}",
                     connection.name,
                     connection.scheme.as_str(),
                     where_to,
@@ -504,6 +511,7 @@ fn list(journal: &Journal) -> ExitCode {
                         &connection.root
                     },
                     wire,
+                    checked.unwrap_or_default(),
                 );
             }
             ExitCode::SUCCESS
@@ -517,6 +525,34 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
         Ok(connection) => connection,
         Err(error) => return fail(&error),
     };
+    // Written down whichever way it went, so the window's list and `list`
+    // here can say when it was last checked without asking again.
+    let (code, ok, note) = check(&connection, secrets);
+    if let Err(error) = journal.record_check(name, ok, &note) {
+        eprintln!("warning: the result was not saved: {error}");
+    }
+    code
+}
+
+/// An error and its causes as one line, for a check's note.
+fn sentence(error: &dyn std::error::Error) -> String {
+    let mut line = error.to_string();
+    let mut cause = error.source();
+    while let Some(next) = cause {
+        line.push_str(": ");
+        line.push_str(&next.to_string());
+        cause = next.source();
+    }
+    line
+}
+
+/// Check a connection and say what was found. The code to exit with, whether
+/// it worked, and a note to remember it by.
+fn check(
+    connection: &tungstate_journal::Connection,
+    secrets: &dyn SecretStore,
+) -> (ExitCode, bool, String) {
+    let name = connection.name.as_str();
 
     // The root is named, not just the count. "reachable, 18 entries" is
     // reassuring and useless when the 18 entries are the server's own `/bin`
@@ -526,7 +562,7 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
     } else {
         &connection.root
     };
-    match tungstate_backend_opendal::probe(&connection, journal, secrets) {
+    match tungstate_backend_opendal::probe(connection, secrets) {
         Ok(entries) => {
             println!("`{name}` is reachable");
             println!("  {root} holds {} entries", entries.len());
@@ -555,7 +591,7 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
             // them is what a drain needs. Asked here so it is answered once,
             // rather than by every file in a run failing separately.
             if connection.scheme.is_networked() {
-                match tungstate_backend_opendal::probe_writable(&connection, journal, secrets) {
+                match tungstate_backend_opendal::probe_writable(connection, secrets) {
                     Ok(true) => println!("  {root} accepts files"),
                     Ok(false) => {
                         println!("  {root} REFUSES files, so every transfer here would fail");
@@ -571,34 +607,96 @@ fn test(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
                                  at the root before moving it."
                             );
                         }
-                        return ExitCode::FAILURE;
+                        return (
+                            ExitCode::FAILURE,
+                            false,
+                            format!("{root} lists but refuses files"),
+                        );
                     }
-                    Err(error) => return fail(&error),
+                    Err(error) => return (fail(&error), false, sentence(&error)),
                 }
             }
-            if ConnectionSettings::from(&connection)
+            if ConnectionSettings::from(connection)
                 .in_the_clear()
                 .is_some()
             {
                 println!("  (this connection is not encrypted)");
             }
-            ExitCode::SUCCESS
+            let things = entries.len();
+            (
+                ExitCode::SUCCESS,
+                true,
+                format!(
+                    "{things} {} in {root}",
+                    if things == 1 { "thing" } else { "things" }
+                ),
+            )
         }
-        Err(error) => fail(&error),
+        Err(error) => (fail(&error), false, sentence(&error)),
     }
 }
 
 fn remove(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
-    // The row first: if a link still points at it the foreign key refuses, and
-    // deleting the password before finding that out would break a live link.
-    if let Err(error) = journal.delete_connection(name) {
-        return fail(&error);
+    let connection = match journal.connection_by_name(name) {
+        Ok(connection) => connection,
+        Err(error) => return fail(&error),
+    };
+    // Named before anything is touched: "it is in use" is a guessing game,
+    // "these two saved pairs" is something to act on.
+    let uses = match journal.connection_uses(connection.id) {
+        Ok(uses) => uses,
+        Err(error) => return fail(&error),
+    };
+    if uses.blocks_removal() {
+        eprintln!("error: `{name}` is still used, so it was not removed:");
+        for (what, names) in [
+            ("saved pairs", &uses.pairs),
+            ("syncs", &uses.syncs),
+            ("transfers that stopped part-way", &uses.unfinished),
+        ] {
+            if !names.is_empty() {
+                eprintln!("  {what}: {}", names.join(", "));
+            }
+        }
+        eprintln!("  remove those first, or finish or clear the unfinished transfers");
+        return ExitCode::FAILURE;
     }
+
+    // The row first: if something else refused, deleting the password before
+    // finding that out would break a connection that is still there.
+    let removal = match journal.remove_connection(name) {
+        Ok(removal) => removal,
+        Err(error) => return fail(&error),
+    };
     if let Err(error) = secrets.delete(&connection_key(name)) {
         eprintln!("warning: `{name}` was removed, but its saved password was not: {error}");
     }
     println!("removed connection `{name}`");
+    if removal == tungstate_journal::Removal::Retired {
+        println!(
+            "  History still names it in {} past {}, so those keep saying where\n  \
+             their files went. The name is free to use again.",
+            uses.history,
+            if uses.history == 1 {
+                "operation"
+            } else {
+                "operations"
+            },
+        );
+    }
     ExitCode::SUCCESS
+}
+
+/// A moment as a date and time on this machine's clock.
+fn when(millis: i64) -> String {
+    jiff::Timestamp::from_millisecond(millis).map_or_else(
+        |_| "at an unknown time".to_string(),
+        |at| {
+            at.to_zoned(jiff::tz::TimeZone::system())
+                .strftime("%Y-%m-%d %H:%M")
+                .to_string()
+        },
+    )
 }
 
 /// Every scheme's spelling, for an error that has to list them.

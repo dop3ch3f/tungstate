@@ -2543,3 +2543,162 @@ fn a_leg_is_a_link_the_saved_pairs_never_show() {
     assert_eq!(journal.link_by_name("sync:1:1>2").unwrap().id, id);
     assert!(journal.links().unwrap().is_empty());
 }
+
+mod connection_lifecycle {
+    use super::*;
+    use crate::{FirstCheck, NewMember, NewSync, OnRemove, SyncDirection};
+
+    fn nas(journal: &Journal, name: &str) -> ConnectionId {
+        journal
+            .create_connection(&NewConnection {
+                name: name.to_string(),
+                scheme: Scheme::Smb,
+                host: Some("nas.local".into()),
+                port: None,
+                username: Some("me".into()),
+                root: "media".into(),
+                options: std::collections::BTreeMap::new(),
+            })
+            .unwrap()
+    }
+
+    fn pair(journal: &Journal, name: &str, on: ConnectionId, saved: bool) -> LinkId {
+        journal
+            .create_link(&NewLink {
+                name: name.to_string(),
+                source: Endpoint::local("/Users/me/Videos"),
+                destination: Endpoint::remote(on, "inbox"),
+                source_policy: SourcePolicy::Keep,
+                verify: VerifyLevel::Hash,
+                order: Order::LargestFirst,
+                on_conflict: ConflictAction::Quarantine,
+                cooldown: std::time::Duration::ZERO,
+                saved,
+            })
+            .unwrap()
+    }
+
+    /// One file sent through `link`, finished or left in flight.
+    fn sent(journal: &Journal, link: LinkId, finished: bool) {
+        let found = journal.link_by_id(link).unwrap();
+        let op = journal
+            .begin(&NewOp {
+                kind: OpKind::Copy,
+                source: Some(Location::within(&found.source, "a.mp4")),
+                destination: Some(Location::within(&found.destination, "a.mp4")),
+                size: Some(1),
+                link: Some(found.name.clone()),
+                link_id: Some(link),
+            })
+            .unwrap();
+        if finished {
+            journal
+                .finish(op, &Outcome::Committed { hash: None })
+                .unwrap();
+        }
+    }
+
+    #[test]
+    fn a_check_is_remembered_whichever_surface_ran_it() {
+        let journal = Journal::open_in_memory().unwrap();
+        nas(&journal, "nas");
+        assert_eq!(journal.connection_by_name("nas").unwrap().last_check, None);
+
+        journal
+            .record_check("nas", false, "refused the password")
+            .unwrap();
+        journal
+            .record_check("nas", true, "12 things in media")
+            .unwrap();
+        let check = journal
+            .connection_by_name("nas")
+            .unwrap()
+            .last_check
+            .unwrap();
+        assert!(check.ok, "the newest check is the one that counts");
+        assert_eq!(check.note, "12 things in media");
+        assert!(check.at > 0);
+        assert!(matches!(
+            journal.record_check("nope", true, ""),
+            Err(JournalError::UnknownConnection(_))
+        ));
+    }
+
+    #[test]
+    fn a_connection_nothing_ever_used_is_deleted_outright() {
+        let journal = Journal::open_in_memory().unwrap();
+        nas(&journal, "nas");
+        assert_eq!(journal.remove_connection("nas").unwrap(), Removal::Deleted);
+        assert!(journal.connections().unwrap().is_empty());
+    }
+
+    #[test]
+    fn what_uses_a_connection_is_named_and_what_matters_stops_it_going() {
+        let journal = Journal::open_in_memory().unwrap();
+        let id = nas(&journal, "nas");
+        let other = nas(&journal, "other");
+        pair(&journal, "videos-to-nas", id, true);
+        pair(&journal, "elsewhere", other, true);
+        let one_off = pair(&journal, "browser-1-0", id, false);
+        sent(&journal, one_off, false);
+        journal
+            .create_sync(
+                &NewSync {
+                    name: "capcut".into(),
+                    direction: SyncDirection::All,
+                    exact: false,
+                    anchor: None,
+                    on_conflict: ConflictAction::Quarantine,
+                    on_remove: OnRemove::SetAside,
+                    verify: VerifyLevel::Hash,
+                    cooldown: std::time::Duration::ZERO,
+                    first_check: FirstCheck::Full,
+                },
+                &[
+                    NewMember {
+                        name: "laptop".into(),
+                        connection: None,
+                        path: "/Users/me/CapCut".into(),
+                    },
+                    NewMember {
+                        name: "nas".into(),
+                        connection: Some(id),
+                        path: "capcut".into(),
+                    },
+                ],
+            )
+            .unwrap();
+
+        let uses = journal.connection_uses(id).unwrap();
+        assert_eq!(uses.pairs, ["videos-to-nas"]);
+        assert_eq!(uses.syncs, ["capcut"]);
+        assert_eq!(uses.unfinished, ["browser-1-0"]);
+        assert_eq!(uses.history, 1);
+        assert!(uses.blocks_removal());
+        assert!(matches!(
+            journal.remove_connection("nas"),
+            Err(JournalError::ConnectionInUse(_))
+        ));
+        assert!(journal.connection_by_name("nas").is_ok(), "nothing changed");
+    }
+
+    #[test]
+    fn a_connection_only_history_names_is_retired_and_its_name_freed() {
+        let journal = Journal::open_in_memory().unwrap();
+        let id = nas(&journal, "nas");
+        let one_off = pair(&journal, "browser-1-0", id, false);
+        sent(&journal, one_off, true);
+        let uses = journal.connection_uses(id).unwrap();
+        assert!(!uses.blocks_removal(), "{uses:?}");
+        assert_eq!(uses.history, 1);
+
+        assert_eq!(journal.remove_connection("nas").unwrap(), Removal::Retired);
+        // Out of every list, and its name free for a new one.
+        assert!(journal.connections().unwrap().is_empty());
+        assert!(journal.connection_by_name("nas").is_err());
+        let again = nas(&journal, "nas");
+        assert_ne!(again, id);
+        // History still resolves the one it named.
+        assert_eq!(journal.connection_by_id(id).unwrap().scheme, Scheme::Smb);
+    }
+}

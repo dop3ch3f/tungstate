@@ -481,8 +481,7 @@ fn a_writable_root_says_so_and_is_left_exactly_as_it_was() {
     std::fs::write(dir.path().join("already-here.txt"), b"x").unwrap();
     let before = entries(dir.path());
 
-    let writable =
-        crate::probe_writable(&connection_of(&journal), &journal, &MemoryStore::new()).unwrap();
+    let writable = crate::probe_writable(&connection_of(&journal), &MemoryStore::new()).unwrap();
 
     assert!(writable, "a temp directory should accept a file");
     assert_eq!(
@@ -504,7 +503,7 @@ fn a_root_that_refuses_files_answers_false_rather_than_failing() {
     let before = entries(dir.path());
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o555)).unwrap();
 
-    let answer = crate::probe_writable(&connection_of(&journal), &journal, &MemoryStore::new());
+    let answer = crate::probe_writable(&connection_of(&journal), &MemoryStore::new());
 
     // Restore first, so a failed assertion does not leave an undeletable dir.
     std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o755)).unwrap();

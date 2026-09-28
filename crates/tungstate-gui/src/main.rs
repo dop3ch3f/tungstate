@@ -1116,11 +1116,26 @@ struct ConnectionView {
     /// Derived in Rust rather than tested for in the template, so the CLI and
     /// the window cannot come to different conclusions about the same row.
     rootless: Option<&'static str>,
+    /// What crosses the network unencrypted, as advice, when anything does.
+    clear: Option<&'static str>,
+    /// Where it points, as a person would say it.
+    place: String,
+    /// The last check from either surface, if there has been one.
+    last_check: Option<CheckView>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct CheckView {
+    at: i64,
+    ok: bool,
+    note: String,
 }
 
 impl From<Connection> for ConnectionView {
     fn from(connection: Connection) -> Self {
+        let clear = ConnectionSettings::from(&connection).in_the_clear();
         Self {
+            place: place_of(&connection),
             name: connection.name,
             scheme: connection.scheme.as_str().to_string(),
             host: connection.host,
@@ -1129,9 +1144,48 @@ impl From<Connection> for ConnectionView {
             rootless: connection.scheme.rootless_warning(&connection.root),
             root: connection.root,
             options: connection.options,
-            encrypted: connection.scheme.is_encrypted(),
+            encrypted: clear.is_none(),
+            clear,
             networked: connection.scheme.is_networked(),
+            last_check: connection.last_check.map(|check| CheckView {
+                at: check.at,
+                ok: check.ok,
+                note: check.note,
+            }),
         }
+    }
+}
+
+/// Where a connection points, in the words its kind uses: a bucket for S3, a
+/// share on a server for SMB, a folder on a server for FTP.
+fn place_of(connection: &Connection) -> String {
+    let inside = |root: &str| {
+        let root = root.trim().trim_matches(['/', '\\']);
+        if root.is_empty() {
+            String::new()
+        } else {
+            format!(" › {root}")
+        }
+    };
+    let host = connection.host.as_deref().unwrap_or("");
+    match connection.scheme {
+        Scheme::Fs => connection.root.clone(),
+        Scheme::S3 => {
+            let bucket = connection
+                .options
+                .get(tungstate_journal::option::BUCKET)
+                .map_or("", String::as_str);
+            let at = connection
+                .options
+                .get(tungstate_journal::option::ENDPOINT)
+                .map(|endpoint| {
+                    let bare = endpoint.split("://").nth(1).unwrap_or(endpoint);
+                    format!(" at {}", bare.trim_end_matches('/'))
+                })
+                .unwrap_or_default();
+            format!("bucket {bucket}{at}{}", inside(&connection.root))
+        }
+        Scheme::Smb | Scheme::Ftp | Scheme::Ftps => format!("{host}{}", inside(&connection.root)),
     }
 }
 
@@ -1152,9 +1206,25 @@ struct ConnectionForm {
 }
 
 impl ConnectionForm {
+    /// The settings, refused with every reason at once if they would not work.
+    fn checked(&self) -> std::result::Result<ConnectionSettings, String> {
+        let settings = self.settings()?;
+        let problems = settings.problems();
+        if problems.is_empty() {
+            Ok(settings)
+        } else {
+            Err(problems
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>()
+                .join(". "))
+        }
+    }
+
     fn settings(&self) -> std::result::Result<ConnectionSettings, String> {
         Ok(ConnectionSettings {
-            scheme: Scheme::parse(&self.scheme).ok_or("the protocol must be fs, ftp or ftps")?,
+            scheme: Scheme::parse(&self.scheme)
+                .ok_or_else(|| format!("`{}` is not a kind of connection", self.scheme))?,
             // A blank field in a form is an empty string, not a missing value,
             // and an empty hostname is a hostname nothing can connect to.
             host: blank_to_none(self.host.as_deref()),
@@ -1211,7 +1281,7 @@ fn add_connection(
     secret: Option<String>,
     state: State<'_, App>,
 ) -> Result<(), String> {
-    let settings = form.settings()?;
+    let settings = form.checked()?;
     state
         .journal
         .create_connection(&NewConnection {
@@ -1248,8 +1318,22 @@ fn update_connection(
 ) -> Result<(), String> {
     state
         .journal
-        .update_connection(&name, &form.settings()?)
+        .update_connection(&name, &form.checked()?)
         .map_err(describe)
+}
+
+/// What would stop these settings working, one sentence each. Empty when
+/// they are worth testing. The same answers `connection add` gives.
+#[tauri::command]
+fn settings_problems(form: ConnectionForm) -> Vec<String> {
+    match form.settings() {
+        Ok(settings) => settings
+            .problems()
+            .iter()
+            .map(ToString::to_string)
+            .collect(),
+        Err(why) => vec![why],
+    }
 }
 
 /// Replace the stored password.
@@ -1285,13 +1369,67 @@ fn set_connection_password(
 #[tauri::command]
 fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, String> {
     let connection = state.journal.connection_by_name(&name).map_err(describe)?;
+    let found = probe_view(&connection, &secrets());
+    // Written down whichever way it went, so the list can say when it was
+    // last checked, and `connection list` agrees.
+    let (ok, note) = match &found {
+        Ok(view) if view.accepts_files == Some(false) => {
+            (false, format!("{} lists but refuses files", view.root))
+        }
+        Ok(view) => (
+            true,
+            format!(
+                "{} in {}",
+                plural(view.entries, "thing", "things"),
+                view.root
+            ),
+        ),
+        Err(why) => (false, why.clone()),
+    };
+    if let Err(error) = state.journal.record_check(&name, ok, &note) {
+        tracing::warn!(error = %describe(error), "a connection check was not recorded");
+    }
+    found
+}
+
+/// Check settings that have not been saved, as the form stands.
+///
+/// With the password typed into the form, or, when editing and none was
+/// typed, the one already in the keychain. Nothing is written anywhere.
+#[tauri::command]
+fn test_settings(form: ConnectionForm, secret: Option<String>) -> Result<ProbeView, String> {
+    let settings = form.checked()?;
+    let connection = Connection {
+        id: tungstate_journal::ConnectionId(0),
+        name: form.name.trim().to_string(),
+        scheme: settings.scheme,
+        host: settings.host,
+        port: settings.port,
+        username: settings.username,
+        root: settings.root,
+        options: settings.options,
+        created_at: 0,
+        last_check: None,
+    };
+    match secret.filter(|typed| !typed.is_empty()) {
+        Some(typed) => {
+            let held = tungstate_secret::MemoryStore::new();
+            held.set(&connection_key(&connection.name), &typed)
+                .map_err(describe)?;
+            probe_view(&connection, &held)
+        }
+        None => probe_view(&connection, &secrets()),
+    }
+}
+
+/// List a connection's root, and ask whether it takes a file.
+fn probe_view(connection: &Connection, store: &dyn SecretStore) -> Result<ProbeView, String> {
     let root = if connection.root.is_empty() {
         "/".to_string()
     } else {
         connection.root.clone()
     };
-    let found = tungstate_backend_opendal::probe(&connection, &state.journal, &secrets())
-        .map_err(describe)?;
+    let found = tungstate_backend_opendal::probe(connection, store).map_err(describe)?;
     let names = found
         .iter()
         .take(12)
@@ -1311,10 +1449,7 @@ fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, Str
     // Listing and writing are different permissions, and only one of them is
     // what a drain needs. Asked once here rather than by every file in a run.
     let accepts_files = if connection.scheme.is_networked() {
-        Some(
-            tungstate_backend_opendal::probe_writable(&connection, &state.journal, &secrets())
-                .map_err(describe)?,
-        )
+        Some(tungstate_backend_opendal::probe_writable(connection, store).map_err(describe)?)
     } else {
         None
     };
@@ -1326,33 +1461,53 @@ fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, Str
     })
 }
 
-/// Forget a connection, and the password that went with it.
-#[tauri::command]
-fn remove_connection(name: String, state: State<'_, App>) -> Result<(), String> {
-    let connection = state.journal.connection_by_name(&name).map_err(describe)?;
+/// What still uses a connection, so Delete can say before it is pressed.
+#[derive(Debug, Serialize)]
+struct UsesView {
+    pairs: Vec<String>,
+    syncs: Vec<String>,
+    unfinished: Vec<String>,
+    /// Past operations that name it; they do not stop it going.
+    history: usize,
+}
 
-    // The row first: if a link still points at it the foreign key refuses, and
-    // deleting the password before finding that out would break a live link.
-    match state.journal.delete_connection(&name) {
-        Ok(()) => {}
-        // The foreign key knows something references the row but not what.
-        // "Remove these two links first" is actionable where "it is in use" is
-        // a guessing game.
+#[tauri::command]
+fn connection_uses(name: String, state: State<'_, App>) -> Result<UsesView, String> {
+    let connection = state.journal.connection_by_name(&name).map_err(describe)?;
+    let uses = state
+        .journal
+        .connection_uses(connection.id)
+        .map_err(describe)?;
+    Ok(UsesView {
+        pairs: uses.pairs,
+        syncs: uses.syncs,
+        unfinished: uses.unfinished,
+        history: uses.history,
+    })
+}
+
+/// Forget a connection, and the password that went with it. `"deleted"`, or
+/// `"retired"` when History still names it and so it was put away instead.
+#[tauri::command]
+fn remove_connection(name: String, state: State<'_, App>) -> Result<&'static str, String> {
+    let removal = match state.journal.remove_connection(&name) {
+        Ok(removal) => removal,
+        // The window asks `connection_uses` first and names them; this is the
+        // answer for a use that appeared in between.
         Err(JournalError::ConnectionInUse(_)) => {
-            let links = state.journal.links_using(connection.id).map_err(describe)?;
             return Err(format!(
-                "`{name}` is still used by {}: {}. Remove {} first.",
-                plural(links.len(), "link", "links"),
-                links.join(", "),
-                if links.len() == 1 { "it" } else { "them" },
+                "`{name}` is still used by a saved pair, a sync or an unfinished transfer."
             ));
         }
         Err(other) => return Err(describe(other)),
-    }
-
+    };
     // A password left behind would be read by the next connection to take this
     // name, which is not a credential anyone meant to reuse.
-    secrets().delete(&connection_key(&name)).map_err(describe)
+    secrets().delete(&connection_key(&name)).map_err(describe)?;
+    Ok(match removal {
+        tungstate_journal::Removal::Deleted => "deleted",
+        tungstate_journal::Removal::Retired => "retired",
+    })
 }
 
 fn plural(count: usize, one: &str, many: &str) -> String {
@@ -2695,6 +2850,9 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             transfer_queue,
             remove_from_queue,
+            settings_problems,
+            test_settings,
+            connection_uses,
             governed,
             govern_folder,
             forget_folder,

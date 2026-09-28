@@ -244,6 +244,15 @@ const MIGRATIONS: &[&str] = &[
     // run without asking first. Slice 9d. A run that would remove anything
     // still asks, whatever this says.
     "ALTER TABLE syncs ADD COLUMN run_quietly INTEGER NOT NULL DEFAULT 0;",
+    // v14: the Connections section, polish pass. When a connection was last
+    // checked and how that went, so the list can say without asking again,
+    // and `retired_at`, the same tombstone `links.deleted_at` is: a
+    // connection only History still names is put away rather than deleted,
+    // so every past operation keeps saying where its file went.
+    "ALTER TABLE connections ADD COLUMN checked_at INTEGER;
+     ALTER TABLE connections ADD COLUMN check_ok INTEGER;
+     ALTER TABLE connections ADD COLUMN check_note TEXT;
+     ALTER TABLE connections ADD COLUMN retired_at INTEGER;",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

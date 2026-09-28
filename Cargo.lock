@@ -7554,6 +7554,7 @@ dependencies = [
  "clap",
  "image",
  "insta",
+ "jiff",
  "miette",
  "opendal",
  "opendal-http-transport-reqwest",
