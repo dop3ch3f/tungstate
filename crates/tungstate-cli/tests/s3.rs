@@ -1,7 +1,7 @@
 //! The drain and a sync, over a real S3 service.
 //!
 //! Gated behind `--features s3-integration` and pointed at a service by
-//! `TUNGSTATE_S3_*`. CI runs it on Linux against SeaweedFS; an object store
+//! `TUNGSTATE_S3_*`. CI runs it on Linux against `SeaweedFS`; an object store
 //! has no rename, so this is the engine's no-rename path over a second
 //! protocol.
 //!
