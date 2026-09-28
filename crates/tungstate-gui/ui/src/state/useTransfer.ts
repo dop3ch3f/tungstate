@@ -59,6 +59,9 @@ const stopping = ref(false);
 const halting = ref(false);
 /** A command that failed. A transfer that fails says so in its own row. */
 const problem = ref<string | null>(null);
+/** Which tab Transfer opens on next, for a caller elsewhere that started
+ *  something there to watch. Read and cleared as Transfer opens. */
+const openOn = ref<"runs" | "links" | null>(null);
 /** Set when the engine cannot reach this window at all. Distinct from a run
  *  that failed: transfers still work, they just report nowhere. */
 const deaf = ref<string | null>(null);
@@ -275,7 +278,7 @@ const running = computed(() => current.value !== null || queue.value.running !==
 export function useTransfer() {
   return {
     queue, current, rows, live, shape, atOnce, finished, placed, conflict, identical,
-    stranded, stopping, halting, problem, deaf, cleaned,
+    stranded, stopping, halting, problem, deaf, cleaned, openOn,
     /** A stopped run being picked up or cleaned up. */
     settling: (link: string) => doing.busy(link),
     /** A queued transfer being taken out. */

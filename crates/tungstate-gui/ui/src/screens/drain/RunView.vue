@@ -27,6 +27,15 @@ const moved = computed(() =>
     .reduce((n, r) => n + r.size, 0),
 );
 const planned = computed(() => t.rows.value.length);
+/** Every byte this run means to send, and those part-way there now. On the
+ *  way is not moved: a file counts as moved only once it is verified. */
+const total = computed(() => t.rows.value.reduce((n, r) => n + r.size, 0));
+const onTheWay = computed(() =>
+  t.rows.value
+    .filter((r) => r.state === "live" || r.state === "checking")
+    .reduce((n, r) => n + r.done, 0),
+);
+const share = (n: number) => (total.value ? `${Math.min(100, (n / total.value) * 100)}%` : "0%");
 /** From the job event, or from the queue if this window opened mid-run. */
 const now = computed(() => t.current.value ?? t.queue.value.running);
 const waiting = computed(() => t.queue.value.waiting);
@@ -85,15 +94,20 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
       </div>
       <div class="run-readout" v-if="planned">
         <span class="run-mass num">{{ bytes(moved) }}</span>
-        <span class="run-of">moved</span>
+        <span class="run-of">moved of {{ bytes(total) }}</span>
+        <span class="run-of" v-if="onTheWay"><b class="num">{{ bytes(onTheWay) }}</b> on the way</span>
         <span class="run-of">
           <b class="num">{{ t.settled.value }}</b> of <b class="num">{{ planned }}</b> files
         </span>
-        <span class="run-at" v-if="t.atOnce.value">{{ t.atOnce.value }} at a time</span>
       </div>
       <p class="run-quiet" v-else>Working out what to send…</p>
+      <!-- The whole run in one bar: solid for verified, lighter for on the way. -->
+      <div class="run-bar" v-if="planned" aria-hidden="true">
+        <i class="run-bar-done" :style="{ width: share(moved) }"></i>
+        <i class="run-bar-way" :style="{ width: share(onTheWay) }"></i>
+      </div>
       <!-- Its own scroll, so the queue below stays in sight during a long run. -->
-      <div class="run-files" v-if="planned"><Ledger :rows="t.rows.value" /></div>
+      <div class="run-files" v-if="planned"><Ledger :rows="t.rows.value" :under="now.destination" /></div>
     </section>
 
     <section class="run-list" v-if="waiting.length">
@@ -173,7 +187,6 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
 .run-mass { font-size: 30px; font-weight: 500; letter-spacing: -0.02em; }
 .run-of { font-size: var(--small); color: var(--text-quiet); }
 .run-of b { color: var(--text); font-weight: 600; }
-.run-at { font-size: var(--fine); color: var(--text-faint); }
 .run-quiet { font-size: var(--fine); color: var(--text-faint); margin: 0; }
 .run-files { max-height: 42vh; overflow-y: auto; }
 
@@ -200,4 +213,17 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
 .run-failures { list-style: none; margin: 0; padding: 0; font-size: var(--fine); }
 .run-failures li { display: flex; gap: var(--s3); padding: 3px 0; color: var(--text-quiet); }
 .run-why { color: var(--bad); margin-left: auto; }
+/* Drawn like a file's bar, so the whole and its parts read as one family:
+   verified solid, on the way in the copying colour. */
+.run-bar {
+  display: flex;
+  height: 12px;
+  margin: calc(var(--s1) * -1) 0 var(--s3);
+  background: var(--surface);
+  border: var(--bw) solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.run-bar-done { background: var(--ok); transition: width 0.3s ease-out; }
+.run-bar-way { background: var(--accent); opacity: 0.55; transition: width 0.3s ease-out; }
 </style>

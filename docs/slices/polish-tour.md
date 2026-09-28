@@ -351,3 +351,48 @@ folder: a move drain with read-back verification, `connection test`, a sync
 that set a changed version aside, then removal of the folder, and a listing of
 the share's top level identical to the one taken before. The NAS accepts
 `encryption=required`.
+
+## Phase D: the window, screen by screen
+
+Each screen goes the same way: photograph every state in retro light and dark
+with the headless harness, and every button on it with `&press=Label` (which
+presses a button after the scene is set, `|` for several). A critic that sees
+only the images scores it. Rework, and repeat until the scores stop moving,
+then take a before/after sheet to the owner.
+
+### Home (critic 5/10 → 7/10) and the running transfer (4/10 → 8/10)
+
+Home was a menu: four boxes describing features, truncated paths, and two
+activity tables of one row per file. It is now a status board:
+
+- The headline says whether anything needs you ("All in order", "2 things need
+  you", "Start here" on first launch).
+- One box lists what needs you, each row with the single step that deals
+  with it: a transfer that stopped (Resume starts it and opens Runs), a watched
+  folder in trouble, a rules file with a mistake.
+- A tile per section, Sync and Duplicates included, each row carrying a fact:
+  when a folder was tidied, a pair sent, a sync run, how much a clean-up
+  cleared. A row with a fault says it in the alert's words, quietly; red is
+  kept for the alert.
+- Lately: `lib/lately.ts` folds the journal's one-op-per-file rows into
+  sentences ("Renamed 3 files in Downloads") and drops ops a watcher notice
+  already announced. `counts.grouped` is the one place a run of ops becomes a
+  `FileCount`, and only for kinds that move one file per op.
+
+The alert got an icon drawn at text size and centred on the first line
+(`ui/AlertIcon.vue`); in retro a warning and a failure are the same outlined
+bar, yellow and red (`--alarm-bar`). Every screen's notices use it.
+
+Resume opening an empty Runs tab led to the running transfer itself. Its rows
+were ruled lines with a 2 px bar that read as one more line. Files on the move
+are now raised cards with a thick bar whose stripes travel (blue copying, green
+checking), the state and a percent beside it, and waiting files are filled
+cards with no lines. A bar across the top shows verified against on the way:
+"0 B moved" stays honest, because a file counts as moved only once verified,
+and "324 MB on the way" stops it reading as stalled. Paths are shown below the
+destination, and filtering and sorting appear only past twelve files.
+
+Left for their own screens: Organize does not show a broken rules file's
+error when opened ("Fix it" lands on the folder without it), and names a
+folder by its directory rather than its saved name. Transfer's "Move" word
+beside the route, and speed and time left, need the engine to report a rate.

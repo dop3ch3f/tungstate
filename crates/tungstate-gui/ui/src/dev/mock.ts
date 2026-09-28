@@ -34,18 +34,21 @@ function outcomes(name: keyof typeof fx.compare, total: number): T.Outcome[] {
   }));
 }
 
-const now = fx.now;
+// The fixture was captured in January; times are laid out back from today so
+// a screen reads "3 hours ago" as it would in use.
+const now = Date.now();
 const ops: T.Op[] = fx.preview["messy-downloads"].moves.slice(0, 14).map((m, i) => ({
   id: 900 - i,
-  status: i === 3 ? "failed" : "done",
-  kind: i % 5 === 4 ? "transfer" : "rename",
+  status: i === 3 ? "failed" : "ok",
+  kind: i % 5 === 4 ? "move" : "rename",
   source: `${DEMO}/messy-downloads/${m.from}`,
-  destination: `${DEMO}/messy-downloads/${m.to}`,
+  destination: i % 5 === 4 ? `area51:media/incoming/${m.to.split("/").pop()}` : `${DEMO}/messy-downloads/${m.to}`,
   size: 1_000_000 * (i + 3),
   hash: null,
   link: i % 5 === 4 ? "videos-to-nas" : null,
   note: i === 3 ? "destination refused the write" : null,
-  started_at: now - i * 3600,
+  // Bursts a few minutes apart over the last day, as tidies and transfers come.
+  started_at: now - 25 * 60_000 - Math.floor(i / 3) * 95 * 60_000 - (i % 3) * 20_000,
 }));
 
 const learned: T.Learned = {
@@ -91,7 +94,7 @@ const pastRun = (plan: number, name: string, files: number, bytes: number, ago: 
 });
 const pastTidies = [
   pastRun(12, "messy-downloads", 28, 1_048_576_000, 2 * 3_600_000),
-  pastRun(9, "real-shape", 4, 125_829_120, day),
+  pastRun(9, "real-shape-media", 4, 125_829_120, day),
   pastRun(6, "auto", 1, 2_516_582, 2 * day, true),
   pastRun(3, "messy-downloads", 17, 402_653_184, 6 * day),
 ];
@@ -163,6 +166,8 @@ const pastSyncs: T.PastSync[] = [
   { plan: 22, sync: "capcut", applied_at: now - 4 * day, copied: 3, taken_off: 0, renamed: 0, bytes: 734_003_200, undone: true, undoable: false },
 ];
 
+/** Set once a stopped transfer is picked up, so it stops being listed. */
+let resumed = false;
 mockIPC((cmd, args) => {
   const a = (args ?? {}) as Record<string, any>;
   if (bare && ["governed", "list_links", "list_connections", "recent", "history", "whereis", "archives", "interrupted", "past_tidies", "past_cleanups", "recent_scans", "list_syncs", "past_syncs"].includes(cmd)) {
@@ -192,7 +197,7 @@ mockIPC((cmd, args) => {
     case "recent": case "history": case "whereis": return ops;
     case "past_tidies": return pastTidies;
     case "past_cleanups": return pastCleanups;
-    case "recent_scans": return [`${DEMO}/messy-downloads`, `${DEMO}/real-shape-media`];
+    case "recent_scans": return [`${DEMO}/Downloads`, `${DEMO}/messy-downloads`, `${DEMO}/real-shape-media`];
     case "list_links": return links;
     case "find_duplicates": return found(a.target ?? `${DEMO}/messy-downloads`);
     case "duplicate_action": return null;
@@ -213,7 +218,15 @@ mockIPC((cmd, args) => {
     case "preview_link":
       return { overlapping: [], fresh: 3, same_size: 1, clashes: 1, too_recent: 0, bytes: 629_145_600, removes_originals: true,
         items: listings[`${DEMO}/nas/incoming`].entries.map((e, i) => ({ path: e.path, size: e.size, outcome: ["move", "move", "move", "check", "clash"][i] ?? "move", existing: null, towards: "forward" })) };
-    case "interrupted": return [];
+    case "resume_interrupted":
+      resumed = true;
+      // What the engine's events would say next: the run is under way.
+      setTimeout(showRunning, 30);
+      return { started: true, waiting: 0, job: 1 };
+    case "interrupted":
+      return sceneName === "home-busy" && !resumed
+        ? [{ link: "videos-to-nas", source: `${DEMO}/to-drain`, destination: "area51:media/incoming", files: 14, bytes: 3_221_225_472, names: ["wedding-rough-cut.mp4"] }]
+        : [];
     case "transfer_queue": return { running: null, waiting: [] };
     case "list_syncs": return syncList;
     case "following_state":
@@ -247,7 +260,7 @@ mockIPC((cmd, args) => {
     case "change_sync": return syncList[0];
     case "run_sync": return { started: true, waiting: 0 };
     case "put_back_sync": return { plan: 31, put_back: 2, taken_off: 5, parked_left: 0, revived: [{ member: "laptop", path: "2025/wedding-rough-cut.mp4" }] };
-    case "places": return [{ label: "Demo", path: DEMO }, { label: "NAS", path: `${DEMO}/nas` }];
+    case "places": return [{ label: "Demo", path: DEMO }, { label: "Downloads", path: `${DEMO}/Downloads` }, { label: "NAS", path: `${DEMO}/nas` }];
     case "last_panes": return { left: `${DEMO}/photos-by-nothing`, right: `${DEMO}/nas/incoming` };
     case "browse":
       if (a.path === "area51:" || a.path === "area51:media") {
@@ -482,8 +495,33 @@ const summary = (over: Partial<T.Summary>): T.Summary => ({
   recovered: 0, pruned: 0, cancelled: false, destination_lost: false, failures: [], ...over,
 });
 
+/** A transfer under way, as the engine's events leave the store. */
+function showRunning() {
+  const files = listings[`${DEMO}/nas/incoming`].entries.slice(0, 4);
+  t.current.value = queued(1, `${DEMO}/to-drain`, `${DEMO}/nas/incoming`, true, 4, 1_258_291_200);
+  t.shape.value = { removes_originals: true, at_once: 2 };
+  t.atOnce.value = 2;
+  t.live.value = files[0]?.path ?? null;
+  t.rows.value = files.map((e, i) => ({
+    path: e.path, size: e.size, detail: null,
+    state: ["live", "checking", "waiting"][i] ?? "waiting",
+    done: i === 0 ? Math.round(e.size * 0.62) : i === 1 ? e.size : 0,
+    checked: i === 1 ? Math.round(e.size * 0.3) : 0,
+  }));
+}
+
 const scenes: Record<string, () => unknown> = {
   home: () => {},
+  // Home with everything it can show at once: a stopped transfer, and the
+  // watcher having filed, held and failed while the window was open.
+  "home-busy": async () => {
+    const { useWatch } = await import("../state/useWatch");
+    useWatch().recent.value = [
+      { kind: "tidied", folder: "messy-downloads", files: 3, plan: 44, why: "", at: now - 4 * 60_000 },
+      { kind: "waiting", folder: "messy-downloads", files: 12, plan: 0, why: "", at: now - 50 * 60_000 },
+      { kind: "trouble", folder: "real-shape", files: 0, plan: 0, why: "the folder was moved or renamed", at: now - 3 * 3_600_000 },
+    ];
+  },
   "folder-start": async () => { nav.go("folder"); await f.listRegistered(); },
   "folder-read": async () => { nav.go("folder"); await f.look(DL); },
   "folder-read-real": async () => { nav.go("folder"); await f.look(`${DEMO}/real-shape`); },
@@ -512,17 +550,7 @@ const scenes: Record<string, () => unknown> = {
   "drain-run": async () => {
     nav.go("drain");
     await tab(1);
-    const files = listings[`${DEMO}/nas/incoming`].entries.slice(0, 4);
-    t.current.value = queued(1, `${DEMO}/to-drain`, `${DEMO}/nas/incoming`, true, 4, 1_258_291_200);
-    t.shape.value = { removes_originals: true, at_once: 2 };
-    t.atOnce.value = 2;
-    t.live.value = files[0]?.path ?? null;
-    t.rows.value = files.map((e, i) => ({
-      path: e.path, size: e.size, detail: null,
-      state: ["live", "checking", "waiting"][i] ?? "waiting",
-      done: i === 0 ? Math.round(e.size * 0.62) : i === 1 ? e.size : 0,
-      checked: i === 1 ? Math.round(e.size * 0.3) : 0,
-    }));
+    showRunning();
   },
   // Two transfers, the second started while the first runs, replayed as the
   // engine emits them. `&step=` stops the replay at 1 (first running),
@@ -841,6 +869,13 @@ const scenes: Record<string, () => unknown> = {
 };
 try {
   await scenes[scene]?.();
+  // `&press=Label` presses a button after the scene is set, to photograph
+  // where it leads; `|` separates several, pressed in turn.
+  for (const label of (params.get("press") ?? "").split("|").filter(Boolean)) {
+    await tick();
+    press(label);
+    await tick();
+  }
 } catch (e) {
   // A scene that throws must say so: a silent one photographs the wrong screen.
   document.title = `scene failed: ${String(e)}`;

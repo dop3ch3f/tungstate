@@ -16,7 +16,7 @@
 // refuses it, on every platform CI runs on.
 
 import type {
-  Cleared, DupeRow, Found, JobView, MemberPreview, Notice, Outcome, PastRun, PastSync, PreviewView,
+  Cleared, DupeRow, Found, JobView, MemberPreview, Notice, Op, Outcome, PastRun, PastSync, PreviewView,
   PutBackDone, ScanProgress, Summary, SyncLeg, SyncPreview, SyncRan, SyncUndone, TidyDone,
 } from "../engine/types";
 
@@ -42,6 +42,11 @@ export const putBack = (done: PutBackDone): FileCount => seal(done.files);
 
 /** Files a preview says would move. `blast.files`, never `plan.ops.length`. */
 export const wouldMove = (view: PreviewView): FileCount => seal(view.files);
+
+/** Files in a run of alike file ops (copy, move, rename, remove): the journal
+ *  writes exactly one op per file for those kinds. Never pass a run holding
+ *  `mkdir` or `rmdir`, which count folders. */
+export const grouped = (run: readonly Op[]): FileCount => seal(run.length);
 
 /** Files the watcher filed, or found waiting. The engine counts what moved,
  *  not the plan's operations. */

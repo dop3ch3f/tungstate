@@ -26,3 +26,15 @@ test("a place in line reads the way it is said", () => {
   assert.deepEqual([1, 2, 3, 4].map(ordinal), ["1st", "2nd", "3rd", "4th"]);
   assert.deepEqual([11, 12, 13, 21, 22, 111].map(ordinal), ["11th", "12th", "13th", "21st", "22nd", "111th"]);
 });
+
+test("ago says a time the way a person would", async () => {
+  const { ago } = await import("../src/lib/format.ts");
+  const now = 10 * 86_400_000;
+  assert.equal(ago(now - 20_000, now), "just now");
+  assert.equal(ago(now - 5 * 60_000, now), "5 min ago");
+  assert.equal(ago(now - 61 * 60_000, now), "an hour ago");
+  assert.equal(ago(now - 3 * 3_600_000, now), "3 hours ago");
+  assert.equal(ago(now - 30 * 3_600_000, now), "yesterday");
+  assert.equal(ago(now - 4 * 86_400_000, now), "4 days ago");
+  assert.doesNotMatch(ago(now - 9 * 86_400_000, now), /ago/);
+});

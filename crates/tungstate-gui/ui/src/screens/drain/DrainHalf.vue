@@ -19,8 +19,9 @@ import Notice from "../../ui/Notice.vue";
 import Sheet from "../../ui/Sheet.vue";
 
 type Where = "files" | "runs" | "links";
-const where = ref<Where>("files");
 const t = useTransfer();
+const where = ref<Where>(t.openOn.value ?? "files");
+t.openOn.value = null;
 const nav = useNav();
 const cx = useConnections();
 

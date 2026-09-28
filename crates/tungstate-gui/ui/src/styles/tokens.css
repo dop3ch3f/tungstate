@@ -113,6 +113,9 @@
   --kind-folder: var(--raw-kind-folder);
 
   --hold: var(--raw-amber);
+  /* An alert icon's shape and the mark cut out of it; alerts set their own. */
+  --alert-icon: currentColor;
+  --alert-knock: var(--panel);
   /* Text on retro's yellow warning bar, which stays yellow after dark. */
   --warn-ink: var(--text);
   --ok: var(--raw-green);
@@ -221,6 +224,8 @@
   --disabled: #a5a79d;
   --tint-home: #f7a501;
   --warn-bar: #ffd44d;
+  /* A failure's bar: the same weight as the warning's, in red. */
+  --alarm-bar: #ffb4a3;
   --tint-home-ink: #151515;
   --tint-folder: #f54e00;
   --tint-drain: #1d4aff;
@@ -299,6 +304,7 @@
   --control: #f7a501;
   --control-ink: #151515;
   --warn-bar: #f5c842;
+  --alarm-bar: #ff9a82;
   --warn-ink: #151515;
   --hold: #f0b43c;
   --ok: #5cc485;
