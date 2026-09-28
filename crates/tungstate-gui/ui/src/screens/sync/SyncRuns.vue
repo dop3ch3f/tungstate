@@ -47,7 +47,7 @@ const table = useTable(toRef(props, "runs"), {
         Runs are listed here, and each one can be put back on every folder.
       </div>
       <template v-else>
-        <TableTools v-if="!props.single" :table="table" placeholder="Filter by sync" />
+        <TableTools v-if="!props.single && props.runs.length > 6" :table="table" placeholder="Filter by sync" />
         <div class="sr-head">
           <span></span>
           <SortHead :table="table" column="sync">{{ props.single ? "Run" : "Sync" }}</SortHead>

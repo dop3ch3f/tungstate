@@ -1,6 +1,7 @@
 <!-- Mounted once, at the top of the window. Draws whatever `ask()` is waiting
      on, and nothing when nothing is. -->
 <script setup lang="ts">
+import { computed } from "vue";
 import Sheet from "./Sheet.vue";
 import Button from "./Button.vue";
 import ActionBar from "./ActionBar.vue";
@@ -10,6 +11,19 @@ import { useNav } from "../nav";
 // A question wears the tile of the section that asked it; without this every
 // dialog showed the default, which is Settings.
 const nav = useNav();
+/** The main choice last, as on every bar; the rest keep the order asked. */
+const ordered = computed(() => {
+  const all = dialog.open.value?.choices ?? [];
+  const main = all.some((c) => c.look === "primary");
+  // With a safer main choice on offer, a destructive one waits at the far
+  // left, as Remove does in a sync's settings; with none, it is the main one.
+  const aside = main ? all.filter((c) => c.look === "danger") : [];
+  const rest = all.filter((c) => !aside.includes(c));
+  return {
+    aside,
+    right: [...rest.filter((c) => c.look !== "primary"), ...rest.filter((c) => c.look === "primary")],
+  };
+});
 </script>
 
 <template>
@@ -23,8 +37,11 @@ const nav = useNav();
       {{ dialog.open.value.checkbox }}
     </label>
     <ActionBar>
+      <template #say>
+        <Button v-for="choice in ordered.aside" :key="choice.id" look="danger" @click="answer(choice.id)">{{ choice.label }}</Button>
+      </template>
       <Button
-        v-for="choice in dialog.open.value.choices"
+        v-for="choice in ordered.right"
         :key="choice.id"
         :look="choice.look ?? 'plain'"
         @click="answer(choice.id)"

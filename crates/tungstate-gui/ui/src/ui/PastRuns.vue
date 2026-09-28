@@ -52,7 +52,8 @@ const table = useTable(toRef(props, "runs"), {
         {{ props.empty }}
       </div>
       <template v-else>
-        <TableTools :table="table" placeholder="Filter by folder" />
+        <!-- Filters earn their room only once there are rows to filter. -->
+        <TableTools v-if="props.runs.length > 6" :table="table" placeholder="Filter by folder" />
         <div class="pr-head">
           <span></span>
           <SortHead :table="table" column="name">Folder</SortHead>

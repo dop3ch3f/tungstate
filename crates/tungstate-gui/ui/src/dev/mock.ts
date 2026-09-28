@@ -203,7 +203,8 @@ mockIPC((cmd, args) => {
     case "duplicate_action": return null;
     case "stop_finding_duplicates": return null;
     case "clear_duplicates":
-      return { files: 3, bytes: 41_943_040, plan: 7, reversible: true, dropped: 1, failed: [] };
+      // What the found scene ticks by default: the folder copy and its files.
+      return { files: 217, bytes: 3_404_000_000, plan: 7, reversible: true, dropped: 1, failed: [] };
     case "list_connections": return savedConnections;
     case "test_connection": return { entries: 14, root: "/volume1/media", names: ["Movies", "Photos"], accepts_files: true };
     case "test_settings": return { entries: 6, root: "media/backups", names: ["2024/", "2025/", "2026/", "CapCut/", "Photos/", "notes.txt"], accepts_files: true };
@@ -294,7 +295,9 @@ function found(root: string) {
   const mid = two?.size ?? 2_400_000;
   return {
     root,
-    files: 192,
+    // Matches the scanning scene's count, so the harness never shows a scan
+    // that found more extras than files.
+    files: 4210,
     extra_files: 217 + 2 + 1 + 1 + 1,
     reclaimable: 3_400_000_000 + big * 2 + mid + 240_000 + 3_900_000,
     unsure: 1,
@@ -723,6 +726,10 @@ const scenes: Record<string, () => unknown> = {
     await dz.look(`${DEMO}/photos-by-nothing`);
     await dz.clear("set-aside");
   },
+  // What Duplicates' buttons open.
+  "dupes-choose": async () => { nav.go("dupes"); await tick(); press("Choose a folder…"); await tick(); },
+  "dupes-clear-ask": async () => { await scenes["dupes-found"]!(); await tick(); pressIn(".ab", "Set aside 217 files"); await tick(); },
+  "dupes-putback-ask": async () => { nav.go("dupes"); await tick(); await tick(); pressIn(".pr-rows", "Put back"); await tick(); },
   settings: () => nav.go("settings"),
   "drain-connections": async () => { nav.go("drain"); await tab(3); },
   "drain-runs": async () => { nav.go("drain"); await tab(1); },

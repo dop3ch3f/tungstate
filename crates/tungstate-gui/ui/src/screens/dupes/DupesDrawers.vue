@@ -85,11 +85,6 @@ function isOpen(claim: Claim, kind: DupeKind | null): boolean {
       </button>
     </section>
 
-    <section class="chosen">
-      <h2>Ticked</h2>
-      <p class="tick-total">{{ bytes(d.chosenBytes.value) }}</p>
-      <p class="tick-count">in {{ files(d.chosenFiles.value) }}</p>
-    </section>
   </nav>
 </template>
 
@@ -135,7 +130,4 @@ h2 {
 .k-doc { background: var(--kind-doc); }
 .k-archive { background: var(--kind-archive); }
 .k-folder { background: var(--kind-folder); }
-.chosen { margin-top: auto; padding-top: var(--s3); border-top: 1px solid var(--rule); }
-.tick-total { font-size: var(--title); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.tick-count { font-size: var(--fine); color: var(--text-faint); margin: 2px 0 0; }
 </style>

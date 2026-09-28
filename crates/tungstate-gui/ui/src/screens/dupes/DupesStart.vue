@@ -77,17 +77,14 @@ async function look(at: string) {
 <template>
   <div class="dz-column">
     <p class="dz-intro">
-      Files that are the same file, whatever they are called. Nothing is read
-      in full unless it has to be, and nothing moves until you say so.
+      Files that are the same, whatever they are called. Nothing moves until you say so.
     </p>
 
     <label class="dz-also">
       <input type="checkbox" v-model="d.alsoSimilar.value" />
       <span>
         Also find files that are nearly the same
-        <em>a photo re-exported smaller, a video re-encoded, one song at two
-        bitrates. This opens every picture and video, so it takes longer the
-        first time and is quick after that.</em>
+        <em>A photo exported smaller, a video re-encoded. Slower the first time.</em>
       </span>
     </label>
 
@@ -107,14 +104,14 @@ async function look(at: string) {
 
     <section class="dz-again" v-if="d.recent.value.length">
       <h2>Looked at before</h2>
-      <button
-        v-for="place in d.recent.value"
-        :key="place"
-        class="dz-recent"
-        @click="d.look(place)"
-      >
-        <span class="path">{{ shortPath(place) }}</span>
-      </button>
+      <ul class="dz-places">
+        <li v-for="place in d.recent.value" :key="place">
+          <button class="dz-recent" :title="place" @click="d.look(place)">
+            <span class="path">{{ shortPath(place) }}</span>
+            <span class="dz-go" aria-hidden="true">›</span>
+          </button>
+        </li>
+      </ul>
     </section>
 
     <Notice tone="bad" v-if="d.problem.value">{{ d.problem.value }}</Notice>
@@ -141,11 +138,15 @@ async function look(at: string) {
 .dz-also em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.5; margin-top: 2px; }
 .dz-pick { display: flex; align-items: flex-end; gap: var(--s4); flex-wrap: wrap; }
 .dz-again h2 { font-size: var(--body); font-weight: 700; margin: 0 0 var(--s2); }
+/* Rows as the sync list has them: ruled, the whole row a button, a chevron. */
+.dz-places { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.dz-places li { border-bottom: 1px solid var(--rule); }
 .dz-recent {
-  display: block;
+  display: flex;
+  align-items: center;
   width: 100%;
-  margin: 0 0 2px;
-  padding: 5px var(--s2);
+  margin: 0;
+  padding: 8px var(--s2);
   font: inherit;
   text-align: left;
   color: var(--text-quiet);
@@ -155,4 +156,7 @@ async function look(at: string) {
   cursor: pointer;
 }
 .dz-recent:hover { color: var(--text); background: var(--surface-hover); }
+.dz-recent .path { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dz-go { font-size: var(--body); color: var(--text-faint); }
+.dz-recent:hover .dz-go { color: var(--text); }
 </style>

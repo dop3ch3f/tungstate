@@ -12,6 +12,7 @@ import { extraIn, files, lookedAt } from "../../lib/counts";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
 import ActionBar from "../../ui/ActionBar.vue";
+import Segmented from "../../ui/Segmented.vue";
 import Notice from "../../ui/Notice.vue";
 import DupesDrawers from "./DupesDrawers.vue";
 import DupesList from "./DupesList.vue";
@@ -49,18 +50,22 @@ async function go() {
   // promises: one can be undone here and the other cannot.
   if (!d.action.value) {
     const chosen = await ask({
-      title: "What should happen to the extra copies?",
+      title: `Set aside ${files(d.chosenFiles.value)}, or send them to the Trash?`,
       why: answer.can_trash
-        ? "Set aside moves them inside the folder, and Put it back undoes it. The Trash is your desktop's: only the Finder can bring those back."
-        : "This is not on this machine, so the desktop's Trash is not available. Extra copies are set aside inside the folder, and Put it back undoes it.",
+        ? "Set aside keeps them inside the folder, where Put it back can bring them back. From the Trash, only the Finder can. This is asked once and remembered."
+        : "This is not on this Mac, so there is no Trash for it. The extra copies are set aside inside the folder, where Put it back can bring them back.",
       choices: answer.can_trash
         ? [
-            { id: "set-aside", label: "Set them aside", look: "primary" },
+            { id: "cancel", label: "Cancel" },
             { id: "trash", label: "Send to the Trash", look: "danger" },
+            { id: "set-aside", label: "Set them aside", look: "primary" },
           ]
-        : [{ id: "set-aside", label: "Set them aside", look: "primary" }],
+        : [
+            { id: "cancel", label: "Cancel" },
+            { id: "set-aside", label: "Set them aside", look: "primary" },
+          ],
     });
-    if (!chosen.id) return;
+    if (!chosen.id || chosen.id === "cancel") return;
     await d.chooseAction(chosen.id);
   }
 
@@ -95,6 +100,13 @@ async function go() {
   });
   if (confirmed.id === "yes") await d.clear(doing.value);
 }
+// Suggested is the copy the scan chose and explains; the ticks start there.
+const KEEP = [
+  { id: "suggested", label: "Suggested" },
+  { id: "newest", label: "The newest" },
+  { id: "oldest", label: "The oldest" },
+  { id: "biggest", label: "The biggest" },
+] as const;
 </script>
 
 <template>
@@ -116,9 +128,12 @@ async function go() {
     <template v-else>
       <div class="rules">
         <span class="rules-lbl">Keep</span>
-        <Button look="link" @click="d.keepBy('newest')">the newest</Button>
-        <Button look="link" @click="d.keepBy('oldest')">the oldest</Button>
-        <Button look="link" @click="d.keepBy('biggest')">the biggest</Button>
+        <Segmented
+          label="Which copy to keep"
+          :options="KEEP"
+          :model-value="d.keptBy.value ?? 'suggested'"
+          @update:model-value="(k) => d.keepBy(k === 'suggested' ? 'all' : k)"
+        />
         <span class="rules-gap"></span>
         <Button look="link" @click="d.keepBy('all')">Tick every extra</Button>
         <Button look="link" @click="d.keepBy('none')">Tick nothing</Button>
@@ -137,9 +152,7 @@ async function go() {
 
       <ActionBar pinned>
         <template #say><p class="foot-sum">
-          <b>{{ bytes(found.reclaimable) }}</b> in
-          {{ extraIn(found) }} extra {{ extraIn(found) === 1 ? "file" : "files" }}, out of {{ lookedAt(found) }} looked at.
-          <span v-if="found.unchecked.length" class="foot-note">
+          <b>{{ files(d.chosenFiles.value) }} ticked, {{ bytes(d.chosenBytes.value) }}.</b>{{ " " }}<span class="foot-note">{{ extraIn(found) }} extra {{ extraIn(found) === 1 ? "file" : "files" }} in {{ lookedAt(found) }} looked at.</span>{{ " " }}<span v-if="found.unchecked.length" class="foot-note">
             {{ found.unchecked.length }} could not be looked at.
           </span>
         </p></template>
@@ -172,7 +185,8 @@ async function go() {
   border-top: 1px solid var(--rule);
   padding-top: var(--s3);
 }
-.wide { grid-template-columns: 190px minmax(280px, 1fr) minmax(260px, 0.85fr); }
+/* The list is where the choosing happens, so it gets the room. */
+.wide { grid-template-columns: 180px minmax(320px, 1.35fr) minmax(240px, 0.8fr); }
 .peek { grid-template-columns: 170px minmax(0, 1fr) minmax(220px, 0.8fr); }
 .pane-left { min-height: 0; }
 .pane-mid { min-height: 0; }

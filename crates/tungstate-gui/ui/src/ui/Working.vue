@@ -22,7 +22,7 @@ defineProps<{ what: string; note?: string }>();
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--accent);
+  background: var(--control);
   animation: breathe 1.6s var(--ease) infinite;
 }
 .what { font-size: var(--body); }

@@ -531,3 +531,38 @@ every section shares:
 - one shadow on everything.
 
 You chose to commit Sync and do those next, across the whole app.
+
+### Pieces every screen shares (critic 6.5 → 6.5 over four rounds)
+
+- One ActionBar ends every page and sheet: what to know on the left, the
+  choices on the right with the main one last, and Cancel always a button.
+  It is pinned where what is above it scrolls. A form's errors and a check's
+  answer sit on the bar, so scrolling can't hide them.
+- Dialogs have a close button only. Their choices are ordered the same way.
+  A destructive choice waits at the far left when there is a safer main one.
+- A Notice is one construction at three levels, with an icon and an optional
+  action at its right. Home's alerts are notices too now.
+- Tables sit flat under a heading, cards inside a section have no shadow,
+  tabs are one joined strip, and row dividers are hairlines.
+- Focus rings, ticks and radios take the section's colour. Duplicates has
+  its own green; Settings, History and the update sheet press in ink.
+- Put it back is never the main button.
+- A row's lesser actions, and anything that deletes, sit behind a "…" menu.
+- Start pages are named as the sidebar names them (Organize, Transfer,
+  History). The way back is one small link above the heading.
+- Labels are sentence case, intros are one size, a screen's big number has
+  one style, and a disabled button looks the same whichever it is.
+
+### Duplicates (critic 6 → 6.5)
+
+- Keep is a strip that shows the rule in force, starting on Suggested, the
+  copy the scan chose. A tick by hand makes the ticks your own.
+- The ticked tally moved from the rail, where it was cut off, into the bar
+  beside the button it is about. The list column is wider.
+- Scanning leads with its count, shows a moving bar, and keeps Stop at the
+  foot. The file it is on is cut from the front.
+- The question before a first clear says how many, has Cancel, and keeps
+  Send to the Trash at the far left.
+- Done leads with what was set aside. The start screen says less, and places
+  looked at before are rows.
+- Run tables show their filters only past six rows.

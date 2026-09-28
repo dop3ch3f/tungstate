@@ -106,6 +106,7 @@ async function look(target: string) {
     const answer = await dupes.find(target, alsoSimilar.value);
     found.value = answer;
     ticked.value = ticksFor(answer);
+    keptBy.value = null;
     drawer.value = { claim: firstClaimWithRows(answer), kind: null };
     // The first group opens, so the screen arrives showing what a group is
     // rather than a list of closed drawers.
@@ -136,6 +137,7 @@ async function stop() {
 
 /** Tick or untick one copy. */
 function tick(path: string, on: boolean) {
+  keptBy.value = null;
   const next = new Set(ticked.value);
   if (on) next.add(path);
   else next.delete(path);
@@ -196,7 +198,12 @@ const showing = computed(() => {
  *  A rule never acts. It moves the checkboxes and leaves the list on screen,
  *  so the preview still gets the last word. Every one of them keeps a copy by
  *  construction, and the engine checks again anyway. */
+/** Which rule the ticks follow, while they still follow one; a tick by hand
+ *  makes them the person's own. */
+const keptBy = ref<"newest" | "oldest" | "biggest" | null>(null);
+
 function keepBy(which: "newest" | "oldest" | "biggest" | "none" | "all") {
+  keptBy.value = which === "none" || which === "all" ? null : which;
   const next = new Set(ticked.value);
   for (const row of shown.value) {
     for (const copy of row.copies) next.delete(copy.path);
@@ -232,6 +239,7 @@ function pick(row: DupeRow, which: "newest" | "oldest" | "biggest"): string | nu
 
 /** Keep whichever copy sits under this directory, in the open drawer. */
 function keepIn(directory: string) {
+  keptBy.value = null;
   const inside = (path: string) => path === directory || path.startsWith(`${directory}/`);
   const next = new Set(ticked.value);
   for (const row of shown.value) {
@@ -386,6 +394,7 @@ export function useDupes() {
     tickedIn,
     open,
     keepBy,
+    keptBy,
     keepIn,
     clear,
     recent,
