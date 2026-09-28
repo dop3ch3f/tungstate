@@ -149,10 +149,14 @@ jobs:
           JSON
           docker run -d --name tungstate-s3 -p 9000:8333 \
             -v "${{ runner.temp }}/s3.json:/etc/s3.json:ro" \
-            chrislusf/seaweedfs server -s3 -s3.config=/etc/s3.json -dir=/data
+            chrislusf/seaweedfs@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d \
+            server -s3 -s3.config=/etc/s3.json -dir=/data
 
-          # Ready means the bucket exists and the S3 port answers.
-          for _ in $(seq 1 60); do
+          # Ready means the bucket exists and the S3 port answers. Up to three
+          # minutes: its master elects itself leader first, which has been
+          # seen to take over a minute on a busy runner. Pinned by digest so a
+          # new release cannot change what "ready" takes under us.
+          for _ in $(seq 1 180); do
             if docker exec tungstate-s3 sh -c "echo 's3.bucket.create -name tungstate' | weed shell" >/dev/null 2>&1 \
               && docker exec tungstate-s3 sh -c "echo 's3.bucket.list' | weed shell" 2>/dev/null | grep -q tungstate \
               && curl -s -o /dev/null http://127.0.0.1:9000/; then
