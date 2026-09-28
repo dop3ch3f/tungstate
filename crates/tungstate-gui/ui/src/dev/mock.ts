@@ -414,6 +414,12 @@ async function syncAt(index: number, preview?: T.SyncPreview) {
 }
 const DL = `${DEMO}/messy-downloads`;
 
+/** A preview of the same folder once it matches its rules: nothing moves,
+ *  and before and after are the same tree. */
+function settled(view: T.PreviewView): T.PreviewView {
+  return { ...view, tidy: true, files: 0 as never, bytes: 0, large: false, moves: [], before: view.after.map((e) => ({ ...e, moves: false })), after: view.after.map((e) => ({ ...e, moves: false })) };
+}
+
 /** Open a governed folder straight at its preview. */
 async function open(root: string) {
   const step = (n: string) => (document.documentElement.dataset.step = n);
@@ -535,14 +541,14 @@ const scenes: Record<string, () => unknown> = {
   "folder-tidied": async () => {
     nav.go("folder"); await f.listRegistered(); await f.open(DL);
     f.tidied.value = { moved: 28, skipped: 1, failed: 0, already_tidy: false };
-    f.preview.value = { ...f.preview.value!, undoable: 41 };
+    // After a tidy the window reads the folder again, and it now matches.
+    f.preview.value = { ...settled(f.preview.value!), undoable: 41 };
   },
   "folder-confirm": async () => {
     nav.go("folder"); await f.listRegistered(); await f.open(DL);
     void ask({
-      title: "Tidy downloads?",
-      why: "This is a large change. Everything it does can be put back, and the button to do that stays on this screen.",
-      detail: ["28 files would move, of 30.", "1.0 GB in all.", "6 directories made, 1 emptied."],
+      title: "Tidy messy-downloads?",
+      why: "That is a large change: 28 files of 30 move. Everything it does can be put back from this screen.",
       choices: [{ id: "no", label: "Not now" }, { id: "yes", label: "Tidy up", look: "primary" }],
     });
   },
@@ -718,15 +724,15 @@ const scenes: Record<string, () => unknown> = {
     f.putBackCount.value = 28;
     f.preview.value = { ...f.preview.value!, undoable: null };
   },
-  "folder-working": async () => { await open(DL); f.busy.value = "Tidying. This does not report progress"; },
+  "folder-working": async () => { await open(DL); f.busy.value = "Tidying 28 files"; },
   "folder-error": async () => { await open(DL); f.problem.value = "the rules in this folder will not load: line 3, column 9: expected `=`"; },
   "folder-cooldown": async () => {
     await open(DL);
-    f.preview.value = { ...f.preview.value!, tidy: true, files: 0 as never, waiting: 4, longest_wait: 96 };
+    f.preview.value = { ...settled(f.preview.value!), waiting: 4, longest_wait: 96 };
   },
   "folder-already-tidy": async () => {
     await open(DL);
-    f.preview.value = { ...f.preview.value!, tidy: true, files: 0 as never, waiting: 0 };
+    f.preview.value = settled(f.preview.value!);
   },
   "folder-unsettled": async () => {
     await open(DL);
@@ -734,7 +740,8 @@ const scenes: Record<string, () => unknown> = {
   },
   "folder-broken": async () => {
     nav.go("folder");
-    await f.look(DL);
+    await f.listRegistered();
+    await f.look(`${DEMO}/broken-rules`);
     f.outcomes.value = [
       { name: "(the rules you have)", summary: "", loads: false, settles: true, files: 0, of: 30, bytes: 0, created: 0, removed: 0, example: null },
       ...f.outcomes.value.slice(1),

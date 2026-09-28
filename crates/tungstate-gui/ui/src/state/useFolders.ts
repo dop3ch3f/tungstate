@@ -132,7 +132,8 @@ async function tidy() {
   if (!path) return;
   // No events exist for this, so it is one blocking call and the screen says
   // so. See `docs/SEAM.md`, "what is deliberately not in the seam yet".
-  const done = await run("Tidying. This does not report progress", () => folders.tidy(path));
+  const n = preview.value?.files;
+  const done = await run(n ? `Tidying ${n} file${n === 1 ? "" : "s"}` : "Tidying", () => folders.tidy(path));
   if (!done) return;
   tidied.value = done;
   putBackCount.value = null;

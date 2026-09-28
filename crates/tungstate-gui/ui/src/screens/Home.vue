@@ -207,7 +207,7 @@ function scanAgain(path: string) {
       <div class="grid">
         <section class="panel">
           <TitleBar class="pbar" of="folder" title="Organize">
-            <Button look="link" v-if="governed.length" @click="chooseFolder()">Add a folder…</Button>
+            <Button look="link" v-if="governed.length" @click="chooseFolder()">Choose a folder…</Button>
             <Button look="link" v-if="governed.length > SHOWN" @click="nav.go('folder')">All {{ governed.length }}</Button>
           </TitleBar>
           <div class="pb">
@@ -228,7 +228,7 @@ function scanAgain(path: string) {
               <p class="none">See how a folder is filed and tidy it, with every move undoable. Downloads is usually the messiest.</p>
               <footer class="pf">
                 <Button v-if="downloads" look="primary" @click="look(downloads)">Start with Downloads</Button>
-                <Button :look="downloads ? 'link' : undefined" @click="chooseFolder()">Add a folder…</Button>
+                <Button :look="downloads ? 'link' : undefined" @click="chooseFolder()">Choose a folder…</Button>
               </footer>
             </template>
           </div>

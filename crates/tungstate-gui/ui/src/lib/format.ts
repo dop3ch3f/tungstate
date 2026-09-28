@@ -75,6 +75,10 @@ export function ago(ms: number, now = Date.now()): string {
   return new Date(ms).toLocaleDateString(undefined, { month: "short", day: "numeric" });
 }
 
+/** An engine message as a sentence: it arrives starting lower case, because
+ *  it is written to follow "could not …" in a log line. */
+export const sentence = (text: string): string => (text ? text[0]!.toUpperCase() + text.slice(1) : text);
+
 /** A human name for what a file is. */
 export function kind(entry: { is_dir: boolean; name: string }): string {
   if (entry.is_dir) return "Folder";

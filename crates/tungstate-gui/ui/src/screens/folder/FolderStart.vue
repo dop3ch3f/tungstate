@@ -3,10 +3,11 @@
      `compare_folder` take a bare path, so somebody can be shown their own
      files before they have learned a word of this app's vocabulary. -->
 <script setup lang="ts">
-import { onMounted, ref, shallowRef } from "vue";
+import { computed, onMounted, ref, shallowRef } from "vue";
 import { folders } from "../../engine/commands";
 import type { PastRun } from "../../engine/types";
 import { files, putBack as putBackCount, ran } from "../../lib/counts";
+import { ago, shortPath } from "../../lib/format";
 import { useFolders } from "../../state/useFolders";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
@@ -61,6 +62,13 @@ async function putBack(run: PastRun) {
   }
 }
 
+/** When each folder was last tidied; `past` arrives newest first. */
+const lastTidy = computed(() => {
+  const seen = new Map<string, number>();
+  for (const run of past.value) if (!seen.has(run.root)) seen.set(run.root, run.applied_at);
+  return seen;
+});
+
 const STEPS = [
   { art: "folder", title: "Point at a folder", line: "Its own shape is read first, so nothing is assumed about it." },
   { art: "history", title: "See every move", line: "Before and after side by side, with what stays put and why." },
@@ -73,13 +81,13 @@ const STEPS = [
     <div class="column">
       <div class="head"><Tile of="folder" :size="26" /><h1>Tidy a folder</h1></div>
       <p class="intro">
-        Point at one and you will see how it is filed now, beside what every
-        other way of filing would do to it. Nothing moves until you say so.
+        See how a folder is filed now and what each way of filing would change.
+        Nothing moves until you say so.
       </p>
 
       <Steps v-if="loaded && !past.length" class="steps" :steps="[...STEPS]" />
 
-      <Button look="primary" @click="f.pick()">Point at a folder…</Button>
+      <Button look="primary" @click="f.pick()">Choose a folder…</Button>
 
       <Notice tone="bad" v-if="f.problem.value">{{ f.problem.value }}</Notice>
       <Notice v-if="said">{{ said }}</Notice>
@@ -95,14 +103,16 @@ const STEPS = [
           @click="folder.broken ? f.look(folder.root) : f.open(folder.root)"
         >
           <span class="known-name">{{ folder.name }}</span>
-          <span class="path known-path">{{ folder.root }}</span>
-          <span class="known-state" v-if="folder.broken">rules will not load</span>
+          <span class="path known-path" :title="folder.root">{{ shortPath(folder.root) }}</span>
+          <span class="known-state" v-if="folder.broken">the rules file has a mistake</span>
           <span class="known-state dim" v-else-if="!folder.has_rules">no rules yet</span>
+          <span class="known-state dim" v-else-if="lastTidy.has(folder.root)">tidied {{ ago(lastTidy.get(folder.root)!) }}</span>
+          <span class="known-state dim" v-else>not tidied yet</span>
         </button>
       </section>
 
       <PastRuns
-        v-if="loaded"
+        v-if="loaded && past.length"
         class="past"
         of="folder"
         title="Recent tidies"
@@ -154,6 +164,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .known-row[aria-busy="true"] .known-name { animation: known-breathe 1.2s var(--ease) infinite; }
 @keyframes known-breathe { 0%, 100% { opacity: 0.45 } 50% { opacity: 1 } }
 .known-name { font-weight: 600; flex: none; }
+.known-state { margin-left: auto; }
 .known-path { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .known-state { flex: none; font-size: var(--fine); color: var(--bad); }
 .known-state.dim { color: var(--text-faint); }

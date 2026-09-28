@@ -6,7 +6,7 @@ import { computed } from "vue";
 import { useTable } from "../../lib/table";
 import SortHead from "../../ui/SortHead.vue";
 import { useFolders } from "../../state/useFolders";
-import { bytes } from "../../lib/format";
+import { bytes, sentence } from "../../lib/format";
 import { movedBy, made, emptied } from "../../lib/counts";
 import type { Outcome } from "../../engine/types";
 import Button from "../../ui/Button.vue";
@@ -37,6 +37,9 @@ const wayTable = useTable(ways, {
   sort: { key: "", dir: 1 },
 });
 
+/** A layout's name as words: `by-date` reads "By date". The engine's name is
+ *  still what is sent back when one is chosen. */
+const human = (name: string) => name.charAt(0).toUpperCase() + name.slice(1).replace(/-/g, " ");
 const pickable = (o: Outcome) => o.loads && o.settles;
 const total = computed(() => ways.value[0]?.of ?? 0);
 const picked = computed(() => ways.value.find((o) => o.name === chosen.value) ?? null);
@@ -68,22 +71,21 @@ const shape = computed(() => {
 
       <p class="shape">{{ shape }}</p>
 
-      <Notice tone="bad" v-if="f.problem.value">{{ f.problem.value }}</Notice>
+      <Notice tone="bad" v-if="f.problem.value">{{ sentence(f.problem.value) }}</Notice>
+      <!-- The mistake itself, where it can be fixed: the file and the line. -->
+      <Notice tone="bad" v-if="mine && !mine.loads">
+        The rules file has a mistake, so this folder cannot be tidied until it is fixed:
+        {{ f.current.value?.broken ?? "it will not load" }}. It is
+        <span class="path inline">.tungstate/policy.toml</span> in this folder.
+      </Notice>
 
       <h2 class="ways">Ways you could file these {{ total }} files</h2>
 
-      <p class="caveat" v-if="mine && !mine.loads">
-        This folder already has rules and they will not load, so they are not
-        among the ways below. The file is <span class="path inline">.tungstate/policy.toml</span>.
+      <p class="caveat" v-if="mine && mine.loads && !mine.settles">
+        Its own rules are not among these: they would move the same files every run.
       </p>
-      <p class="caveat" v-else-if="mine && !mine.settles">
-        The rules already in this folder are not among them: they would move the
-        same files every run.
-      </p>
-      <p class="caveat" v-else-if="mine">
-        This folder already has rules, so these are shown for comparison only.
-        Changing them means editing
-        <span class="path inline">.tungstate/policy.toml</span> yourself.
+      <p class="caveat" v-else-if="mine && mine.loads">
+        It has its own rules, so these are for comparison.
       </p>
 
       <div class="table">
@@ -103,7 +105,7 @@ const shape = computed(() => {
           :disabled="!pickable(o)"
           @click="chosen = o.name"
         >
-          <span class="wayname">{{ o.name }}</span>
+          <span class="wayname">{{ human(o.name) }}</span>
           <span class="said">
             {{ o.summary }}<template v-if="!o.settles"> (these would never settle)</template>
           </span>
@@ -121,17 +123,23 @@ const shape = computed(() => {
           <span class="becomes">becomes</span>
           <span class="path to">{{ picked.example.to }}</span>
         </p>
-        <p class="eg" v-else-if="picked && movedBy(picked) === 0">
-          <span class="egl">nothing here would change</span>
-        </p>
-        <div class="act">
+        <!-- A folder with rules of its own is tidied by them, so the step from
+             here is its preview, not a second set of rules. -->
+        <div class="act" v-if="mine">
+          <Button v-if="mine.loads && mine.settles" look="primary" :busy="!!f.busy.value" @click="f.open(f.root.value!)">
+            See what its rules would move
+          </Button>
+          <span class="safe" v-else>Fix its rules file, then open it again.</span>
+        </div>
+        <div class="act" v-else>
           <Button
             look="primary"
-            :disabled="!chosen || !!mine"
+            :disabled="!picked || movedBy(picked) === 0"
             :busy="!!f.busy.value"
             @click="chosen && f.choose(chosen)"
-          >{{ chosen && !mine ? `Give this folder the ${chosen} rules` : "Give this folder these rules" }}</Button>
-          <span class="safe">You will see every move before anything happens.</span>
+          >{{ chosen ? `File it ${human(chosen).toLowerCase()}` : "Choose a way above" }}</Button>
+          <span class="safe" v-if="picked && movedBy(picked) === 0">This way would change nothing here.</span>
+          <span class="safe" v-else>You will see every move before anything happens.</span>
         </div>
       </footer>
     </div>
@@ -220,7 +228,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 }
 .way:hover:not(:disabled):not(.on) { background: var(--surface-hover); }
 /* One signal for one state: the row you picked is the filled one. */
-.way.on { background: var(--surface-raised); box-shadow: inset 0 0 0 1px var(--accent); }
+.way.on { background: var(--chosen); color: var(--chosen-ink); box-shadow: inset 0 0 0 var(--bw) var(--chosen-edge); }
 .way:disabled { cursor: default; opacity: 0.5; }
 
 .wayname { grid-column: 1; grid-row: 1; font-weight: 600; }

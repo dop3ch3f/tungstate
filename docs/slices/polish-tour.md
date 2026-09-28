@@ -396,3 +396,36 @@ Left for their own screens: Organize does not show a broken rules file's
 error when opened ("Fix it" lands on the folder without it), and names a
 folder by its directory rather than its saved name. Transfer's "Move" word
 beside the route, and speed and time left, need the engine to report a rate.
+
+### Organize (critic 6/10 → 6.5/10)
+
+Half of the first round's complaints were the harness, not the window: after
+a tidy the real app reads the folder again and finds it settled, but the
+scene kept the old plan on screen. `settled()` in `dev/mock.ts` now builds
+that answer, so the tidied, cooldown and already-tidy scenes show what the
+app would.
+
+What changed in the window:
+
+- The preview leads with one sentence, "28 of 30 files would move", with the
+  size and folders beside it. The yellow "large change" banner is gone; the
+  confirmation says it instead, in one line.
+- After a tidy the headline is the result ("28 files moved"), the caption
+  names anything skipped, Put it back is the filled button, and a settled
+  folder shows one tree, "The folder now", not two identical ones. Put it
+  back after an undo gets the same treatment.
+- Tidy up is shown only when it could do something, and is blocked while an
+  error is on screen. Put it back stays whether or not it can be pressed.
+- Trees give files at the top their own heading and show a file under its
+  folder by name only. Every move reads `from → to`; the rule chips that
+  repeated the folder chips are gone. Filters appear past twelve rows.
+- A broken rules file says so with its own words and where the file is, and
+  the only step offered is fixing it. A folder with working rules offers its
+  preview instead of a second set of rules. Layouts read as words ("By
+  date"), and the chosen one wears the same raised look as a chosen tab.
+- The start screen shows when each folder was last tidied, and hides the
+  empty history on first use. "Choose a folder…" is the one name for the
+  picker, here and on Home. `format.sentence` capitalises engine errors.
+
+Left: one list for "Folders you have added" and "Recent tidies", and tidy
+progress, which needs the engine to report it.
