@@ -15,8 +15,10 @@ path = "src/main.rs"
 # on Linux only. Everything the engine does without rename is covered by a fake
 # backend in tungstate-transfer, on all three platforms.
 ftp-integration = []
-# The same bargain for S3: CI runs these on Linux against MinIO.
+# The same bargain for S3: CI runs these on Linux against SeaweedFS.
 s3-integration = []
+# And for SMB, against Samba.
+smb-integration = []
 
 [dependencies]
 tungstate-api = { path = "../tungstate-api" }
@@ -44,6 +46,9 @@ tracing-subscriber = { workspace = true }
 rpassword = { workspace = true }
 
 [dev-dependencies]
+# The SMB suite's second, independent client: the backend itself, signed in
+# separately from the binary under test.
+tungstate-backend-smb = { path = "../tungstate-backend-smb" }
 # The S3 suite's second, independent client. Already in the build through
 # tungstate-backend-opendal, so this costs no new compilation.
 opendal = { workspace = true, features = ["services-s3"] }

@@ -14,7 +14,12 @@
 //! **Services registered in this slice: `fs` and `memory`.** `fs` is not a
 //! curiosity: it is how the adapter is exercised on macOS, Windows and Linux
 //! with no server and no network, and it answers "does this behave identically
-//! to [`LocalBackend`]?" directly. FTP arrives in slice 4c as one more flag.
+//! to [`LocalBackend`]?" directly. FTP arrives in slice 4c as one more flag,
+//! and S3 in the polish pass as another.
+//!
+//! SMB is the exception to the name: it is not an `OpenDAL` service, and has
+//! a crate of its own, `tungstate-backend-smb`. [`open`] still hands it out,
+//! because this remains the one place that turns a connection into a backend.
 
 mod backend;
 mod keys;
@@ -130,6 +135,10 @@ pub fn open(
     };
 
     let connection = journal.connection_by_id(id)?;
+    #[cfg(feature = "smb")]
+    if connection.scheme == Scheme::Smb {
+        return smb_backend(&connection, &endpoint.path, secrets);
+    }
     let (operator, anchor) = operator_for(&connection, secrets)?;
     let prefix = remote_key(&endpoint.path).map_err(|source| OpenError::EndPath {
         path: endpoint.path.clone(),
@@ -288,6 +297,34 @@ fn operator_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
     }
 }
 
+/// A share reached directly, signed in to before this returns.
+#[cfg(feature = "smb")]
+fn smb_backend(
+    connection: &Connection,
+    link_end: &std::path::Path,
+    secrets: &dyn SecretStore,
+) -> Result<Box<dyn Backend>> {
+    let Some(host) = connection.host.as_deref().filter(|h| !h.trim().is_empty()) else {
+        return Err(OpenError::MissingHost {
+            name: connection.name.clone(),
+        });
+    };
+    let settings = tungstate_backend_smb::Settings {
+        host: host.trim().to_string(),
+        port: connection.port,
+        root: connection.root.clone(),
+        username: connection.username.clone().unwrap_or_default(),
+        password: secret_for(connection, secrets)?.unwrap_or_default(),
+        require_encryption: connection
+            .options
+            .get(tungstate_journal::option::ENCRYPTION)
+            .is_some_and(|value| value.trim() == "required"),
+    };
+    let backend =
+        tungstate_backend_smb::SmbBackend::connect(&settings, link_end, &connection.name)?;
+    Ok(Box::new(backend))
+}
+
 /// A connection whose scheme this build has no operator for.
 #[allow(clippy::unnecessary_wraps)]
 fn not_compiled(connection: &Connection, _secrets: &dyn SecretStore) -> Result<(Operator, Anchor)> {
@@ -422,7 +459,7 @@ fn ftp_operator(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
 /// `None` is not an error: an anonymous FTP server is a real thing, and a
 /// rejected login is something the server reports rather than something to
 /// guess at here.
-#[cfg(any(feature = "ftp", feature = "s3"))]
+#[cfg(any(feature = "ftp", feature = "s3", feature = "smb"))]
 fn secret_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<Option<String>> {
     secrets
         .get(&tungstate_secret::connection_key(&connection.name))

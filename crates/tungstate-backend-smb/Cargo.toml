@@ -1,0 +1,29 @@
+[package]
+name = "tungstate-backend-smb"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# Windows file sharing, reached directly: a NAS share with nothing mounted.
+# smb-rs's own synchronous client, so this needs no async runtime at all.
+[features]
+# Opt-in: these tests need a real SMB server, so CI runs them on Linux
+# against a Samba container.
+samba-integration = []
+
+[dependencies]
+tungstate-backend = { path = "../tungstate-backend" }
+# `multi_threaded` is smb-rs's synchronous client, safe to share between the
+# transfer engine's workers. Kerberos and QUIC are left out: a home NAS signs
+# in with a user and a password over TCP.
+smb = { version = "0.12.1", default-features = false, features = ["multi_threaded", "sign", "encrypt", "compress", "netbios-transport"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+proptest = { workspace = true }
+
+[lints]
+workspace = true

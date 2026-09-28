@@ -272,6 +272,9 @@ pub enum SettingsProblem {
     /// S3 with no bucket.
     #[error("S3 needs a bucket")]
     NeedsBucket,
+    /// SMB with nobody to sign in as.
+    #[error("SMB needs a user name; signing in as a guest is not supported")]
+    NeedsUser,
     /// SMB with no share at the start of the root.
     #[error("the root has to start with the share's name, as in media/backups")]
     NeedsShare,
@@ -317,8 +320,19 @@ impl ConnectionSettings {
             }
             _ => {}
         }
-        if self.scheme == Scheme::Smb && share_of(&self.root).is_none() {
-            found.push(SettingsProblem::NeedsShare);
+        if self.scheme == Scheme::Smb {
+            // A guest session cannot be signed, so allowing one would mean
+            // accepting a server nobody can vouch for.
+            if self
+                .username
+                .as_deref()
+                .is_none_or(|user| user.trim().is_empty())
+            {
+                found.push(SettingsProblem::NeedsUser);
+            }
+            if share_of(&self.root).is_none() {
+                found.push(SettingsProblem::NeedsShare);
+            }
         }
         if self.scheme == Scheme::S3 {
             if given(option::BUCKET).is_none() {

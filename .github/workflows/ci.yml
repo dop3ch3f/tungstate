@@ -177,3 +177,53 @@ jobs:
       - name: S3 service log
         if: always()
         run: docker logs tungstate-s3
+
+  # SMB reached directly, with nothing mounted, against Samba: the backend's
+  # own suite and the drain and a sync through the binary.
+  smb:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start an SMB server
+        run: |
+          docker run -d --name tungstate-samba -p 445:445 \
+            -e NETBIOS_DISABLE=1 -e AVAHI_DISABLE=1 -e WSDD2_DISABLE=1 \
+            -e ACCOUNT_tungstate=s3cret -e UID_tungstate=1000 \
+            -e 'SAMBA_VOLUME_CONFIG_media=[media]; path=/shares/media; valid users = tungstate; guest ok = no; read only = no' \
+            ghcr.io/servercontainers/samba:smbd-only-latest
+
+          # Ready means the share's folder exists, belongs to the account, and
+          # the server is taking connections on 445.
+          for _ in $(seq 1 60); do
+            if docker exec tungstate-samba sh -c 'mkdir -p /shares/media && chown 1000 /shares/media' 2>/dev/null \
+              && bash -c 'echo > /dev/tcp/127.0.0.1/445' 2>/dev/null; then
+              echo "smb server is ready"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "smb server never came up" >&2
+          exit 1
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --locked -p tungstate-backend-smb --features samba-integration
+        env:
+          TUNGSTATE_SMB_HOST: 127.0.0.1
+          TUNGSTATE_SMB_PORT: "445"
+          TUNGSTATE_SMB_USER: tungstate
+          TUNGSTATE_SMB_PASSWORD: s3cret
+          TUNGSTATE_SMB_SHARE: media
+      - run: cargo test --locked -p tungstate-cli --features smb-integration --test smb
+        env:
+          TUNGSTATE_SMB_HOST: 127.0.0.1
+          TUNGSTATE_SMB_PORT: "445"
+          TUNGSTATE_SMB_USER: tungstate
+          TUNGSTATE_SMB_PASSWORD: s3cret
+          TUNGSTATE_SMB_SHARE: media
+
+      - name: SMB server log
+        if: always()
+        run: docker logs tungstate-samba

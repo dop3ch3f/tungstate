@@ -919,7 +919,7 @@ fn settings(
         scheme,
         host: host.map(str::to_string),
         port: None,
-        username: None,
+        username: Some("me".to_string()),
         root: root.to_string(),
         options: options
             .iter()
@@ -955,6 +955,11 @@ fn each_kind_of_connection_says_what_it_is_missing() {
         settings(Scheme::S3, None, "", &[]).problems(),
         [P::NeedsBucket]
     );
+    let guest = ConnectionSettings {
+        username: None,
+        ..settings(Scheme::Smb, Some("nas"), "media", &[])
+    };
+    assert_eq!(guest.problems(), [P::NeedsUser]);
 
     // Complete ones are worth saving.
     assert!(
