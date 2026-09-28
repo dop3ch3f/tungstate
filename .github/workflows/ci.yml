@@ -134,9 +134,9 @@ jobs:
         if: always()
         run: docker logs tungstate-ftp
 
-  # S3 needs a service too. MinIO is the object store the suite runs against:
-  # the same API as AWS, B2 and R2, and no rename, so this is the engine's
-  # no-rename path over a second protocol.
+  # S3 needs a service too. SeaweedFS speaks the same API as AWS, B2 and R2,
+  # checks signatures, and has no rename, so this is the engine's no-rename
+  # path over a second protocol. (MinIO's images are no longer public.)
   s3:
     runs-on: ubuntu-latest
     steps:
@@ -144,14 +144,18 @@ jobs:
 
       - name: Start an S3 service
         run: |
-          docker run -d --name tungstate-minio -p 9000:9000 \
-            -e MINIO_ROOT_USER=tungstate -e MINIO_ROOT_PASSWORD=s3cret-s3cret \
-            minio/minio server /data
+          cat > "${{ runner.temp }}/s3.json" <<'JSON'
+          {"identities":[{"name":"tungstate","credentials":[{"accessKey":"tungstate","secretKey":"s3cret-s3cret"}],"actions":["Admin","Read","Write","List","Tagging"]}]}
+          JSON
+          docker run -d --name tungstate-s3 -p 9000:8333 \
+            -v "${{ runner.temp }}/s3.json:/etc/s3.json:ro" \
+            chrislusf/seaweedfs server -s3 -s3.config=/etc/s3.json -dir=/data
 
-          # Ready means a bucket exists, which needs the server answering.
+          # Ready means the bucket exists and the S3 port answers.
           for _ in $(seq 1 60); do
-            if docker exec tungstate-minio mc alias set local http://127.0.0.1:9000 tungstate s3cret-s3cret >/dev/null 2>&1 \
-              && docker exec tungstate-minio mc mb --ignore-existing local/tungstate; then
+            if docker exec tungstate-s3 sh -c "echo 's3.bucket.create -name tungstate' | weed shell" >/dev/null 2>&1 \
+              && docker exec tungstate-s3 sh -c "echo 's3.bucket.list' | weed shell" 2>/dev/null | grep -q tungstate \
+              && curl -s -o /dev/null http://127.0.0.1:9000/; then
               echo "s3 service is ready"
               exit 0
             fi
@@ -172,4 +176,4 @@ jobs:
 
       - name: S3 service log
         if: always()
-        run: docker logs tungstate-minio
+        run: docker logs tungstate-s3

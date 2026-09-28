@@ -1,17 +1,17 @@
 //! The drain and a sync, over a real S3 service.
 //!
 //! Gated behind `--features s3-integration` and pointed at a service by
-//! `TUNGSTATE_S3_*`. CI runs it on Linux against `MinIO`; an object store has
-//! no rename, so this is the engine's no-rename path over a second protocol.
+//! `TUNGSTATE_S3_*`. CI runs it on Linux against SeaweedFS; an object store
+//! has no rename, so this is the engine's no-rename path over a second
+//! protocol.
 //!
-//! Bring a service up with:
+//! Bring a service up with (`s3.json` holding one identity, `tungstate` /
+//! `s3cret-s3cret`, allowed Admin, Read, Write and List):
 //!
 //! ```text
-//! docker run -d --name tungstate-minio -p 9000:9000 \
-//!   -e MINIO_ROOT_USER=tungstate -e MINIO_ROOT_PASSWORD=s3cret-s3cret \
-//!   minio/minio server /data
-//! docker exec tungstate-minio mc alias set local http://127.0.0.1:9000 tungstate s3cret-s3cret
-//! docker exec tungstate-minio mc mb local/tungstate
+//! docker run -d --name tungstate-s3 -p 9000:8333 -v "$PWD/s3.json:/etc/s3.json:ro" \
+//!   chrislusf/seaweedfs server -s3 -s3.config=/etc/s3.json -dir=/data
+//! docker exec tungstate-s3 sh -c "echo 's3.bucket.create -name tungstate' | weed shell"
 //! ```
 #![cfg(feature = "s3-integration")]
 
