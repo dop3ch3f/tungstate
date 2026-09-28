@@ -5,6 +5,7 @@ import { computed } from "vue";
 import { useUpdate, type Waiting } from "../state/useUpdate";
 import { bytes } from "../lib/format";
 import Button from "../ui/Button.vue";
+import ActionBar from "../ui/ActionBar.vue";
 import Notice from "../ui/Notice.vue";
 import Sheet from "../ui/Sheet.vue";
 
@@ -31,13 +32,17 @@ const doing = computed(() => {
 
 <template>
   <Sheet v-if="u.showing.value && u.ready.value" of="settings" :title="`Tungstate ${u.ready.value.version}`" @dismiss="u.showing.value = false">
+    <!-- Neutral, wherever in the window it opens: the sheet is teleported to
+         the frame, so the scope is set in here. -->
+    <div data-half="settings">
     <p class="up-lede">Tungstate restarts into the new version. Anything running finishes first.</p>
     <pre class="up-notes" v-if="u.ready.value.body">{{ u.ready.value.body }}</pre>
     <p class="up-doing" v-if="doing">{{ doing }}</p>
     <Notice tone="bad" v-if="u.problem.value">{{ u.problem.value }}</Notice>
-    <div class="up-do">
-      <Button look="link" @click="u.showing.value = false">Later</Button>
+    <ActionBar pinned>
+      <Button @click="u.showing.value = false">Later</Button>
       <Button look="primary" :busy="u.step.value !== 'idle'" @click="u.apply()">Update and restart</Button>
+    </ActionBar>
     </div>
   </Sheet>
 </template>
@@ -57,5 +62,4 @@ const doing = computed(() => {
   border-radius: var(--radius);
 }
 .up-doing { font-size: var(--small); margin: 0 0 var(--s3); }
-.up-do { display: flex; justify-content: flex-end; align-items: center; gap: var(--s3); }
 </style>

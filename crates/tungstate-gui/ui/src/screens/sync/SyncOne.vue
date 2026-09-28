@@ -171,7 +171,7 @@ async function putBack(run: PastSync) {
   <div class="so">
     <Notice tone="hold" v-if="s.isHeld(sync.name)">
       Stopped keeping in step: its next run would remove files, so it waits for you.
-      <Button look="link" @click="s.look()">Look at it</Button>
+      <template #act><Button look="link" @click="s.look()">Look at it</Button></template>
     </Notice>
 
     <p class="so-says">

@@ -12,6 +12,7 @@ import { kindOf } from "../../lib/kinds";
 import { ago, plural, sentence } from "../../lib/format";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
+import RowMenu from "../../ui/RowMenu.vue";
 import Notice from "../../ui/Notice.vue";
 import Steps from "../../ui/Steps.vue";
 import Sheet from "../../ui/Sheet.vue";
@@ -75,6 +76,15 @@ async function savePassword() {
 
 /** Say what still uses it before anything is asked, and what Delete will
  *  mean: gone, or put away because History still names it. */
+/** What a row's "…" menu asked for. */
+function rowAction(id: string, item: Connection) {
+  if (id === "edit") form.value = { editing: item };
+  else if (id === "secret") {
+    changing.value = item;
+    newSecret.value = "";
+  } else if (id === "delete") void remove(item);
+}
+
 async function remove(target: Connection) {
   let uses: Awaited<ReturnType<typeof connections.uses>>;
   try {
@@ -167,11 +177,15 @@ async function remove(target: Connection) {
           <div class="cn-do">
             <Button look="link" :busy="c.checking(item.name)" @click="c.check(item.name)">Check</Button>
             <Button look="link" @click="browse(item.name)">Browse</Button>
-            <Button look="link" @click="form = { editing: item }">Edit</Button>
-            <Button look="link" v-if="item.scheme !== 'fs'" @click="changing = item; newSecret = ''">
-              {{ item.scheme === "s3" ? "Secret key" : "Password" }}
-            </Button>
-            <Button look="link" class="cn-del" :busy="doing.busy(`remove:${item.name}`)" @click="remove(item)">Delete</Button>
+            <RowMenu
+              :label="`More for ${item.name}`"
+              :items="[
+                { id: 'edit', label: 'Edit' },
+                ...(item.scheme !== 'fs' ? [{ id: 'secret', label: item.scheme === 's3' ? 'Change the secret key' : 'Change the password' }] : []),
+                { id: 'delete', label: 'Delete', danger: true, busy: doing.busy(`remove:${item.name}`) },
+              ]"
+              @pick="(id) => rowAction(id, item)"
+            />
           </div>
         </li>
       </ul>
@@ -244,8 +258,6 @@ async function remove(target: Connection) {
 .cn-fail { color: var(--bad); }
 .cn-when { color: var(--text-faint); }
 .cn-warn { grid-column: 2; color: var(--hold); line-height: 1.45; }
-/* A row's actions are one tier, links; the one that loses something is red. */
 .cn-do { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
-.cn-do .cn-del { color: var(--bad); }
 .cn-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>

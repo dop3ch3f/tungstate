@@ -25,7 +25,7 @@ button, .chrome { user-select: none; }
 :focus-visible { outline: 2px solid var(--control); outline-offset: 2px; }
 
 /* Form controls, drawn once so no screen falls back to the browser's own. */
-input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }
+input[type="checkbox"] { accent-color: var(--control); width: 14px; height: 14px; margin: 0; }
 select, input[type="text"], input[type="search"], input[type="password"], input[type="number"], input:not([type]) {
   font: inherit;
   font-size: var(--small);

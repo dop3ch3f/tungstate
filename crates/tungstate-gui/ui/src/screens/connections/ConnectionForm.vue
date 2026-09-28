@@ -2,7 +2,7 @@
      place it is, then asks only what that kind needs, each field explained.
      Check works before anything is saved. -->
 <script setup lang="ts">
-import { computed, ref, watch, nextTick, useTemplateRef } from "vue";
+import { computed, ref, watch } from "vue";
 import { connections, folders } from "../../engine/commands";
 import type { Connection, ConnectionForm, Probe } from "../../engine/types";
 import { KINDS, S3_SERVICES, kindOf, serviceOf, splitShare, type Kind, type S3Service } from "../../lib/kinds";
@@ -96,7 +96,6 @@ async function refused(): Promise<boolean> {
   return problems.value.length > 0;
 }
 
-const answer = useTemplateRef<HTMLElement>("answer");
 
 async function check() {
   checking.value = true;
@@ -110,10 +109,6 @@ async function check() {
   } finally {
     checking.value = false;
   }
-  // The answer lands above the pinned footer, often below the fold of a
-  // long form; bring it up rather than leave it half under the buttons.
-  await nextTick();
-  answer.value?.scrollIntoView({ block: "nearest" });
 }
 
 async function save() {
@@ -258,16 +253,17 @@ const verdict = computed(() => {
         This endpoint is plain http, so your files cross the network unencrypted. Your secret key never does.
       </Notice>
 
-      <Notice tone="bad" v-if="name.trim() && !nameOk">Use two or more letters, digits, dashes or underscores for the name.</Notice>
-      <Notice tone="bad" v-if="problems.length">
-        <template v-for="(p, i) in problems" :key="i">{{ p.charAt(0).toUpperCase() + p.slice(1) }}.<br v-if="i < problems.length - 1" /></template>
-      </Notice>
-      <div ref="answer" class="cf-answer">
-        <Notice v-if="verdict" :tone="verdict.ok ? 'plain' : 'bad'">{{ verdict.line }}</Notice>
-        <Notice tone="bad" v-if="trouble">{{ trouble }}</Notice>
-      </div>
-
       <ActionBar pinned>
+        <!-- What is wrong with the form, and what a check said, sit on the bar
+             itself, so neither can be scrolled out of sight behind it. -->
+        <template #above>
+          <Notice tone="bad" v-if="name.trim() && !nameOk">Use two or more letters, digits, dashes or underscores for the name.</Notice>
+          <Notice tone="bad" v-if="problems.length">
+            <template v-for="(p, i) in problems" :key="i">{{ p.charAt(0).toUpperCase() + p.slice(1) }}.<br v-if="i < problems.length - 1" /></template>
+          </Notice>
+          <Notice v-if="verdict" :tone="verdict.ok ? 'plain' : 'bad'">{{ verdict.line }}</Notice>
+          <Notice tone="bad" v-if="trouble">{{ trouble }}</Notice>
+        </template>
         <Button @click="emit('dismiss')">Cancel</Button>
         <Button :disabled="!nameOk" :busy="checking" @click="check()">Check</Button>
         <Button look="primary" :disabled="!nameOk" :busy="saving" @click="save()">
@@ -299,8 +295,6 @@ const verdict = computed(() => {
 .cf-kind span { font-size: var(--fine); color: var(--text-quiet); line-height: 1.45; }
 .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-bottom: var(--s3); }
 .cf-gap { margin-bottom: var(--s3); }
-/* Scrolled to with room for the pinned bar below it, not tucked under it. */
-.cf-answer { scroll-margin-bottom: 80px; }
 .cf-inline { display: flex; gap: var(--s2); }
 .cf-tick { display: flex; gap: var(--s2); align-items: flex-start; font-size: var(--small); margin: var(--s2) 0 var(--s3); }
 .cf-tick em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); margin-top: 2px; line-height: 1.45; }

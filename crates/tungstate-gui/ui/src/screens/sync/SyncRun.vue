@@ -125,7 +125,7 @@ async function putBack() {
       <Notice tone="bad" v-if="s.problem.value">{{ s.problem.value }}</Notice>
       <!-- Done is the usual next step; putting a run back is the exception,
            beside it at a lower weight. -->
-      <ActionBar>
+      <ActionBar class="rn-end">
         <template #say>
           <span v-if="ran.plan != null && !ran.reversible">This run deleted files outright, so it cannot be put back.</span>
         </template>
@@ -139,7 +139,9 @@ async function putBack() {
 </template>
 
 <style scoped>
-.rn { display: flex; flex-direction: column; gap: var(--s3); min-height: 0; }
+/* Fills the window, so a finished run's bar sits at its foot. */
+.rn { flex: 1; display: flex; flex-direction: column; gap: var(--s3); min-height: 0; }
+.rn-end { margin-top: auto; }
 .rn-readout { display: flex; align-items: baseline; gap: var(--s5); flex-wrap: wrap; }
 .rn-mass { font-size: var(--hero); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
 .rn-of { font-size: var(--small); color: var(--text-quiet); }

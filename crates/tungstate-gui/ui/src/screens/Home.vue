@@ -19,7 +19,6 @@ import { lately, leaf } from "../lib/lately";
 import type { FolderView, InterruptedRun, Link, Op, PastRun, PastSync, Place, SyncView } from "../engine/types";
 import Button from "../ui/Button.vue";
 import Notice from "../ui/Notice.vue";
-import AlertIcon from "../ui/AlertIcon.vue";
 import TitleBar from "../ui/TitleBar.vue";
 
 const nav = useNav();
@@ -181,28 +180,24 @@ function scanAgain(path: string) {
       <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
       <!-- One box for everything that needs you, each row with the one step
            that deals with it. A failure is red; a paused thing amber. -->
-      <ul class="needs" v-if="needs">
-        <li class="need" v-if="stranded.length === 1">
-          <AlertIcon tone="hold" class="n-hold" />
-          <span>{{ stranded[0]!.link }}: stopped part-way.</span>
-          <Button look="link" @click="pickUp(stranded[0]!.link)">Resume</Button>
-        </li>
-        <li class="need" v-else-if="stranded.length">
-          <AlertIcon tone="hold" class="n-hold" />
-          <span>{{ stranded.length }} transfers stopped part-way.</span>
-          <Button look="link" @click="nav.go('drain')">See them</Button>
-        </li>
-        <li class="need" v-for="n in trouble" :key="`t${n.at}${n.folder}`">
-          <AlertIcon tone="bad" class="n-bad" />
-          <span>{{ n.folder }}: {{ n.why }}.</span>
-          <Button look="link" @click="openNamed(n.folder)">Open {{ n.folder }}</Button>
-        </li>
-        <li class="need" v-for="g in broken" :key="`b${g.root}`" :title="g.broken ?? undefined">
-          <AlertIcon tone="bad" class="n-bad" />
-          <span>{{ g.name }}: the rules file has a mistake.</span>
-          <Button look="link" @click="openFolder(g)">Fix it</Button>
-        </li>
-      </ul>
+      <div class="needs" v-if="needs">
+        <Notice tone="hold" v-if="stranded.length === 1">
+          {{ stranded[0]!.link }}: stopped part-way.
+          <template #act><Button look="link" @click="pickUp(stranded[0]!.link)">Resume</Button></template>
+        </Notice>
+        <Notice tone="hold" v-else-if="stranded.length">
+          {{ stranded.length }} transfers stopped part-way.
+          <template #act><Button look="link" @click="nav.go('drain')">See them</Button></template>
+        </Notice>
+        <Notice tone="bad" v-for="n in trouble" :key="`t${n.at}${n.folder}`">
+          {{ n.folder }}: {{ n.why }}.
+          <template #act><Button look="link" @click="openNamed(n.folder)">Open {{ n.folder }}</Button></template>
+        </Notice>
+        <Notice tone="bad" v-for="g in broken" :key="`b${g.root}`">
+          <span :title="g.broken ?? undefined">{{ g.name }}: the rules file has a mistake.</span>
+          <template #act><Button look="link" @click="openFolder(g)">Fix it</Button></template>
+        </Notice>
+      </div>
 
       <div class="grid">
         <section class="panel">
@@ -321,22 +316,9 @@ function scanAgain(path: string) {
 .home { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
 .column { max-width: 900px; margin: 0 auto; padding: var(--s5) var(--s6) var(--s6); display: flex; flex-direction: column; gap: var(--s4); }
 h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin: 0; }
-.needs {
-  list-style: none;
-  margin: 0;
-  padding: 0 var(--s4);
-  background: var(--panel);
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--lift-panel);
-  font-size: var(--small);
-  line-height: 1.55;
-}
-.need { display: flex; align-items: flex-start; gap: var(--s2); padding: var(--s3) 0; }
-.need + .need { border-top: 1px solid var(--rule); }
-.need > span { flex: 1; min-width: 0; }
-.n-hold { --alert-icon: var(--hold); }
-.n-bad { --alert-icon: var(--bad); }
+/* Each thing that needs you is a notice of its own, with the one step that
+   deals with it. */
+.needs { display: flex; flex-direction: column; gap: var(--s2); }
 
 /* Each tile as tall as what it holds, so a busy Home still fits one screen. */
 .grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s4); align-items: start; }

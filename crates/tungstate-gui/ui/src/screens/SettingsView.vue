@@ -219,7 +219,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .st-switch { display: flex; align-items: flex-start; gap: var(--s2); font-size: var(--small); max-width: 66ch; }
 .st-switch em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.5; margin-top: 3px; }
 .st-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--s3); max-width: 66ch; }
-.st-switch input[type="radio"] { accent-color: var(--accent); margin: 2px 0 0; }
+.st-switch input[type="radio"] { accent-color: var(--control); margin: 2px 0 0; }
 .st-why { font-size: var(--small); color: var(--text-quiet); margin: 0; max-width: 70ch; line-height: 1.5; }
 .st-do { display: flex; gap: var(--s2); }
 .st-row {

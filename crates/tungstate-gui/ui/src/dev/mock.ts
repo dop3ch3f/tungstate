@@ -669,9 +669,11 @@ const scenes: Record<string, () => unknown> = {
     fill(["photos-b2", "family-photos", "https://s3.us-west-004.backblazeb2.com", "us-west-004", "2026", "0045a1b2c3", "secret"]);
     await tick();
   },
-  "connections-edit": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:first-child", "Edit"); await tick(); },
-  "connections-delete-used": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:nth-child(2)", "Delete"); await tick(); await tick(); },
-  "connections-delete-retire": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:nth-child(3)", "Delete"); await tick(); await tick(); },
+  // A row's "…" menu, open.
+  "connections-menu": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:nth-child(2)", "…"); await tick(); },
+  "connections-edit": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:first-child", "…"); await tick(); pressIn(".cn-row:first-child", "Edit"); await tick(); },
+  "connections-delete-used": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:nth-child(2)", "…"); await tick(); pressIn(".cn-row:nth-child(2)", "Delete"); await tick(); await tick(); },
+  "connections-delete-retire": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:nth-child(3)", "…"); await tick(); pressIn(".cn-row:nth-child(3)", "Delete"); await tick(); await tick(); },
   "picker-sync": async () => {
     await scenes["sync-make"]!();
     await tick();

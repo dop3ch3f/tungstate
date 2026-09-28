@@ -17,6 +17,7 @@ const TONE = { plain: "said-plain", hold: "said-hold", bad: "said-bad" } as cons
   <p class="said" :class="TONE[props.tone]">
     <AlertIcon :tone="props.tone" />
     <span class="said-text"><slot /></span>
+    <span class="said-act" v-if="$slots.act"><slot name="act" /></span>
   </p>
 </template>
 
@@ -37,7 +38,9 @@ const TONE = { plain: "said-plain", hold: "said-hold", bad: "said-bad" } as cons
   --alert-knock: var(--panel);
 }
 .said-plain { /* the default, already drawn above */ }
-.said-text { min-width: 0; }
+.said-text { flex: 1; min-width: 0; }
+/* The one step that deals with it, at the right edge, never mid-sentence. */
+.said-act { flex: none; display: flex; align-items: center; gap: var(--s3); }
 .said-hold { border-left-color: var(--hold); color: var(--text); --alert-icon: var(--hold); }
 .said-bad { border-left-color: var(--bad); color: var(--text); --alert-icon: var(--bad); }
 

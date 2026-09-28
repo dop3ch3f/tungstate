@@ -305,8 +305,8 @@ async function confirmPutBack() {
           <span v-else-if="p.undoable !== null && !justTidied">The last tidy of this folder can be undone.</span>
         </template>
         <template v-if="!f.busy.value">
+          <!-- Undo is never the main button: a reflex click must not undo. -->
           <Button
-            :look="still && p.undoable !== null ? 'primary' : undefined"
             :disabled="p.undoable === null"
             :title="p.undoable === null ? 'Nothing here has been tidied yet' : undefined"
             @click="confirmPutBack()"

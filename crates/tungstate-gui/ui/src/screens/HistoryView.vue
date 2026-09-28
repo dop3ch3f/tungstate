@@ -121,14 +121,14 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
       <TableTools v-if="ops.length" :table="table" placeholder="Filter these rows" />
       <div class="h-head" v-if="ops.length">
         <span></span>
-        <SortHead :table="table" column="kind">kind</SortHead>
-        <SortHead :table="table" column="file">file</SortHead>
-        <SortHead :table="table" column="outcome" numeric>outcome</SortHead>
-        <SortHead :table="table" column="size" numeric>size</SortHead>
-        <SortHead :table="table" column="when" numeric>when</SortHead>
+        <SortHead :table="table" column="kind">Kind</SortHead>
+        <SortHead :table="table" column="file">File</SortHead>
+        <SortHead :table="table" column="outcome" numeric>Outcome</SortHead>
+        <SortHead :table="table" column="size" numeric>Size</SortHead>
+        <SortHead :table="table" column="when" numeric>When</SortHead>
       </div>
       <p class="h-nomatch" v-if="ops.length && !table.shown.value.length">Nothing here matches that.</p>
-      <div class="h-row" v-for="op in table.shown.value" :key="op.id" :class="{ 'h-row-bad': dot(op.status) === 'h-bad' }">
+      <div class="h-row" v-for="op in table.shown.value" :key="op.id">
         <span class="h-dot" :class="dot(op.status)"></span>
         <span class="h-kind">{{ op.kind }}</span>
         <span class="h-what">
@@ -161,7 +161,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .h-head {
   grid-template-columns: 9px 72px minmax(0, 1fr) 90px 78px 118px;
   gap: var(--s2);
-  padding: 4px 0;
+  padding: 4px var(--s2);
   font-size: var(--fine);
   color: var(--text-faint);
   border-bottom: 1px solid var(--rule);
@@ -172,14 +172,14 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   font-weight: 700;
   font-family: var(--font-mono);
   padding: 5px var(--s2);
-  margin: 0 calc(var(--s2) * -1);
 }
 .h-row {
   display: grid;
   grid-template-columns: 9px 72px minmax(0, 1fr) 90px 78px 118px;
   gap: var(--s2);
   align-items: center;
-  padding: 7px 0;
+  /* Inset as the retro header band is, so rows and band share one edge. */
+  padding: 7px var(--s2);
   font-size: var(--fine);
   border-bottom: 1px solid var(--rule);
 }
@@ -196,6 +196,5 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
    nearest directories survive; `bdi` keeps the path itself reading left to right. */
 .h-dir { color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; direction: rtl; text-align: left; }
 .h-said-bad { color: var(--bad); font-weight: 600; }
-.h-row-bad { background: var(--panel); border-radius: var(--radius); }
 .h-said, .h-size, .h-when { color: var(--text-faint); text-align: right; }
 </style>

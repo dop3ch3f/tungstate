@@ -49,32 +49,30 @@ onMounted(() => d.loadAction());
         <!-- A result screen that swallows an error is a button that does
              nothing and says nothing, which is what Put it back did here. -->
         <Notice tone="bad" v-if="d.problem.value">{{ d.problem.value }}</Notice>
-        <Notice>
-          {{ files(cleared(d.cleared.value)) }}
-          {{ d.cleared.value.reversible ? "set aside" : "sent to the Trash" }}.
-          {{ bytes(d.cleared.value.bytes) }} reclaimed.
-        </Notice>
+        <!-- The result leads, as Organize's does after a tidy. -->
+        <div class="dz-result">
+          <p class="dz-big num">{{ files(cleared(d.cleared.value)) }} {{ d.cleared.value.reversible ? "set aside" : "sent to the Trash" }}</p>
+          <p class="dz-sub">{{ bytes(d.cleared.value.bytes) }} reclaimed.</p>
+        </div>
         <Notice tone="hold" v-if="d.cleared.value.dropped">
           {{ plural(d.cleared.value.dropped, "group") }} {{ d.cleared.value.dropped === 1 ? "was" : "were" }} not identical after all, and {{ d.cleared.value.dropped === 1 ? "was" : "were" }} left alone.
         </Notice>
         <Notice tone="bad" v-for="failure in d.cleared.value.failed" :key="failure">
           {{ failure }}
         </Notice>
-        <p class="dz-back" v-if="d.cleared.value.reversible">
-          Every file it set aside can go back where it was.
-        </p>
-        <p class="dz-back" v-else>
-          These are in your Trash. Only the Finder can put them back.
-        </p>
         <ActionBar class="dz-again">
-          <Button @click="d.again()">Look somewhere else</Button>
+          <template #say>
+            <span v-if="d.cleared.value.reversible">Every file it set aside can go back where it was.</span>
+            <span v-else>These are in your Trash. Only the Finder can put them back.</span>
+          </template>
           <Button @click="d.root.value && d.look(d.root.value)">Scan again</Button>
+          <!-- Undo is never the main button: a reflex click must not undo. -->
           <Button
             v-if="d.cleared.value.reversible"
-            look="primary"
             :busy="d.puttingBack()"
             @click="d.putBack()"
           >Put it back</Button>
+          <Button look="primary" @click="d.again()">Look somewhere else</Button>
         </ActionBar>
       </div>
     </div>
@@ -92,7 +90,10 @@ onMounted(() => d.loadAction());
 .head { display: flex; align-items: center; gap: var(--s3); }
 .head-out { margin-left: auto; }
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.dz-done { display: flex; flex-direction: column; gap: var(--s3); }
-.dz-back { font-size: var(--small); color: var(--text-quiet); margin: 0; }
-.dz-again { margin-top: var(--s3); }
+/* Fills the window, so the bar sits at its foot rather than mid-screen. */
+.dz-done { flex: 1; display: flex; flex-direction: column; gap: var(--s3); }
+.dz-result { display: flex; flex-direction: column; gap: var(--s1); }
+.dz-big { font-size: var(--hero); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; margin: 0; }
+.dz-sub { font-size: var(--body); color: var(--text-quiet); margin: 0; }
+.dz-again { margin-top: auto; }
 </style>

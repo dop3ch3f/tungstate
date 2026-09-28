@@ -6,6 +6,7 @@ import { CHOICES, type Link, type Place, type Preview } from "../../engine/types
 import { bytes, duration } from "../../lib/format";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
+import RowMenu from "../../ui/RowMenu.vue";
 import Notice from "../../ui/Notice.vue";
 import Empty from "../../ui/Empty.vue";
 import Sheet from "../../ui/Sheet.vue";
@@ -146,8 +147,14 @@ async function remove(link: Link) {
       <div class="lk-do">
         <Button look="primary" :busy="doing.busy(link.name)" @click="run(link.name)">Run</Button>
         <Button @click="preview(link.name)">Preview</Button>
-        <Button look="link" @click="showSetAside(link.name)">What it set aside</Button>
-        <Button look="link" :disabled="doing.busy(link.name)" @click="remove(link)">Remove</Button>
+        <RowMenu
+          :label="`More for ${link.name}`"
+          :items="[
+            { id: 'aside', label: 'What it set aside' },
+            { id: 'remove', label: 'Remove', danger: true, busy: doing.busy(link.name) },
+          ]"
+          @pick="(id) => (id === 'aside' ? showSetAside(link.name) : remove(link))"
+        />
       </div>
     </div>
 

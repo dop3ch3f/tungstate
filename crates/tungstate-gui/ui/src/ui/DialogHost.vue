@@ -3,6 +3,7 @@
 <script setup lang="ts">
 import Sheet from "./Sheet.vue";
 import Button from "./Button.vue";
+import ActionBar from "./ActionBar.vue";
 import { dialog, answer } from "./useDialog";
 import { useNav } from "../nav";
 
@@ -21,19 +22,21 @@ const nav = useNav();
       <input type="checkbox" v-model="dialog.checked.value" />
       {{ dialog.open.value.checkbox }}
     </label>
-    <div class="choices">
+    <ActionBar>
       <Button
         v-for="choice in dialog.open.value.choices"
         :key="choice.id"
         :look="choice.look ?? 'plain'"
         @click="answer(choice.id)"
       >{{ choice.label }}</Button>
-    </div>
+    </ActionBar>
   </Sheet>
 </template>
 
 <style scoped>
 .blurb { font-size: var(--small); color: var(--text-quiet); margin: 0; line-height: 1.55; }
+/* Room between what the question says and the bar that answers it. */
+.blurb, .particulars, .optin { margin-bottom: var(--s4); }
 .particulars { margin: var(--s3) 0 0; padding-left: var(--s4); font-size: var(--small); color: var(--text-quiet); }
 .particulars li { margin-bottom: var(--s1); }
 .optin {
@@ -44,5 +47,4 @@ const nav = useNav();
   color: var(--text-quiet);
   margin-top: var(--s3);
 }
-.choices { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>
