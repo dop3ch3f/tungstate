@@ -78,7 +78,7 @@ mod tests {
 
     #[test]
     fn a_name_smb_would_read_as_a_way_out_is_refused() {
-        for sneaky in [r"a\..\..\etc", r"x\y", "file.txt:hidden", "..", "a/../b"] {
+        for sneaky in [r"a\..\..\etc", "file.txt:hidden", "..", "a/../b"] {
             assert!(
                 matches!(
                     parts(Path::new(sneaky)),
@@ -91,6 +91,17 @@ mod tests {
             parts(&PathBuf::from("/etc/passwd")),
             Err(BackendError::PathNotRelative(_))
         ));
+        // One name holding a backslash on macOS and Linux, which SMB would
+        // read as a way into another folder. On Windows the backslash already
+        // separated it into two ordinary parts before it got here.
+        if cfg!(windows) {
+            assert_eq!(parts(Path::new(r"x\y")).unwrap(), ["x", "y"]);
+        } else {
+            assert!(matches!(
+                parts(Path::new(r"x\y")),
+                Err(BackendError::PathEscapesRoot(_))
+            ));
+        }
     }
 
     #[test]
