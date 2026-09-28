@@ -65,11 +65,14 @@ const useful = computed(() =>
   cursor: pointer;
 }
 .tt-chip:hover { color: var(--text); background: var(--surface-hover); }
-.tt-on { color: var(--text); background: var(--surface-raised); font-weight: 700; }
+/* On is unmistakable: ink, with the words in the paper's colour. */
+.tt-on { color: var(--panel); background: var(--text); border-color: var(--text); font-weight: 700; }
+.tt-on .tt-n { color: var(--panel); }
+.tt-on:hover { color: var(--panel); background: var(--text); }
 .tt-n { color: var(--text-faint); font-variant-numeric: tabular-nums; }
 .tt-count { font-size: var(--fine); color: var(--text-faint); margin-left: auto; }
 .tt-clear { font: inherit; background: none; border: none; padding: 0 0 0 var(--s2); color: var(--text); text-decoration: underline; cursor: pointer; }
 /* Retro: chips are the same outlined blocks as every other control. */
 :global([data-theme="retro"] .tt-chip) { border-width: var(--bw); border-radius: var(--radius); }
-:global([data-theme="retro"] .tt-on) { box-shadow: var(--lift); }
+
 </style>

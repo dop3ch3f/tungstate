@@ -566,3 +566,19 @@ You chose to commit Sync and do those next, across the whole app.
 - Done leads with what was set aside. The start screen says less, and places
   looked at before are rows.
 - Run tables show their filters only past six rows.
+
+### History (critic 6 → 6)
+
+- An intro line replaces the form label. The field says what it takes, the
+  button says Find, and the hint under it is right ("Searching by path").
+- Rows sit under their day, with only the time in the row. Each row says
+  what changed: a name ("archive.zip.d → Documents"), a folder ("into
+  Archives"), or two places ("…/messy-downloads → area51:media/incoming").
+- The Outcome column went. It was empty for everything that worked, so a
+  failure now says why under its file.
+- A search leads with where the file is now, then its story oldest first,
+  without filters. Nothing found is one honest empty state with the way back.
+- A chosen filter chip is ink, in every list.
+
+The critic's remaining asks (a timeline grouped by run, retry beside a
+failure) need the engine, and are left for later.

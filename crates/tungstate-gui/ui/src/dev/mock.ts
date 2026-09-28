@@ -194,7 +194,13 @@ mockIPC((cmd, args) => {
         : outcomes("messy-downloads", fx.preview["messy-downloads"].bytes);
     case "folder_preview": return byRoot(a.root);
     case "rules_text": return learned.as_is;
-    case "recent": case "history": case "whereis": return ops;
+    case "recent": return ops;
+    // A search the harness knows nothing about finds nothing, as it would.
+    case "history": case "whereis": {
+      // A file's own story: the operations that touched something of its name.
+      const name = String(a.path ?? a.target ?? "").split("/").pop() ?? "";
+      return ops.filter((op) => `${op.source ?? ""} ${op.destination ?? ""}`.includes(name) && name.length > 0);
+    }
     case "past_tidies": return pastTidies;
     case "past_cleanups": return pastCleanups;
     case "recent_scans": return [`${DEMO}/Downloads`, `${DEMO}/messy-downloads`, `${DEMO}/real-shape-media`];
@@ -807,6 +813,9 @@ const scenes: Record<string, () => unknown> = {
     await tab(1);
     t.deaf.value = "This window cannot hear the engine, so a running transfer will report nothing here. Transfers themselves are unaffected.";
   },
+  // A search that finds a file's story, and the list narrowed to failures.
+  "history-found": async () => { nav.go("history"); await tick(); type("input", "~/Downloads/archive.zip"); click(".h-find button"); await tick(); },
+  "history-failed": async () => { nav.go("history"); await tick(); await tick(); pressIn(".tt", "failed"); await tick(); },
   "history-nothing-found": async () => { nav.go("history"); await tick(); type("input", "nothing like this"); click(".h-find button"); },
   "sync-start": async () => { nav.go("sync"); await sy.load(); },
   "sync-make": async () => { nav.go("sync"); await sy.load(); sy.making(); },
