@@ -16,9 +16,9 @@ export interface KindInfo {
 
 export const KINDS: KindInfo[] = [
   { id: "smb", label: "A shared folder", tag: "SMB", line: "Windows file sharing. Most NAS boxes and other computers offer it, and nothing needs mounting." },
-  { id: "ftps", label: "FTP over TLS", tag: "FTPS", line: "FTP with the password and the files encrypted." },
-  { id: "s3", label: "S3 storage", tag: "S3", line: "A bucket on AWS, Backblaze B2, Cloudflare R2, MinIO, or a NAS's own object store." },
   { id: "fs", label: "A folder this Mac can reach", tag: "Folder", line: "A drive or a share that is already mounted, reached like any folder." },
+  { id: "s3", label: "S3 storage", tag: "S3", line: "A bucket on AWS, Backblaze B2, Cloudflare R2, MinIO, or a NAS's own object store." },
+  { id: "ftps", label: "FTP over TLS", tag: "FTPS", line: "FTP with the password and the files encrypted." },
   { id: "ftp", label: "FTP", tag: "FTP", line: "Plain FTP. The password and the files cross the network unencrypted." },
 ];
 

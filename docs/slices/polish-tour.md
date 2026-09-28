@@ -464,3 +464,27 @@ What changed in the window:
 
 Left: a "…" menu for a pair's lesser actions, place names over the two panes,
 and retry for a failed file, which needs an engine command.
+
+### Connections (critic 6.5/10 → 7.5/10)
+
+- Rows sit on fixed columns, so every status starts at the same place. A
+  place stays on one line (whole in its tooltip); a check reads as a
+  sentence with a relative time, engine backticks removed; a connection
+  never checked gets a grey dot rather than none.
+- The kind picker wears the same badges as the rows, in the order people
+  reach for them: shared folder, a folder this Mac can reach, S3, FTPS, FTP.
+- The form opens on one line, "SMB A shared folder · Change", drops the
+  command-line hint, and pins Cancel, Check and Add to the bottom of the
+  sheet; after Check the answer scrolls into view above them. Editing shows
+  the name as the title instead of a disabled box.
+- Delete asks before it marks anything busy (the busy dot used to sit beside
+  the link for as long as the question was up), and says the retire case in
+  one sentence.
+- The place picker shows each connection's last check, with a failed one
+  said in words.
+- `DialogHost` gives every question the tile of the section that asked it.
+  They all wore Settings's.
+
+Left, for shared pieces: a "…" menu for rows with many actions (here and on
+saved pairs). And the engine's check wording ("refused the credentials it
+was given", "6 things in media") could be shorter at the source.

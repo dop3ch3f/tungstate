@@ -643,7 +643,7 @@ const scenes: Record<string, () => unknown> = {
   "connections-add": async () => { nav.go("connections"); await tick(); press("Add a connection"); await tick(); },
   "connections-add-smb": async () => {
     await scenes["connections-add"]!();
-    press("A shared folder");
+    press("SMB");
     await tick();
     fill(["area51", "area51.local", "media", "backups", "me", "hunter2"]);
     await tick();
@@ -652,7 +652,7 @@ const scenes: Record<string, () => unknown> = {
   },
   "connections-add-smb-problem": async () => {
     await scenes["connections-add"]!();
-    press("A shared folder");
+    press("SMB");
     await tick();
     fill(["area51", "area51.local", "", "", "me"]);
     await tick();

@@ -2,7 +2,7 @@
      place it is, then asks only what that kind needs, each field explained.
      Check works before anything is saved. -->
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, watch, nextTick, useTemplateRef } from "vue";
 import { connections, folders } from "../../engine/commands";
 import type { Connection, ConnectionForm, Probe } from "../../engine/types";
 import { KINDS, S3_SERVICES, kindOf, serviceOf, splitShare, type Kind, type S3Service } from "../../lib/kinds";
@@ -95,6 +95,8 @@ async function refused(): Promise<boolean> {
   return problems.value.length > 0;
 }
 
+const answer = useTemplateRef<HTMLElement>("answer");
+
 async function check() {
   checking.value = true;
   trouble.value = null;
@@ -107,6 +109,10 @@ async function check() {
   } finally {
     checking.value = false;
   }
+  // The answer lands above the pinned footer, often below the fold of a
+  // long form; bring it up rather than leave it half under the buttons.
+  await nextTick();
+  answer.value?.scrollIntoView({ block: "nearest" });
 }
 
 async function save() {
@@ -148,7 +154,7 @@ const verdict = computed(() => {
       <p class="cf-why">What kind of place is it?</p>
       <div class="cf-kinds">
         <button v-for="k in KINDS" :key="k.id" class="cf-kind" @click="kind = k.id">
-          <b>{{ k.label }}</b>
+          <b><span class="cf-tag">{{ k.tag }}</span> {{ k.label }}</b>
           <span>{{ k.line }}</span>
         </button>
       </div>
@@ -156,21 +162,20 @@ const verdict = computed(() => {
 
     <template v-else>
       <p class="cf-why">
-        {{ info?.line }}
-        <Button v-if="!was" look="link" @click="kind = null">Choose another kind</Button>
+        <span class="cf-tag">{{ info?.tag }}</span> {{ info?.label }}
+        <Button v-if="!was" look="link" @click="kind = null">Change</Button>
       </p>
 
-      <div class="cf-grid">
-        <!-- Disabled rather than hidden on edit: it answers "which one am I
-             changing?", and it cannot change, because saved pairs and the
-             stored password are both filed under it. -->
-        <Field label="Name" :note="was ? 'Saved pairs and the stored password use this name, so it cannot change.' : 'Short, like nas. You would type it before a colon: nas:photos.'">
-          <input v-model="name" :disabled="!!was" placeholder="nas" spellcheck="false" />
+      <!-- On edit the name is said, not offered: saved pairs and the stored
+           password are both filed under it, so it cannot change. -->
+      <div class="cf-grid" v-if="!was">
+        <Field label="Name" note="Short, like nas.">
+          <input v-model="name" placeholder="nas" spellcheck="false" />
         </Field>
       </div>
 
       <template v-if="kind === 'fs'">
-        <Field label="Folder" note="Everything browsed or sent is inside this folder. A mounted share is in /Volumes.">
+        <Field class="cf-gap" label="Folder" note="Everything browsed or sent is inside this folder. A mounted share is in /Volumes.">
           <div class="cf-inline">
             <input v-model="root" placeholder="/Volumes/nas" spellcheck="false" />
             <Button @click="chooseFolder()">Choose…</Button>
@@ -187,7 +192,7 @@ const verdict = computed(() => {
             <input v-model="share" placeholder="media" spellcheck="false" />
           </Field>
         </div>
-        <Field label="Folder inside the share" note="Optional. Everything is kept inside it.">
+        <Field class="cf-gap" label="Folder inside the share" note="Optional. Everything is kept inside it.">
           <input v-model="inside" placeholder="backups" spellcheck="false" />
         </Field>
       </template>
@@ -197,7 +202,7 @@ const verdict = computed(() => {
           <Field label="Server"><input v-model="host" placeholder="nas.local" spellcheck="false" /></Field>
           <Field label="Port" note="Leave blank for the usual one."><input v-model="port" placeholder="21" spellcheck="false" /></Field>
         </div>
-        <Field label="Folder to start from" note="A path on the server. It is often not where you land when you sign in; Check shows what is really there.">
+        <Field class="cf-gap" label="Folder to start from" note="A path on the server. It is often not where you land when you sign in; Check shows what is really there.">
           <input v-model="root" placeholder="/volume1/media" spellcheck="false" />
         </Field>
       </template>
@@ -219,7 +224,7 @@ const verdict = computed(() => {
             <input v-model="region" :placeholder="s3Service.region || 'us-east-1'" spellcheck="false" />
           </Field>
         </div>
-        <Field label="Folder inside the bucket" note="Optional. Everything is kept inside it.">
+        <Field class="cf-gap" label="Folder inside the bucket" note="Optional. Everything is kept inside it.">
           <input v-model="root" placeholder="2026" spellcheck="false" />
         </Field>
       </template>
@@ -256,8 +261,10 @@ const verdict = computed(() => {
       <Notice tone="bad" v-if="problems.length">
         <template v-for="(p, i) in problems" :key="i">{{ p.charAt(0).toUpperCase() + p.slice(1) }}.<br v-if="i < problems.length - 1" /></template>
       </Notice>
-      <Notice v-if="verdict" :tone="verdict.ok ? 'plain' : 'bad'">{{ verdict.line }}</Notice>
-      <Notice tone="bad" v-if="trouble">{{ trouble }}</Notice>
+      <div ref="answer">
+        <Notice v-if="verdict" :tone="verdict.ok ? 'plain' : 'bad'">{{ verdict.line }}</Notice>
+        <Notice tone="bad" v-if="trouble">{{ trouble }}</Notice>
+      </div>
 
       <div class="cf-foot">
         <Button @click="emit('dismiss')">Cancel</Button>
@@ -290,8 +297,30 @@ const verdict = computed(() => {
 .cf-kind b { font-size: var(--small); }
 .cf-kind span { font-size: var(--fine); color: var(--text-quiet); line-height: 1.45; }
 .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-bottom: var(--s3); }
+.cf-gap { margin-bottom: var(--s3); }
 .cf-inline { display: flex; gap: var(--s2); }
 .cf-tick { display: flex; gap: var(--s2); align-items: flex-start; font-size: var(--small); margin: var(--s2) 0 var(--s3); }
 .cf-tick em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); margin-top: 2px; line-height: 1.45; }
-.cf-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
+/* Pinned to the bottom of the sheet, so Check and Add are in reach however
+   long the form, and a check's answer lands just above them. */
+.cf-foot {
+  position: sticky;
+  bottom: calc(var(--s4) * -1);
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--s2);
+  margin-top: var(--s4);
+  padding: var(--s3) 0 var(--s4);
+  background: var(--sheet);
+  border-top: var(--bw) solid var(--rule);
+}
+.cf-tag {
+  font-size: var(--fine);
+  font-weight: 600;
+  color: var(--text-quiet);
+  border: var(--bw) solid var(--edge);
+  border-radius: var(--radius);
+  padding: 0 5px;
+  margin-right: 2px;
+}
 </style>

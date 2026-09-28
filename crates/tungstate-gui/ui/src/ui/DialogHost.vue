@@ -4,10 +4,15 @@
 import Sheet from "./Sheet.vue";
 import Button from "./Button.vue";
 import { dialog, answer } from "./useDialog";
+import { useNav } from "../nav";
+
+// A question wears the tile of the section that asked it; without this every
+// dialog showed the default, which is Settings.
+const nav = useNav();
 </script>
 
 <template>
-  <Sheet v-if="dialog.open.value" :title="dialog.open.value.title" @dismiss="answer(null)">
+  <Sheet v-if="dialog.open.value" :of="nav.view.value" :title="dialog.open.value.title" @dismiss="answer(null)">
     <p class="blurb" v-if="dialog.open.value.why">{{ dialog.open.value.why }}</p>
     <ul class="particulars" v-if="dialog.open.value.detail?.length">
       <li v-for="line in dialog.open.value.detail" :key="line">{{ line }}</li>

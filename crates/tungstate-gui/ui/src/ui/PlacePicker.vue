@@ -104,8 +104,11 @@ const inside = computed(() => {
           :class="{ 'pp-on': inside === x.name + ':' }"
           @click="open(x.name + ':')"
         >
-          <span>{{ x.name }}</span>
-          <small>{{ kindOf(x.scheme).tag }} · {{ x.place }}</small>
+          <span>
+            <i class="pp-dot" :class="x.last_check ? (x.last_check.ok ? 'pp-ok' : 'pp-bad') : 'pp-never'"></i>{{ x.name }}
+          </span>
+          <small v-if="x.last_check && !x.last_check.ok" class="pp-fail">Last check did not work</small>
+          <small v-else>{{ kindOf(x.scheme).tag }} · {{ x.place }}</small>
         </button>
         <p class="pp-none" v-if="c.loaded.value && !c.all.value.length">None yet.</p>
         <button class="pp-place pp-more" @click="setUp()">Set up a connection…</button>
@@ -163,6 +166,12 @@ const inside = computed(() => {
 .pp-place:hover { background: var(--surface-hover); }
 .pp-on { background: var(--chosen); color: var(--chosen-ink); border-color: var(--chosen-edge); }
 .pp-more { color: var(--text-quiet); }
+/* How the connection's last check went, as on its row in Connections. */
+.pp-dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin: 0 6px 1px 0; }
+.pp-ok { background: var(--ok); }
+.pp-bad { background: var(--bad); }
+.pp-never { background: var(--text-faint); opacity: 0.5; }
+.pp-place small.pp-fail { color: var(--bad); }
 .pp-none { font-size: var(--fine); color: var(--text-faint); margin: 0 var(--s2); }
 .pp-folder { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; border-left: var(--bw) solid var(--rule); padding-left: var(--s4); }
 .pp-at { display: flex; align-items: center; gap: var(--s2); min-width: 0; }

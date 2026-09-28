@@ -9,7 +9,7 @@ import { useConnections } from "../../state/useConnections";
 import { useBusy } from "../../state/useBusy";
 import { useNav } from "../../nav";
 import { kindOf } from "../../lib/kinds";
-import { plural, when } from "../../lib/format";
+import { ago, plural, sentence } from "../../lib/format";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
@@ -36,6 +36,13 @@ const CLEAR: Record<string, string> = {
 };
 
 onMounted(() => void c.load());
+
+/** A check's result as a sentence. The engine quotes names in backticks for
+ *  its log; on screen they are just names. */
+const note = (check: { ok: boolean; note: string }) => {
+  const plain = check.note.replace(/`/g, "");
+  return check.ok ? sentence(plain) : `Did not work: ${plain}`;
+};
 
 const STEPS = [
   { art: "connections", title: "Choose what kind", line: "A NAS share, an FTP server, an S3 bucket, or a drive this Mac has mounted." },
@@ -69,35 +76,45 @@ async function savePassword() {
 /** Say what still uses it before anything is asked, and what Delete will
  *  mean: gone, or put away because History still names it. */
 async function remove(target: Connection) {
-  await doing.run(`remove:${target.name}`, async () => {
-    const uses = await connections.uses(target.name);
-    const blocking = [
-      ...uses.pairs.map((p) => `Saved pair: ${p}`),
-      ...uses.syncs.map((s) => `Sync: ${s}`),
-      ...uses.unfinished.map((u) => `Stopped part-way: ${u}`),
-    ];
-    if (blocking.length) {
-      await ask({
-        title: `${target.name} is still in use`,
-        why: "Remove these first, or finish or clear the transfers that stopped part-way. Then it can go.",
-        detail: blocking,
-        choices: [{ id: "ok", label: "OK", look: "primary" }],
-      });
-      return;
-    }
-    const answer = await ask({
-      title: `Delete ${target.name}?`,
-      why: uses.history
-        ? `History names it in ${plural(uses.history, "past transfer")}, so it is put away rather than deleted: those keep saying where their files went. Its name and its password are freed.`
-        : "It has never been used, so it goes for good, with its password.",
-      choices: [
-        { id: "no", label: "Keep it" },
-        { id: "yes", label: "Delete", look: "danger" },
-      ],
+  let uses: Awaited<ReturnType<typeof connections.uses>>;
+  try {
+    uses = await connections.uses(target.name);
+  } catch (e) {
+    doing.problem.value = String(e);
+    return;
+  }
+  // Asked outside the busy slot: a Delete link spinning behind its own
+  // question drew a stray dot beside it the whole time the question was up.
+  const blocking = [
+    ...uses.pairs.map((p) => `Saved pair: ${p}`),
+    ...uses.syncs.map((s) => `Sync: ${s}`),
+    ...uses.unfinished.map((u) => `Stopped part-way: ${u}`),
+  ];
+  if (blocking.length) {
+    await ask({
+      title: `${target.name} is still in use`,
+      why: uses.unfinished.length
+        ? "Remove these first, and resume or discard the transfers that stopped part-way. Then it can go."
+        : "Remove these first. Then it can go.",
+      detail: blocking,
+      choices: [{ id: "ok", label: "OK", look: "primary" }],
     });
-    if (answer.id !== "yes") return;
+    return;
+  }
+  const answer = await ask({
+    title: `Delete ${target.name}?`,
+    why: uses.history
+      ? `${plural(uses.history, "past transfer")} in History ${uses.history === 1 ? "mentions" : "mention"} it, so History keeps showing where those files went. The connection and its password go, and its name is free to use again.`
+      : "It has never been used, so it goes for good, with its password.",
+    choices: [
+      { id: "no", label: "Keep it" },
+      { id: "yes", label: "Delete", look: "danger" },
+    ],
+  });
+  if (answer.id !== "yes") return;
+  await doing.run(`remove:${target.name}`, async () => {
     const how = await connections.remove(target.name);
-    said.value = how === "retired" ? `Put ${target.name} away. History still shows where its files went.` : `Deleted ${target.name}.`;
+    said.value = how === "retired" ? `Deleted ${target.name}. History still shows where its files went.` : `Deleted ${target.name}.`;
     await c.load();
   });
 }
@@ -129,18 +146,21 @@ async function remove(target: Connection) {
           <div class="cn-who">
             <span class="cn-tag">{{ kindOf(item.scheme).tag }}</span>
             <b class="cn-name">{{ item.name }}</b>
-            <span class="path cn-place">{{ item.place }}</span>
+            <span class="path cn-place" :title="item.place">{{ item.place }}</span>
           </div>
           <div class="cn-state">
             <span v-if="c.checking(item.name)" class="cn-quiet">Checking…</span>
             <template v-else-if="item.last_check">
               <span class="cn-dot" :class="item.last_check.ok ? 'cn-ok' : 'cn-bad'"></span>
-              <span :class="item.last_check.ok ? 'cn-quiet' : 'cn-fail'">
-                {{ item.last_check.ok ? item.last_check.note : `Did not work: ${item.last_check.note}` }}
+              <span class="cn-said">
+                <span :class="item.last_check.ok ? 'cn-quiet' : 'cn-fail'">{{ note(item.last_check) }}</span>
+                <span class="cn-when">{{ ago(item.last_check.at) }}</span>
               </span>
-              <span class="cn-when">{{ when(item.last_check.at) }}</span>
             </template>
-            <span v-else class="cn-quiet">Not checked yet</span>
+            <template v-else>
+              <span class="cn-dot cn-never"></span>
+              <span class="cn-said cn-quiet">Not checked yet</span>
+            </template>
             <span class="cn-warn" v-if="item.clear" :title="item.clear">{{ CLEAR[item.scheme] ?? "Not encrypted" }}</span>
             <span class="cn-warn" v-if="item.rootless">{{ item.rootless }}</span>
           </div>
@@ -190,7 +210,9 @@ async function remove(target: Connection) {
 .cn-list { list-style: none; margin: 0; padding: 0; }
 .cn-row {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr) auto;
+  /* A fixed width for the actions, so every row's status starts at the same
+     place whatever its buttons say. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.25fr) 320px;
   gap: var(--s4);
   align-items: start;
   padding: var(--s3) 0;
@@ -209,15 +231,19 @@ async function remove(target: Connection) {
   padding: 0 5px;
 }
 .cn-name { font-size: var(--body); }
-.cn-place { grid-column: 2; font-size: var(--fine); color: var(--text-faint); }
-.cn-state { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--s2); font-size: var(--fine); }
-.cn-dot { width: 7px; height: 7px; border-radius: 50%; align-self: center; }
+/* One line, cut in the middle is not possible in CSS, so cut at the end; the
+   whole place is the tooltip. */
+.cn-place { grid-column: 1 / -1; font-size: var(--fine); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; }
+.cn-state { display: grid; grid-template-columns: 7px minmax(0, 1fr); align-items: baseline; gap: 2px var(--s2); font-size: var(--fine); }
+.cn-said { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.cn-dot { width: 7px; height: 7px; border-radius: 50%; transform: translateY(-1px); }
+.cn-never { background: var(--text-faint); opacity: 0.5; }
 .cn-ok { background: var(--ok); }
 .cn-bad { background: var(--bad); }
 .cn-quiet { color: var(--text-quiet); }
 .cn-fail { color: var(--bad); }
 .cn-when { color: var(--text-faint); }
-.cn-warn { flex-basis: 100%; color: var(--hold); line-height: 1.45; }
-.cn-do { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.cn-warn { grid-column: 2; color: var(--hold); line-height: 1.45; }
+.cn-do { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
 .cn-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>
