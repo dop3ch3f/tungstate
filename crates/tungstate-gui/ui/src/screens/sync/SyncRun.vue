@@ -9,6 +9,7 @@ import { toneOfOutcome } from "../../lib/tone";
 import { missed } from "../../lib/syncwords";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
 import StopPair from "../../ui/StopPair.vue";
 import Working from "../../ui/Working.vue";
@@ -122,16 +123,17 @@ async function putBack() {
       </ul>
       <SyncUndoneNotice />
       <Notice tone="bad" v-if="s.problem.value">{{ s.problem.value }}</Notice>
-      <footer class="rn-foot">
-        <!-- Done is the usual next step; putting a run back is the exception,
-             kept right beside it at a lower weight. -->
-        <Button look="primary" @click="s.back()">Done</Button>
-        <span class="rn-gap"></span>
+      <!-- Done is the usual next step; putting a run back is the exception,
+           beside it at a lower weight. -->
+      <ActionBar>
+        <template #say>
+          <span v-if="ran.plan != null && !ran.reversible">This run deleted files outright, so it cannot be put back.</span>
+        </template>
         <Button v-if="ran.plan != null && ran.reversible && !s.undone.value" :busy="s.busy.value === ran.plan" @click="putBack()">
           {{ s.busy.value === ran.plan ? "Putting back…" : "Put it back" }}
         </Button>
-        <span class="rn-hint" v-else-if="ran.plan != null && !ran.reversible">This run deleted files outright, so it cannot be put back.</span>
-      </footer>
+        <Button look="primary" @click="s.back()">Done</Button>
+      </ActionBar>
     </template>
   </div>
 </template>
@@ -139,7 +141,7 @@ async function putBack() {
 <style scoped>
 .rn { display: flex; flex-direction: column; gap: var(--s3); min-height: 0; }
 .rn-readout { display: flex; align-items: baseline; gap: var(--s5); flex-wrap: wrap; }
-.rn-mass { font-size: 30px; font-weight: 500; letter-spacing: -0.02em; }
+.rn-mass { font-size: var(--hero); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
 .rn-of { font-size: var(--small); color: var(--text-quiet); }
 .rn-of b { color: var(--text); font-weight: 600; }
 .rn-leg { font-size: var(--small); color: var(--text-faint); }
@@ -152,7 +154,7 @@ async function putBack() {
   align-items: center;
   padding: 5px 0;
   font-size: var(--fine);
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .rn-dot { width: 7px; height: 7px; border-radius: 50%; }
 .rn-plain { background: var(--text-faint); }
@@ -181,6 +183,4 @@ async function putBack() {
 .rn-missed { list-style: none; margin: 0; padding: 0; font-size: var(--fine); }
 .rn-missed li { display: flex; gap: var(--s3); padding: 3px 0; color: var(--text-quiet); }
 .rn-why { color: var(--hold); }
-.rn-foot { display: flex; align-items: center; gap: var(--s3); }
-.rn-hint { font-size: var(--fine); color: var(--text-faint); }
 </style>

@@ -9,6 +9,7 @@ import { WAYS, reason } from "../../lib/syncwords";
 import { shortPath } from "../../lib/format";
 import { useSync } from "../../state/useSync";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Field from "../../ui/Field.vue";
 import Notice from "../../ui/Notice.vue";
 import SyncSettings from "./SyncSettings.vue";
@@ -133,20 +134,22 @@ async function make() {
 
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
 
-    <footer class="mk-foot">
-      <Button look="primary" :disabled="!ready" @click="make()">{{ making ? "Making it…" : "Make the sync" }}</Button>
-      <Button look="link" @click="s.back()">Cancel</Button>
-      <span class="mk-hint" v-if="!ready && !making">{{ !name.trim() ? "Give it a name first." : "Add two folders or more first." }}</span>
-      <span class="mk-hint" v-else>Nothing moves yet. Its first run is previewed before anything is copied.</span>
-    </footer>
+    <ActionBar pinned>
+      <template #say>
+        <span v-if="!ready && !making">{{ !name.trim() ? "Give it a name first." : "Add two folders or more first." }}</span>
+        <span v-else>Nothing moves yet. Its first run is previewed before anything is copied.</span>
+      </template>
+      <Button @click="s.back()">Cancel</Button>
+      <Button look="primary" :disabled="!ready" :busy="making" @click="make()">Make the sync</Button>
+    </ActionBar>
   </div>
 </template>
 
 <style scoped>
 .mk { display: flex; flex-direction: column; gap: var(--s4); max-width: 820px; }
 .mk-block h2 { font-size: var(--small); font-weight: 700; margin: 0 0 var(--s2); }
-.mk-places { list-style: none; margin: 0 0 var(--s2); padding: 0; border-top: var(--bw) solid var(--rule); }
-.mk-place { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: var(--s3); align-items: center; padding: 6px 0; border-bottom: var(--bw) solid var(--rule); }
+.mk-places { list-style: none; margin: 0 0 var(--s2); padding: 0; border-top: 1px solid var(--rule); }
+.mk-place { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: var(--s3); align-items: center; padding: 6px 0; border-bottom: 1px solid var(--rule); }
 .mk-end { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--small); }
 .mk-name { font-size: var(--small); }
 .mk-none { font-size: var(--small); color: var(--text-faint); margin: 0 0 var(--s2); }
@@ -168,8 +171,6 @@ async function make() {
 .mk-way span { font-size: var(--fine); color: var(--text-faint); line-height: 1.45; }
 .mk-on { box-shadow: inset 0 0 0 var(--bw) var(--control), var(--lift); }
 .mk-anchor { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s3); font-size: var(--small); }
-.mk-foot { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
-.mk-hint { font-size: var(--fine); color: var(--text-faint); }
 :global([data-theme="retro"] .mk-way.mk-on) { box-shadow: inset 0 0 0 var(--bw) var(--edge), var(--lift); }
 @media (max-width: 760px) { .mk-ways { grid-template-columns: 1fr; } }
 </style>

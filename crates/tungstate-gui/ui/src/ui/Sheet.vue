@@ -78,9 +78,7 @@ onBeforeUnmount(() => {
           class="cap"
           :of="props.of ?? 'settings'"
           :title="props.title"
-          controls="live"
-          @minimize="emit('dismiss')"
-          @maximize="emit('dismiss')"
+          controls="close"
           @close="emit('dismiss')"
         />
         <div class="inside"><slot /></div>
@@ -114,7 +112,15 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
 }
-.inside { padding: var(--s5) var(--s5) var(--s4); overflow-y: auto; min-height: 0; }
+.inside {
+  padding: var(--s5) var(--s5) var(--s4);
+  overflow-y: auto;
+  min-height: 0;
+  /* An ActionBar in a sheet sits on the sheet's paper, flush with its foot. */
+  --ab-bg: var(--sheet);
+  --ab-bottom: calc(var(--s4) * -1);
+  --ab-pad: var(--s4);
+}
 .cap { padding: var(--s4) var(--s5) 0; }
 :global([data-theme="retro"] .cap) { padding: 6px 7px 6px var(--s3); }
 .panel-wide { width: min(580px, calc(100vw - var(--s6) * 2)); max-height: calc(100vh - var(--s6) * 2); overflow-y: auto; }

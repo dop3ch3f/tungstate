@@ -4,13 +4,14 @@
 
      Controls are drawn only where they do something. Home's small windows are
      shortcuts, not programs, so they have none: a button that cannot be
-     pressed is worse than no button. -->
+     pressed is worse than no button. A dialog can only be closed, so it has
+     the close button alone. -->
 <script setup lang="ts">
 import type { Section } from "../lib/icons";
 import Tile from "./Tile.vue";
 
 const props = withDefaults(
-  defineProps<{ of: Section; title: string; controls?: "live" | "none" }>(),
+  defineProps<{ of: Section; title: string; controls?: "live" | "close" | "none" }>(),
   { controls: "none" },
 );
 const emit = defineEmits<{ minimize: []; maximize: []; close: [] }>();
@@ -33,9 +34,9 @@ const CONTROLS = [
     <Tile :of="props.of" :size="20" />
     <span class="tb-title">{{ props.title }}</span>
     <span class="tb-extra"><slot /></span>
-    <span class="tb-ctl" v-if="props.controls === 'live'">
+    <span class="tb-ctl" v-if="props.controls !== 'none'">
       <button
-        v-for="c in CONTROLS"
+        v-for="c in props.controls === 'close' ? CONTROLS.filter((k) => k.id === 'close') : CONTROLS"
         :key="c.id"
         class="tb-b"
         :class="{ 'tb-close': c.id === 'close' }"

@@ -11,6 +11,7 @@ import { wouldMove, outOf, moved, skipped, failed, putBack, files, dirsCounted }
 import { ask } from "../../ui/useDialog";
 import type { TreeEntry } from "../../engine/types";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 import Working from "../../ui/Working.vue";
@@ -293,31 +294,31 @@ async function confirmPutBack() {
         <pre class="ruletext mono" v-else>{{ rules ?? "Reading the rules…" }}</pre>
       </div>
 
-      <footer class="foot">
-        <Working v-if="f.busy.value" :what="f.busy.value" note="you can leave this running" />
-        <div class="act" v-else>
-          <!-- Property 1: this button exists only here, beside the thing it
-               would do. Property 2: the way back sits next to it at the same
-               weight, and stays visible when there is nothing to undo. -->
-          <!-- The filled button is whichever one there is something to do
-               with: Tidy up while files would move, Put it back after. -->
-          <!-- Shown only when there is something it could do; Put it back is
-               the one button that stays whether or not it can be pressed. -->
-          <Button
-            v-if="!still"
-            look="primary"
-            :disabled="!!f.problem.value"
-            @click="confirmTidy()"
-          >Tidy up</Button>
+      <!-- Property 1: this button exists only here, beside the thing it
+           would do. Property 2: the way back sits next to it, and stays
+           visible when there is nothing to undo. The filled button is
+           whichever one there is something to do with: Tidy up while files
+           would move, Put it back after. -->
+      <ActionBar class="foot">
+        <template #say>
+          <Working v-if="f.busy.value" :what="f.busy.value" note="you can leave this running" />
+          <span v-else-if="p.undoable !== null && !justTidied">The last tidy of this folder can be undone.</span>
+        </template>
+        <template v-if="!f.busy.value">
           <Button
             :look="still && p.undoable !== null ? 'primary' : undefined"
             :disabled="p.undoable === null"
             :title="p.undoable === null ? 'Nothing here has been tidied yet' : undefined"
             @click="confirmPutBack()"
           >Put it back</Button>
-          <span class="safe" v-if="p.undoable !== null && !justTidied">The last tidy of this folder can be undone.</span>
-        </div>
-      </footer>
+          <Button
+            v-if="!still"
+            look="primary"
+            :disabled="!!f.problem.value"
+            @click="confirmTidy()"
+          >Tidy up</Button>
+        </template>
+      </ActionBar>
     </div>
   </div>
 </template>
@@ -362,20 +363,25 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .views button { border-radius: var(--radius); padding: var(--s1) var(--s3); }
 
 /* Retro: a tab is a block with an outline, and the one you are in is white and bold, like the section in the rail. */
+/* Retro: one joined strip in an outline, no shadow, so a tab never reads
+   as a button; the one you are in is filled and bold, like the rail. */
 :global([data-theme="retro"] .views) {
-  background: none;
+  background: var(--surface-raised);
   padding: 0;
-  gap: 4px;
-  border-radius: 0;
+  gap: 0;
+  border: var(--bw) solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 :global([data-theme="retro"] .views button) {
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius) var(--radius) 0 0;
-  background: var(--surface-raised);
+  border: none;
+  border-right: var(--bw) solid var(--edge);
+  border-radius: 0;
+  background: none;
   color: var(--text);
   padding: 5px var(--s3);
-  box-shadow: 2px 0 0 var(--edge);
 }
+:global([data-theme="retro"] .views button:last-child) { border-right: none; }
 :global([data-theme="retro"] .views .von) {
   background: var(--chosen);
   color: var(--chosen-ink);
@@ -435,10 +441,10 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   padding: var(--s1) 0;
   font-size: var(--fine);
   color: var(--text-quiet);
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .becomes { font-size: var(--small); color: var(--text-faint); }
-.mhead { display: flex; gap: var(--s5); font-size: var(--fine); color: var(--text-faint); padding: 4px 0; border-bottom: var(--bw) solid var(--rule); }
+.mhead { display: flex; gap: var(--s5); font-size: var(--fine); color: var(--text-faint); padding: 4px 0; border-bottom: 1px solid var(--rule); }
 :global([data-theme="retro"] .mhead) { background: var(--surface-raised); color: var(--text); font-weight: 700; font-family: var(--font-mono); padding: 5px var(--s2); }
 .to { color: var(--text); }
 .alone .reason { color: var(--text-faint); margin-left: auto; }
@@ -451,16 +457,5 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   color: var(--text-quiet);
 }
 
-.foot {
-  margin-top: auto;
-  padding: var(--s3) var(--s4);
-  margin-bottom: var(--s3);
-  flex: none;
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  box-shadow: var(--lift-panel);
-}
-.act { display: flex; align-items: center; gap: var(--s3); }
-.safe { font-size: var(--small); color: var(--text-faint); }
+.foot { margin-top: auto; flex: none; }
 </style>

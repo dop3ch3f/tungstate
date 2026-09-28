@@ -12,6 +12,7 @@ import { latest } from "../lib/latest";
 import { kindOf } from "../lib/kinds";
 import Sheet from "./Sheet.vue";
 import Button from "./Button.vue";
+import ActionBar from "./ActionBar.vue";
 import Notice from "./Notice.vue";
 import type { Section } from "../lib/icons";
 
@@ -133,12 +134,12 @@ const inside = computed(() => {
     </div>
     <Notice tone="bad" v-if="problem && !props.browse">{{ problem }}</Notice>
 
-    <div class="pp-foot">
+    <ActionBar pinned>
       <Button @click="emit('dismiss')">Cancel</Button>
       <Button v-if="props.browse" look="primary" :disabled="!here || loading" @click="here && emit('chosen', here)">
         {{ props.choose }}
       </Button>
-    </div>
+    </ActionBar>
   </Sheet>
 </template>
 
@@ -173,7 +174,7 @@ const inside = computed(() => {
 .pp-never { background: var(--text-faint); opacity: 0.5; }
 .pp-place small.pp-fail { color: var(--bad); }
 .pp-none { font-size: var(--fine); color: var(--text-faint); margin: 0 var(--s2); }
-.pp-folder { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; border-left: var(--bw) solid var(--rule); padding-left: var(--s4); }
+.pp-folder { display: flex; flex-direction: column; gap: var(--s2); min-width: 0; border-left: 1px solid var(--rule); padding-left: var(--s4); }
 .pp-at { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
 .pp-path { font-size: var(--fine); color: var(--text-quiet); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; }
 .pp-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; max-height: 300px; }
@@ -185,12 +186,11 @@ const inside = computed(() => {
   text-align: left;
   background: none;
   border: none;
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
   color: var(--text);
   padding: 6px var(--s1);
   cursor: pointer;
 }
 .pp-sub:hover { background: var(--surface-hover); }
 .pp-quiet { font-size: var(--fine); color: var(--text-faint); margin: var(--s2) 0; }
-.pp-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s4); }
 </style>

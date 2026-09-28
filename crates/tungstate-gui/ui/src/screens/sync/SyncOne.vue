@@ -9,6 +9,7 @@ import { exactly, following, reason, way, CONFLICTS } from "../../lib/syncwords"
 import { useSync } from "../../state/useSync";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Field from "../../ui/Field.vue";
 import Notice from "../../ui/Notice.vue";
 import Sheet from "../../ui/Sheet.vue";
@@ -216,14 +217,13 @@ async function putBack(run: PastSync) {
     <Sheet v-if="editing" wide of="sync" :title="`Settings for ${sync.name}`" @dismiss="editing = null">
       <SyncSettings v-model="editing" />
       <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
-      <footer class="so-foot">
+      <ActionBar pinned>
         <!-- Rarely wanted and never undone by accident: here rather than
              beside Preview on the sync's page. -->
-        <Button look="danger" :busy="doing.busy('remove')" @click="removeSync()">Remove this sync</Button>
-        <span class="so-gap"></span>
-        <Button look="link" @click="editing = null">Cancel</Button>
+        <template #say><Button look="danger" :busy="doing.busy('remove')" @click="removeSync()">Remove this sync</Button></template>
+        <Button @click="editing = null">Cancel</Button>
         <Button look="primary" :busy="doing.busy('save')" @click="saveSettings()">Save</Button>
-      </footer>
+      </ActionBar>
     </Sheet>
 
     <Sheet v-if="adding" of="sync" :title="`Add a folder to ${sync.name}`" @dismiss="adding = false">
@@ -245,11 +245,10 @@ async function putBack(run: PastSync) {
         @chosen="(end) => { choosing = false; picked = end; }"
       />
       <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
-      <footer class="so-foot">
-        <span class="so-gap"></span>
-        <Button look="link" @click="adding = false">Cancel</Button>
+      <ActionBar pinned>
+        <Button @click="adding = false">Cancel</Button>
         <Button look="primary" :disabled="!picked" :busy="doing.busy('add')" @click="picked && addEnd(picked)">Add</Button>
-      </footer>
+      </ActionBar>
     </Sheet>
 
     <Sheet v-if="forgetting" of="sync" title="Forget a file" @dismiss="forgetting = false">
@@ -260,18 +259,17 @@ async function putBack(run: PastSync) {
       <Field label="File or folder" note="As the preview lists it, e.g. exports/old.mp4 or a whole folder.">
         <input v-model="forgetPath" placeholder="exports/old.mp4" @keydown.enter="forget()" />
       </Field>
-      <footer class="so-foot">
-        <span class="so-gap"></span>
-        <Button look="link" @click="forgetting = false">Cancel</Button>
+      <ActionBar pinned>
+        <Button @click="forgetting = false">Cancel</Button>
         <Button look="primary" :disabled="!forgetPath.trim()" @click="forget()">Show what would go</Button>
-      </footer>
+      </ActionBar>
     </Sheet>
   </div>
 </template>
 
 <style scoped>
 .so { display: flex; flex-direction: column; gap: var(--s4); }
-.so-places { list-style: none; margin: 0; padding: 0; border-top: var(--bw) solid var(--rule); }
+.so-places { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
 /* Rows on fixed columns, as Connections has, so four folders read as a list
    rather than a wrap of tiles with one left over. */
 .so-place {
@@ -280,7 +278,7 @@ async function putBack(run: PastSync) {
   gap: var(--s3);
   align-items: baseline;
   padding: var(--s3) 0;
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
   font-size: var(--small);
 }
 .so-who { display: flex; align-items: baseline; gap: var(--s2); min-width: 0; }
@@ -295,20 +293,6 @@ async function putBack(run: PastSync) {
 .so-drop { justify-self: end; font: inherit; font-size: var(--fine); color: var(--text-faint); background: none; border: none; padding: 0; cursor: pointer; text-decoration: underline; }
 .so-says { margin: calc(-1 * var(--s2)) 0 0; font-size: var(--small); color: var(--text-quiet); display: flex; align-items: baseline; gap: var(--s2); flex-wrap: wrap; }
 .so-acts { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; }
-.so-gap { flex: 1; }
-/* Pinned to the bottom of a sheet, as the connection form's is, so Save is
-   in reach however far the settings run. */
-.so-foot {
-  position: sticky;
-  bottom: calc(var(--s4) * -1);
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  margin-top: var(--s4);
-  padding: var(--s3) 0 var(--s4);
-  background: var(--sheet);
-  border-top: var(--bw) solid var(--rule);
-}
 .so-pick { display: flex; align-items: center; gap: var(--s3); min-width: 0; }
 .so-picked { font-size: var(--small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .so-why { font-size: var(--small); color: var(--text-quiet); line-height: 1.55; margin: 0 0 var(--s3); }

@@ -9,6 +9,7 @@ import { refusal, way } from "../../lib/syncwords";
 import { launchPreviews, useSync } from "../../state/useSync";
 import { useNav } from "../../nav";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
 import Sheet from "../../ui/Sheet.vue";
 
@@ -59,14 +60,14 @@ function lookAt(sync: SyncView) {
         <Button v-if="asking.length > 1" look="link" @click="lookAt(one.sync)">Look at it first</Button>
       </li>
     </ul>
-    <footer class="la-foot">
+    <ActionBar pinned>
+      <Button @click="asking = []">Not now</Button>
       <template v-if="careful">
-        <Button look="primary" @click="lookAt(asking[0]!.sync)">Look at {{ asking.length === 1 ? "it" : asking[0]!.sync.name }} first</Button>
         <Button @click="runAll()">Run {{ asking.length === 1 ? "it" : `all ${asking.length}` }} anyway</Button>
+        <Button look="primary" @click="lookAt(asking[0]!.sync)">Look at {{ asking.length === 1 ? "it" : asking[0]!.sync.name }} first</Button>
       </template>
       <Button v-else look="primary" @click="runAll()">Run {{ asking.length === 1 ? "it" : `all ${asking.length}` }}</Button>
-      <Button look="link" @click="asking = []">Not now</Button>
-    </footer>
+    </ActionBar>
     </div>
   </Sheet>
 </template>
@@ -74,8 +75,7 @@ function lookAt(sync: SyncView) {
 <style scoped>
 .la { display: flex; flex-direction: column; }
 .la-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s3); }
-.la-one { display: flex; flex-direction: column; gap: var(--s1); padding-bottom: var(--s3); border-bottom: var(--bw) solid var(--rule); font-size: var(--small); align-items: flex-start; }
+.la-one { display: flex; flex-direction: column; gap: var(--s1); padding-bottom: var(--s3); border-bottom: 1px solid var(--rule); font-size: var(--small); align-items: flex-start; }
 .la-way { color: var(--text-quiet); }
 .la-what { color: var(--text-faint); font-size: var(--fine); }
-.la-foot { display: flex; gap: var(--s3); align-items: center; margin-top: var(--s4); }
 </style>

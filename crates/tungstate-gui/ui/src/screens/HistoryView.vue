@@ -164,7 +164,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   padding: 4px 0;
   font-size: var(--fine);
   color: var(--text-faint);
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 :global([data-theme="retro"] .h-head) {
   background: var(--surface-raised);
@@ -181,7 +181,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   align-items: center;
   padding: 7px 0;
   font-size: var(--fine);
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .h-dot { width: 7px; height: 7px; border-radius: 50%; }
 .h-plain { background: var(--text-faint); }

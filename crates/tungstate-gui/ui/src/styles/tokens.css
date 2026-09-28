@@ -62,6 +62,11 @@
   --edge-strong: var(--raw-edge-strong);
   /* A line between rows, as against the frame of a window or a button. */
   --rule: var(--edge);
+  /* An ActionBar's paper, how far below the scroll it pins, and its foot
+     padding: the window's on a page; a sheet sets its own (ui/Sheet.vue). */
+  --ab-bg: var(--window-bg);
+  --ab-bottom: 0;
+  --ab-pad: var(--s3);
   /* The fill of whatever is chosen: the section you are in, a tab, a card. */
   --chosen: var(--panel);
   --chosen-ink: var(--text);

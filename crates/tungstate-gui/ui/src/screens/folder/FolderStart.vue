@@ -134,7 +134,7 @@ const STEPS = [
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .intro {
   font-size: var(--body);
-  line-height: 1.6;
+  line-height: 1.55;
   color: var(--text-quiet);
   margin: var(--s3) 0 var(--s5);
   max-width: 62ch;

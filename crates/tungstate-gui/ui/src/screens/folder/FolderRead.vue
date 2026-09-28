@@ -10,6 +10,7 @@ import { bytes, sentence } from "../../lib/format";
 import { movedBy, made, emptied } from "../../lib/counts";
 import type { Outcome } from "../../engine/types";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 
@@ -116,7 +117,7 @@ const shape = computed(() => {
         </button>
       </div>
 
-      <footer class="foot">
+      <div class="foot">
         <p class="eg" v-if="picked?.example">
           <span class="egl">for example</span>
           <span class="path">{{ picked.example.from }}</span>
@@ -125,23 +126,25 @@ const shape = computed(() => {
         </p>
         <!-- A folder with rules of its own is tidied by them, so the step from
              here is its preview, not a second set of rules. -->
-        <div class="act" v-if="mine">
+        <ActionBar v-if="mine">
+          <template #say><span v-if="!(mine.loads && mine.settles)">Fix its rules file, then open it again.</span></template>
           <Button v-if="mine.loads && mine.settles" look="primary" :busy="!!f.busy.value" @click="f.open(f.root.value!)">
             See what its rules would move
           </Button>
-          <span class="safe" v-else>Fix its rules file, then open it again.</span>
-        </div>
-        <div class="act" v-else>
+        </ActionBar>
+        <ActionBar v-else>
+          <template #say>
+            <span v-if="picked && movedBy(picked) === 0">This way would change nothing here.</span>
+            <span v-else>You will see every move before anything happens.</span>
+          </template>
           <Button
             look="primary"
             :disabled="!picked || movedBy(picked) === 0"
             :busy="!!f.busy.value"
             @click="chosen && f.choose(chosen)"
           >{{ chosen ? `File it ${human(chosen).toLowerCase()}` : "Choose a way above" }}</Button>
-          <span class="safe" v-if="picked && movedBy(picked) === 0">This way would change nothing here.</span>
-          <span class="safe" v-else>You will see every move before anything happens.</span>
-        </div>
-      </footer>
+        </ActionBar>
+      </div>
     </div>
   </div>
 </template>
@@ -178,7 +181,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   column-gap: var(--s4);
   padding: 0 var(--s3) 7px;
   margin: 0 calc(var(--s3) * -1);
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
   font-size: var(--fine);
   color: var(--text-faint);
   white-space: nowrap;
@@ -188,8 +191,6 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   background: var(--window-bg);
   padding-top: 2px;
   font-weight: 600;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
 }
 /* Retro: the header is a band, and rows are ruled, not hairlined. */
 :global([data-theme="retro"] .key) {
@@ -197,12 +198,12 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   color: var(--text);
   font-weight: 700;
   padding: 5px var(--s3);
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
   text-transform: none;
   letter-spacing: 0;
   font-family: var(--font-mono);
 }
-:global([data-theme="retro"] .way) { border-bottom: var(--bw) solid var(--rule); border-radius: 0; }
+:global([data-theme="retro"] .way) { border-bottom: 1px solid var(--rule); border-radius: 0; }
 .kway { text-align: left; }
 .knum { text-align: right; }
 
@@ -237,18 +238,8 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .n-move { color: var(--text); }
 .way.on .num { color: var(--text); }
 
-.foot {
-  margin-top: auto;
-  padding: var(--s3) var(--s4);
-  margin-left: calc(var(--s3) * -1);
-  margin-right: calc(var(--s3) * -1);
-  margin-bottom: var(--s3);
-  flex: none;
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius-lg);
-  background: var(--panel);
-  box-shadow: var(--lift-panel);
-}
+/* Held at the bottom of the page: the example, then the action bar. */
+.foot { margin-top: auto; flex: none; }
 .eg {
   font-size: var(--fine);
   margin: 0 0 13px;
@@ -261,6 +252,4 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .egl { color: var(--text-faint); }
 .becomes { font-size: var(--small); color: var(--text-faint); }
 .to { color: var(--text); }
-.act { display: flex; align-items: center; gap: var(--s4); }
-.safe { font-size: var(--small); color: var(--text-quiet); }
 </style>

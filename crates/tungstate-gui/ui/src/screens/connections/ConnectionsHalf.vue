@@ -123,7 +123,7 @@ async function remove(target: Connection) {
 <template>
   <div class="cn">
     <div class="cn-inner">
-      <div class="cn-head">
+      <div class="cn-head head">
         <Tile of="connections" :size="26" /><h1>Connections</h1>
       </div>
       <p class="cn-lede">
@@ -165,13 +165,13 @@ async function remove(target: Connection) {
             <span class="cn-warn" v-if="item.rootless">{{ item.rootless }}</span>
           </div>
           <div class="cn-do">
-            <Button :busy="c.checking(item.name)" @click="c.check(item.name)">Check</Button>
-            <Button @click="browse(item.name)">Browse</Button>
+            <Button look="link" :busy="c.checking(item.name)" @click="c.check(item.name)">Check</Button>
+            <Button look="link" @click="browse(item.name)">Browse</Button>
             <Button look="link" @click="form = { editing: item }">Edit</Button>
             <Button look="link" v-if="item.scheme !== 'fs'" @click="changing = item; newSecret = ''">
               {{ item.scheme === "s3" ? "Secret key" : "Password" }}
             </Button>
-            <Button look="link" :busy="doing.busy(`remove:${item.name}`)" @click="remove(item)">Delete</Button>
+            <Button look="link" class="cn-del" :busy="doing.busy(`remove:${item.name}`)" @click="remove(item)">Delete</Button>
           </div>
         </li>
       </ul>
@@ -204,7 +204,7 @@ async function remove(target: Connection) {
 .cn-inner { padding: var(--win-pad); display: flex; flex-direction: column; gap: var(--s4); min-height: 100%; container-type: inline-size; }
 .cn-head { display: flex; align-items: center; gap: var(--s3); }
 .cn-head h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.cn-lede { font-size: var(--small); color: var(--text-quiet); margin: 0; max-width: 62ch; line-height: 1.5; }
+.cn-lede { font-size: var(--body); color: var(--text-quiet); margin: 0; max-width: 70ch; line-height: 1.55; }
 .cn-bar { display: flex; gap: var(--s2); }
 
 .cn-list { list-style: none; margin: 0; padding: 0; }
@@ -216,7 +216,7 @@ async function remove(target: Connection) {
   gap: var(--s4);
   align-items: start;
   padding: var(--s3) 0;
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 @container (max-width: 720px) {
   .cn-row { grid-template-columns: minmax(0, 1fr); gap: var(--s2); }
@@ -244,6 +244,8 @@ async function remove(target: Connection) {
 .cn-fail { color: var(--bad); }
 .cn-when { color: var(--text-faint); }
 .cn-warn { grid-column: 2; color: var(--hold); line-height: 1.45; }
-.cn-do { display: flex; gap: var(--s2); align-items: center; flex-wrap: wrap; }
+/* A row's actions are one tier, links; the one that loses something is red. */
+.cn-do { display: flex; gap: var(--s3); align-items: center; flex-wrap: wrap; }
+.cn-do .cn-del { color: var(--bad); }
 .cn-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>

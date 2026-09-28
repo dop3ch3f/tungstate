@@ -24,7 +24,7 @@ const heading = computed(() => {
 <template>
   <div class="sh">
     <div class="sh-inner">
-      <div class="sh-head">
+      <div class="sh-head head">
         <Tile of="sync" :size="26" /><h1>{{ heading }}</h1>
         <Button
           v-if="s.phase.value !== 'list' && s.phase.value !== 'running'"

@@ -864,7 +864,7 @@ const scenes: Record<string, () => unknown> = {
   // What each of a sync's own buttons opens.
   "sync-add": async () => { await syncAt(0); await tick(); document.querySelectorAll<HTMLButtonElement>(".so-acts button")[1]?.click(); },
   "sync-forget": async () => { await syncAt(0); await tick(); document.querySelectorAll<HTMLButtonElement>(".so-acts button")[2]?.click(); },
-  "sync-remove": async () => { await syncAt(0); await tick(); document.querySelector<HTMLButtonElement>(".so-says button")?.click(); await tick(); document.querySelector<HTMLButtonElement>(".so-foot .control-danger")?.click(); },
+  "sync-remove": async () => { await syncAt(0); await tick(); document.querySelector<HTMLButtonElement>(".so-says button")?.click(); await tick(); document.querySelector<HTMLButtonElement>(".ab .control-danger")?.click(); },
   "sync-putback-ask": async () => { await syncAt(0); await tick(); document.querySelector<HTMLButtonElement>(".sr-rows button")?.click(); },
   "sync-settings": async () => { await syncAt(0); await tick(); document.querySelector<HTMLButtonElement>(".so-says button")?.click(); },
   "sync-done-busy": async () => {

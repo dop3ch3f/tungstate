@@ -11,6 +11,7 @@ import { bytes } from "../../lib/format";
 import { extraIn, files, lookedAt } from "../../lib/counts";
 import { ask } from "../../ui/useDialog";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
 import DupesDrawers from "./DupesDrawers.vue";
 import DupesList from "./DupesList.vue";
@@ -134,14 +135,14 @@ async function go() {
         <DupesPreview v-if="roomy || showPreview" class="pane-right" />
       </div>
 
-      <footer class="foot">
-        <p class="foot-sum">
+      <ActionBar pinned>
+        <template #say><p class="foot-sum">
           <b>{{ bytes(found.reclaimable) }}</b> in
           {{ extraIn(found) }} extra {{ extraIn(found) === 1 ? "file" : "files" }}, out of {{ lookedAt(found) }} looked at.
           <span v-if="found.unchecked.length" class="foot-note">
             {{ found.unchecked.length }} could not be looked at.
           </span>
-        </p>
+        </p></template>
         <Button
           look="primary"
           :disabled="!d.chosenFiles.value"
@@ -150,7 +151,7 @@ async function go() {
           {{ doing === "trash" ? "Send" : "Set aside" }}
           {{ files(d.chosenFiles.value) }}
         </Button>
-      </footer>
+      </ActionBar>
     </template>
   </div>
 </template>
@@ -160,7 +161,7 @@ async function go() {
 .none { display: flex; flex-direction: column; align-items: flex-start; gap: var(--s3); }
 .none p { font-size: var(--body); color: var(--text-quiet); margin: 0; }
 .rules { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
-.rules-lbl { font-size: var(--fine); color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.05em; }
+.rules-lbl { font-size: var(--fine); font-weight: 600; color: var(--text-quiet); }
 .rules-gap { flex: 1; }
 .panes {
   display: grid;
@@ -168,7 +169,7 @@ async function go() {
   gap: var(--s3);
   flex: 1;
   min-height: 0;
-  border-top: var(--bw) solid var(--rule);
+  border-top: 1px solid var(--rule);
   padding-top: var(--s3);
 }
 .wide { grid-template-columns: 190px minmax(280px, 1fr) minmax(260px, 0.85fr); }
@@ -176,13 +177,6 @@ async function go() {
 .pane-left { min-height: 0; }
 .pane-mid { min-height: 0; }
 .pane-right { min-height: 0; }
-.foot {
-  display: flex;
-  align-items: center;
-  gap: var(--s4);
-  padding-top: var(--s3);
-  border-top: var(--bw) solid var(--rule);
-}
-.foot-sum { flex: 1; font-size: var(--small); color: var(--text-quiet); margin: 0; }
+.foot-sum { margin: 0; }
 .foot-note { color: var(--text-faint); }
 </style>

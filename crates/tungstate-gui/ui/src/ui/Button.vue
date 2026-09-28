@@ -60,7 +60,7 @@ const LOOK = {
   padding: 0 var(--s4);
 }
 .control-primary:hover:not(:disabled) { color: var(--control-ink); background: var(--control); filter: brightness(1.06); }
-.control-primary:disabled { background: var(--surface-raised); color: var(--disabled); border-color: var(--edge); box-shadow: none; opacity: 1; }
+.control-primary:disabled { background: var(--panel); color: var(--disabled); border-color: var(--edge); box-shadow: none; opacity: 0.6; }
 
 .control-danger { color: var(--bad); border-color: var(--bad); }
 .control-danger:hover:not(:disabled) { color: var(--bad); background: var(--surface-raised); }

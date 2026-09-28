@@ -7,6 +7,7 @@ import { CHOICES, type NewLink, type Place } from "../../engine/types";
 import Sheet from "../../ui/Sheet.vue";
 import Field from "../../ui/Field.vue";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
 import PlacePicker from "../../ui/PlacePicker.vue";
 
@@ -99,10 +100,10 @@ async function save() {
     />
 
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
-    <div class="pf-foot">
+    <ActionBar pinned>
       <Button @click="emit('dismiss')">Cancel</Button>
-      <Button look="primary" :disabled="!ready || saving" @click="save()">{{ saving ? "Saving…" : "Save the pair" }}</Button>
-    </div>
+      <Button look="primary" :disabled="!ready" :busy="saving" @click="save()">Save the pair</Button>
+    </ActionBar>
   </Sheet>
 </template>
 
@@ -111,5 +112,4 @@ async function save() {
 .pf-place { display: flex; gap: var(--s2); }
 .pf-place input { flex: 1; min-width: 0; }
 .pf-more { margin-top: var(--s3); }
-.pf-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>

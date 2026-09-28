@@ -53,7 +53,7 @@ const doing = computed(() => {
   margin: 0 0 var(--s3);
   padding: var(--s3);
   background: var(--surface);
-  border: var(--bw) solid var(--rule);
+  border: 1px solid var(--rule);
   border-radius: var(--radius);
 }
 .up-doing { font-size: var(--small); margin: 0 0 var(--s3); }

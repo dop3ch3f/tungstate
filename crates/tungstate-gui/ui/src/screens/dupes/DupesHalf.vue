@@ -8,6 +8,7 @@ import DupesStart from "./DupesStart.vue";
 import DupesScanning from "./DupesScanning.vue";
 import DupesFound from "./DupesFound.vue";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
 import Working from "../../ui/Working.vue";
 import Tile from "../../ui/Tile.vue";
@@ -65,16 +66,16 @@ onMounted(() => d.loadAction());
         <p class="dz-back" v-else>
           These are in your Trash. Only the Finder can put them back.
         </p>
-        <div class="dz-again">
+        <ActionBar class="dz-again">
+          <Button @click="d.again()">Look somewhere else</Button>
+          <Button @click="d.root.value && d.look(d.root.value)">Scan again</Button>
           <Button
             v-if="d.cleared.value.reversible"
             look="primary"
             :busy="d.puttingBack()"
             @click="d.putBack()"
           >Put it back</Button>
-          <Button @click="d.again()">Look somewhere else</Button>
-          <Button @click="d.root.value && d.look(d.root.value)">Scan again</Button>
-        </div>
+        </ActionBar>
       </div>
     </div>
   </div>
@@ -93,5 +94,5 @@ onMounted(() => d.loadAction());
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .dz-done { display: flex; flex-direction: column; gap: var(--s3); }
 .dz-back { font-size: var(--small); color: var(--text-quiet); margin: 0; }
-.dz-again { display: flex; gap: var(--s2); margin-top: var(--s3); }
+.dz-again { margin-top: var(--s3); }
 </style>

@@ -243,10 +243,10 @@ const KIND: Record<string, string> = {
   font-weight: 700;
   font-family: var(--font-mono);
 }
-:global([data-theme="retro"] .pn-row) { border-bottom: var(--bw) solid var(--rule); }
+:global([data-theme="retro"] .pn-row) { border-bottom: 1px solid var(--rule); }
 .cols {
   height: 26px;
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
   font-size: var(--fine);
   color: var(--text-faint);
 }

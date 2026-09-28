@@ -22,7 +22,7 @@ body {
 }
 
 button, .chrome { user-select: none; }
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+:focus-visible { outline: 2px solid var(--control); outline-offset: 2px; }
 
 /* Form controls, drawn once so no screen falls back to the browser's own. */
 input[type="checkbox"] { accent-color: var(--accent); width: 14px; height: 14px; margin: 0; }

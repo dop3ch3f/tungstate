@@ -140,7 +140,7 @@ async function look(at: string) {
 .dz-also { display: flex; align-items: flex-start; gap: var(--s2); font-size: var(--small); max-width: 62ch; }
 .dz-also em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.5; margin-top: 2px; }
 .dz-pick { display: flex; align-items: flex-end; gap: var(--s4); flex-wrap: wrap; }
-.dz-again h2 { font-size: var(--small); font-weight: 700; margin: 0 0 var(--s2); text-transform: uppercase; letter-spacing: 0.04em; }
+.dz-again h2 { font-size: var(--body); font-weight: 700; margin: 0 0 var(--s2); }
 .dz-recent {
   display: block;
   width: 100%;

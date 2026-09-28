@@ -228,7 +228,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
   gap: var(--s3);
   align-items: center;
   padding: var(--s2) 0;
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .st-who { display: flex; flex-direction: column; min-width: 0; }
 .st-when { font-size: var(--small); font-weight: 600; }

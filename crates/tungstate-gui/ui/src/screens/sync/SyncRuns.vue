@@ -11,7 +11,6 @@ import Button from "../../ui/Button.vue";
 import Pixels from "../../ui/Pixels.vue";
 import SortHead from "../../ui/SortHead.vue";
 import TableTools from "../../ui/TableTools.vue";
-import TitleBar from "../../ui/TitleBar.vue";
 
 const props = defineProps<{
   title: string;
@@ -41,7 +40,7 @@ const table = useTable(toRef(props, "runs"), {
 
 <template>
   <section class="sr">
-    <TitleBar of="sync" :title="props.title" />
+    <h2 class="sr-title">{{ props.title }}</h2>
     <div class="sr-body">
       <div v-if="!props.runs.length" class="sr-none">
         <Pixels of="no-history" :size="28" class="sr-none-art" />
@@ -82,15 +81,11 @@ const table = useTable(toRef(props, "runs"), {
 </template>
 
 <style scoped>
-.sr {
-  background: var(--panel);
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--lift-panel);
-  overflow: hidden;
-}
-.sr > :first-child { padding: var(--s4) var(--s4) 0; }
-.sr-body { padding: var(--s3) var(--s4) var(--s4); }
+/* Flat under a plain heading: a table inside a section's window is not a
+   window of its own. */
+.sr { display: flex; flex-direction: column; gap: var(--s2); }
+.sr-title { font-size: var(--body); font-weight: 700; margin: 0; }
+.sr-body { padding: 0; }
 .sr-none { display: flex; align-items: center; gap: var(--s3); font-size: var(--small); color: var(--text-quiet); }
 .sr-none-art { color: var(--text-faint); }
 .sr-head, .sr-row {
@@ -99,10 +94,10 @@ const table = useTable(toRef(props, "runs"), {
   gap: var(--s3);
   align-items: center;
 }
-.sr-head { font-size: var(--fine); color: var(--text-faint); padding: 5px var(--s2); border-bottom: var(--bw) solid var(--rule); }
+.sr-head { font-size: var(--fine); color: var(--text-faint); padding: 5px var(--s2); border-bottom: 1px solid var(--rule); }
 .sr-head > :nth-child(n + 3) { justify-self: end; }
 .sr-rows { list-style: none; margin: 0; padding: 0; }
-.sr-row { padding: 8px var(--s2); border-bottom: var(--bw) solid var(--rule); font-size: var(--small); }
+.sr-row { padding: 8px var(--s2); border-bottom: 1px solid var(--rule); font-size: var(--small); }
 .sr-row > :nth-child(n + 3) { justify-self: end; text-align: right; }
 .sr-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
 .sr-back .sr-dot { background: var(--text-faint); }
@@ -115,6 +110,5 @@ const table = useTable(toRef(props, "runs"), {
    it cannot be read as a link that is switched off. */
 .sr-state { color: var(--text-faint); font-size: var(--fine); font-style: italic; }
 .sr-nomatch { font-size: var(--small); color: var(--text-quiet); margin: var(--s3) 0 0; }
-:global([data-theme="retro"] .sr > :first-child) { padding: 6px 7px 6px var(--s3); }
 :global([data-theme="retro"] .sr-head) { background: var(--surface-raised); color: var(--text); font-weight: 700; font-family: var(--font-mono); }
 </style>

@@ -102,11 +102,9 @@ function isOpen(claim: Claim, kind: DupeKind | null): boolean {
   padding-right: var(--s2);
 }
 h2 {
-  font-size: var(--fine);
+  font-size: var(--small);
   font-weight: 700;
-  color: var(--text-faint);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
+  color: var(--text);
   margin: 0 0 var(--s1);
 }
 .row {
@@ -137,7 +135,7 @@ h2 {
 .k-doc { background: var(--kind-doc); }
 .k-archive { background: var(--kind-archive); }
 .k-folder { background: var(--kind-folder); }
-.chosen { margin-top: auto; padding-top: var(--s3); border-top: var(--bw) solid var(--rule); }
+.chosen { margin-top: auto; padding-top: var(--s3); border-top: 1px solid var(--rule); }
 .tick-total { font-size: var(--title); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .tick-count { font-size: var(--fine); color: var(--text-faint); margin: 2px 0 0; }
 </style>

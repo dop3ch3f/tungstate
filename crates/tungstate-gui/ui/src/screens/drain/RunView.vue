@@ -188,7 +188,7 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
 .run-verb { font-size: var(--small); color: var(--text-quiet); }
 .run-spacer { flex: 1; }
 .run-readout { display: flex; align-items: baseline; gap: var(--s5); }
-.run-mass { font-size: 30px; font-weight: 500; letter-spacing: -0.02em; }
+.run-mass { font-size: var(--hero); font-weight: 700; letter-spacing: -0.02em; line-height: 1.1; }
 .run-of { font-size: var(--small); color: var(--text-quiet); }
 .run-of b { color: var(--text); font-weight: 600; }
 .run-quiet { font-size: var(--fine); color: var(--text-faint); margin: 0; }
@@ -204,7 +204,7 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
   align-items: center;
   padding: var(--s2) 0;
   font-size: var(--small);
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
 }
 .run-place { color: var(--text-faint); font-size: var(--fine); }
 .run-row-route { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; word-break: normal; }

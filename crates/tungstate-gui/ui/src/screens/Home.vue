@@ -333,7 +333,7 @@ h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin:
   line-height: 1.55;
 }
 .need { display: flex; align-items: flex-start; gap: var(--s2); padding: var(--s3) 0; }
-.need + .need { border-top: var(--bw) solid var(--rule); }
+.need + .need { border-top: 1px solid var(--rule); }
 .need > span { flex: 1; min-width: 0; }
 .n-hold { --alert-icon: var(--hold); }
 .n-bad { --alert-icon: var(--bad); }
@@ -357,7 +357,7 @@ h1 { font-size: var(--title); font-weight: 700; letter-spacing: -0.01em; margin:
 :global([data-theme="retro"] .pb) { padding-top: var(--s2); padding-bottom: var(--s2); }
 /* The last row needs no rule of its own: the tile's edge is one. */
 .rows { list-style: none; margin: 0; padding: 0; }
-.rows li + li { border-top: var(--bw) solid var(--rule); }
+.rows li + li { border-top: 1px solid var(--rule); }
 .row {
   display: flex;
   align-items: baseline;

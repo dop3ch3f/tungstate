@@ -109,7 +109,7 @@ function toggle(row: DupeRow) {
 .sorts :deep(button) { width: auto; text-decoration: underline; text-underline-offset: 2px; }
 .nomatch { font-size: var(--small); color: var(--text-quiet); }
 .dl { overflow-y: auto; padding-right: var(--s2); }
-.group { border-bottom: var(--bw) solid var(--rule); }
+.group { border-bottom: 1px solid var(--rule); }
 .head {
   display: flex;
   align-items: center;

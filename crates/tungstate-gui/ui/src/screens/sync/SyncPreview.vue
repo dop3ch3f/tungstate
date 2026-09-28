@@ -12,6 +12,7 @@ import {
 import { bytes, when } from "../../lib/format";
 import { CONFLICTS, refusal, removedBecause, why } from "../../lib/syncwords";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
 import Pixels from "../../ui/Pixels.vue";
 
@@ -167,14 +168,16 @@ const title = computed(() =>
 
     <Notice tone="bad" v-if="s.problem.value">{{ s.problem.value }}</Notice>
 
-    <footer class="sp-foot" v-if="!p.empty">
+    <ActionBar pinned v-if="!p.empty">
+      <template #say>
+        <span class="sp-block" v-if="blocked">Tick the box above to run.</span>
+        <span v-else-if="p.reversible">Every run can be put back afterwards, from this sync's page.</span>
+      </template>
+      <Button @click="s.back()">Not now</Button>
       <Button :look="p.reversible ? 'primary' : 'danger'" :disabled="blocked || s.rechecking.value" @click="s.run()">
         {{ s.rechecking.value ? "Checking again…" : s.forgetting.value.length ? "Forget it" : p.reversible ? "Run" : `Run and delete ${deleting} ${deleting === 1 ? "file" : "files"}` }}
       </Button>
-      <Button look="link" @click="s.back()">Not now</Button>
-      <span class="sp-hint sp-block" v-if="blocked">Tick the box above to run.</span>
-      <span class="sp-hint" v-else-if="p.reversible">Every run can be put back afterwards, from this sync's page.</span>
-    </footer>
+    </ActionBar>
   </div>
 </template>
 
@@ -189,14 +192,14 @@ h2 { display: flex; align-items: center; gap: var(--s2); font-size: var(--small)
 .sp-icon { color: var(--control); }
 /* Rows on the same columns as the sync's own page: who, what happens to
    it, how much it holds. */
-.sp-members { list-style: none; margin: 0; padding: 0; border-top: var(--bw) solid var(--rule); }
+.sp-members { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
 .sp-member {
   display: grid;
   grid-template-columns: 200px minmax(0, 1fr) 120px;
   gap: var(--s3);
   align-items: baseline;
   padding: var(--s3) 0;
-  border-bottom: var(--bw) solid var(--rule);
+  border-bottom: 1px solid var(--rule);
   font-size: var(--small);
 }
 .sp-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -207,17 +210,17 @@ h2 { display: flex; align-items: center; gap: var(--s2); font-size: var(--small)
 .sp-at { font-size: var(--fine); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-holds { justify-self: end; font-size: var(--fine); color: var(--text-faint); }
 .sp-legs { margin: 0; padding-left: 1.1em; font-size: var(--small); color: var(--text-quiet); line-height: 1.6; }
+/* Outlined, not raised: shadows are kept for what is pressed or on top. */
 .sp-panel {
   padding: var(--s3) var(--s4);
   background: var(--panel);
   border: var(--bw) solid var(--edge);
   border-radius: var(--radius-lg);
-  box-shadow: var(--lift-panel);
 }
 .sp-note { font-size: var(--fine); color: var(--text-faint); margin: 0 0 var(--s3); }
 .sp-all { display: flex; align-items: center; gap: var(--s2); flex-wrap: wrap; font-size: var(--small); margin-bottom: var(--s3); }
-.sp-conflicts, .sp-list { list-style: none; margin: 0; padding: 0; border-top: var(--bw) solid var(--rule); }
-.sp-conflict { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "path pick" "versions pick"; gap: 2px var(--s3); padding: 7px 0; border-bottom: var(--bw) solid var(--rule); align-items: center; }
+.sp-conflicts, .sp-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--rule); }
+.sp-conflict { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "path pick" "versions pick"; gap: 2px var(--s3); padding: 7px 0; border-bottom: 1px solid var(--rule); align-items: center; }
 .sp-cpath { grid-area: path; font-size: var(--small); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sp-versions { grid-area: versions; display: flex; gap: var(--s3); font-size: var(--fine); color: var(--text-faint); flex-wrap: wrap; }
 .sp-pick { grid-area: pick; display: flex; }
@@ -235,38 +238,13 @@ h2 { display: flex; align-items: center; gap: var(--s2); font-size: var(--small)
 .sp-seg:first-child { border-radius: var(--radius) 0 0 var(--radius); margin-left: 0; }
 .sp-seg:last-child { border-radius: 0 var(--radius) var(--radius) 0; }
 .sp-seg-on { background: var(--control); color: var(--control-ink); font-weight: 700; }
-.sp-list li { display: flex; gap: var(--s3); justify-content: space-between; padding: 5px 0; border-bottom: var(--bw) solid var(--rule); font-size: var(--small); }
+.sp-list li { display: flex; gap: var(--s3); justify-content: space-between; padding: 5px 0; border-bottom: 1px solid var(--rule); font-size: var(--small); }
 .sp-from { color: var(--text-faint); font-size: var(--fine); white-space: nowrap; }
 .sp-group + .sp-group { margin-top: var(--s3); }
 .sp-why { font-size: var(--small); color: var(--text-quiet); margin: 0 0 var(--s2); }
 .sp-read { font-size: var(--fine); color: var(--text-faint); margin: 0; }
 .sp-refusal { display: block; }
 .sp-yes { margin-top: var(--s2); display: flex; align-items: center; gap: var(--s2); font-size: var(--small); }
-/* Pinned to the bottom of the page, so Run is in reach however long the
-   preview; it stays where it would be when the preview is short. */
-.sp-foot {
-  position: sticky;
-  bottom: 0;
-  display: flex;
-  align-items: center;
-  gap: var(--s3);
-  flex-wrap: wrap;
-  /* Wider than the column by the cards' hard shadow, so a card scrolling
-     under it is covered whole rather than showing an edge beside it. */
-  margin: 0 calc(-1 * var(--s2));
-  padding: var(--s3) var(--s2);
-  z-index: 1;
-  background: var(--window-bg);
-}
-.sp-foot::before {
-  content: "";
-  position: absolute;
-  top: 0;
-  left: var(--s2);
-  right: var(--s2);
-  border-top: var(--bw) solid var(--rule);
-}
-.sp-hint { font-size: var(--fine); color: var(--text-faint); }
 .sp-block { color: var(--hold); }
 :global([data-theme="retro"] .sp-seg-on) { background: var(--chosen); color: var(--chosen-ink); box-shadow: inset 0 0 0 var(--bw) var(--edge), var(--lift); }
 </style>

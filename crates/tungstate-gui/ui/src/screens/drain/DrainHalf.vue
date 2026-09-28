@@ -14,6 +14,7 @@ import { useConnections } from "../../state/useConnections";
 import { useNav } from "../../nav";
 import TransferSetup from "./TransferSetup.vue";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Tile from "../../ui/Tile.vue";
 import Notice from "../../ui/Notice.vue";
 import Sheet from "../../ui/Sheet.vue";
@@ -160,13 +161,15 @@ cx.browseTo.value = null;
           @selection="(names, total) => { rightPicked = names; rightWeight = total }"
         />
       </div>
-      <footer class="dh-act">
-        <span class="dh-tally" v-if="picked">{{ picked }} ticked, {{ bytes(weight) }}</span>
-        <span class="dh-tally dh-dim" v-else>Tick files on either side.</span>
-        <span class="dh-route">{{ route }}</span>
+      <ActionBar>
+        <template #say>
+          <span v-if="picked">{{ picked }} ticked, {{ bytes(weight) }}</span>
+          <span class="dh-dim" v-else>Tick files on either side.</span>
+          <span class="dh-route">{{ route }}</span>
+        </template>
         <Button :disabled="!picked" @click="setup = { legs, intent: 'copy' }">Copy</Button>
         <Button look="primary" :disabled="!picked" @click="setup = { legs, intent: 'move' }">Move</Button>
-      </footer>
+      </ActionBar>
     </div>
 
     <div class="dh-body dh-pad" v-else-if="where === 'runs'"><RunView /></div>
@@ -231,20 +234,25 @@ cx.browseTo.value = null;
 .dh-tabs .dh-on { color: var(--text); background: var(--surface-raised); }
 
 /* Retro: a tab is a block with an outline, and the one you are in is white and bold, like the section in the rail. */
+/* Retro: one joined strip in an outline, no shadow, so a tab never reads
+   as a button; the one you are in is filled and bold, like the rail. */
 :global([data-theme="retro"] .dh-tabs) {
-  background: none;
+  background: var(--surface-raised);
   padding: 0;
-  gap: 4px;
-  border-radius: 0;
+  gap: 0;
+  border: var(--bw) solid var(--edge);
+  border-radius: var(--radius);
+  overflow: hidden;
 }
 :global([data-theme="retro"] .dh-tabs button) {
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius) var(--radius) 0 0;
-  background: var(--surface-raised);
+  border: none;
+  border-right: var(--bw) solid var(--edge);
+  border-radius: 0;
+  background: none;
   color: var(--text);
   padding: 5px var(--s3);
-  box-shadow: 2px 0 0 var(--edge);
 }
+:global([data-theme="retro"] .dh-tabs button:last-child) { border-right: none; }
 :global([data-theme="retro"] .dh-tabs .dh-on) {
   background: var(--chosen);
   color: var(--chosen-ink);
@@ -258,10 +266,8 @@ cx.browseTo.value = null;
 .dh-pad { overflow-y: auto; }
 .dh-panes { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--s3); }
 
-.dh-act { display: flex; align-items: center; gap: var(--s3); }
-.dh-tally { font-size: var(--small); color: var(--text-quiet); }
 .dh-dim { color: var(--text-faint); }
-.dh-route { color: var(--text-faint); margin-right: auto; word-break: normal; }
+.dh-route { color: var(--text-faint); word-break: normal; }
 .dh-qw { font-size: var(--small); color: var(--text-quiet); margin: var(--s2) 0 0; line-height: 1.5; }
 .dh-tick { display: flex; gap: var(--s2); font-size: var(--small); color: var(--text-quiet); margin-top: var(--s3); }
 .dh-qf { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); flex-wrap: wrap; }

@@ -12,7 +12,6 @@ import Button from "./Button.vue";
 import Pixels from "./Pixels.vue";
 import SortHead from "./SortHead.vue";
 import TableTools from "./TableTools.vue";
-import TitleBar from "./TitleBar.vue";
 
 const props = defineProps<{
   of: Section;
@@ -46,7 +45,7 @@ const table = useTable(toRef(props, "runs"), {
 
 <template>
   <section class="pr">
-    <TitleBar :of="props.of" :title="props.title" />
+    <h2 class="pr-title">{{ props.title }}</h2>
     <div class="pr-body">
       <div v-if="!props.runs.length" class="pr-none">
         <Pixels of="no-history" :size="28" class="pr-none-art" />
@@ -87,15 +86,11 @@ const table = useTable(toRef(props, "runs"), {
 </template>
 
 <style scoped>
-.pr {
-  background: var(--panel);
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--lift-panel);
-  overflow: hidden;
-}
-.pr > :first-child { padding: var(--s4) var(--s4) 0; }
-.pr-body { padding: var(--s3) var(--s4) var(--s4); }
+/* Flat under a plain heading: a table inside a section's window is not a
+   window of its own. */
+.pr { display: flex; flex-direction: column; gap: var(--s2); }
+.pr-title { font-size: var(--body); font-weight: 700; margin: 0; }
+.pr-body { padding: 0; }
 .pr-none { display: flex; align-items: center; gap: var(--s3); font-size: var(--small); color: var(--text-quiet); }
 .pr-none-art { color: var(--text-faint); }
 .pr-head, .pr-row {
@@ -104,10 +99,10 @@ const table = useTable(toRef(props, "runs"), {
   gap: var(--s3);
   align-items: center;
 }
-.pr-head { font-size: var(--fine); color: var(--text-faint); padding: 5px var(--s2); border-bottom: var(--bw) solid var(--rule); }
+.pr-head { font-size: var(--fine); color: var(--text-faint); padding: 5px var(--s2); border-bottom: 1px solid var(--rule); }
 .pr-head > :nth-child(n + 3) { justify-self: end; }
 .pr-rows { list-style: none; margin: 0; padding: 0; }
-.pr-row { padding: 8px var(--s2); border-bottom: var(--bw) solid var(--rule); font-size: var(--small); }
+.pr-row { padding: 8px var(--s2); border-bottom: 1px solid var(--rule); font-size: var(--small); }
 .pr-row > :nth-child(n + 3) { justify-self: end; text-align: right; }
 .pr-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
 .pr-back .pr-dot { background: var(--text-faint); }
@@ -120,6 +115,5 @@ const table = useTable(toRef(props, "runs"), {
 .pr-state { color: var(--text-faint); font-size: var(--fine); }
 .pr-nomatch { font-size: var(--small); color: var(--text-quiet); margin: var(--s3) 0 0; }
 /* Retro: the bar is flush with the window's edges, the header a raised band. */
-:global([data-theme="retro"] .pr > :first-child) { padding: 6px 7px 6px var(--s3); }
 :global([data-theme="retro"] .pr-head) { background: var(--surface-raised); color: var(--text); font-weight: 700; font-family: var(--font-mono); }
 </style>

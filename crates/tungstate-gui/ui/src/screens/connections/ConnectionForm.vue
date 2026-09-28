@@ -10,6 +10,7 @@ import { plural } from "../../lib/format";
 import Sheet from "../../ui/Sheet.vue";
 import Field from "../../ui/Field.vue";
 import Button from "../../ui/Button.vue";
+import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
 
 const props = defineProps<{ editing: Connection | null }>();
@@ -261,18 +262,18 @@ const verdict = computed(() => {
       <Notice tone="bad" v-if="problems.length">
         <template v-for="(p, i) in problems" :key="i">{{ p.charAt(0).toUpperCase() + p.slice(1) }}.<br v-if="i < problems.length - 1" /></template>
       </Notice>
-      <div ref="answer">
+      <div ref="answer" class="cf-answer">
         <Notice v-if="verdict" :tone="verdict.ok ? 'plain' : 'bad'">{{ verdict.line }}</Notice>
         <Notice tone="bad" v-if="trouble">{{ trouble }}</Notice>
       </div>
 
-      <div class="cf-foot">
+      <ActionBar pinned>
         <Button @click="emit('dismiss')">Cancel</Button>
         <Button :disabled="!nameOk" :busy="checking" @click="check()">Check</Button>
         <Button look="primary" :disabled="!nameOk" :busy="saving" @click="save()">
           {{ was ? "Save changes" : "Add it" }}
         </Button>
-      </div>
+      </ActionBar>
     </template>
   </Sheet>
 </template>
@@ -298,22 +299,11 @@ const verdict = computed(() => {
 .cf-kind span { font-size: var(--fine); color: var(--text-quiet); line-height: 1.45; }
 .cf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-bottom: var(--s3); }
 .cf-gap { margin-bottom: var(--s3); }
+/* Scrolled to with room for the pinned bar below it, not tucked under it. */
+.cf-answer { scroll-margin-bottom: 80px; }
 .cf-inline { display: flex; gap: var(--s2); }
 .cf-tick { display: flex; gap: var(--s2); align-items: flex-start; font-size: var(--small); margin: var(--s2) 0 var(--s3); }
 .cf-tick em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); margin-top: 2px; line-height: 1.45; }
-/* Pinned to the bottom of the sheet, so Check and Add are in reach however
-   long the form, and a check's answer lands just above them. */
-.cf-foot {
-  position: sticky;
-  bottom: calc(var(--s4) * -1);
-  display: flex;
-  justify-content: flex-end;
-  gap: var(--s2);
-  margin-top: var(--s4);
-  padding: var(--s3) 0 var(--s4);
-  background: var(--sheet);
-  border-top: var(--bw) solid var(--rule);
-}
 .cf-tag {
   font-size: var(--fine);
   font-weight: 600;
