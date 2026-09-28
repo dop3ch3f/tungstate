@@ -505,26 +505,26 @@ export interface ArchiveView {
 /** The choices a link is made of, offered the same way on both surfaces. */
 export const CHOICES = {
   source_policy: [
-    ["delete", "move, deleting each original once verified"],
-    ["trash", "move, sending each original to the trash"],
-    ["keep", "copy, leaving every original alone"],
+    ["delete", "Delete each once its copy checks out"],
+    ["trash", "Send each to the Trash once checked"],
+    ["keep", "Keep them (a copy)"],
   ],
   verify: [
-    ["hash", "hash: compare fingerprints"],
-    ["size", "size: fastest, least thorough"],
-    ["readback", "readback: read it back from the far side"],
+    ["hash", "Comparing fingerprints"],
+    ["size", "Comparing sizes (fastest, least sure)"],
+    ["readback", "Reading it back from the far side"],
   ],
   order: [
-    ["largest-first", "largest first: frees space soonest"],
-    ["smallest-first", "smallest first: most files soonest"],
-    ["oldest-first", "oldest first"],
-    ["discovered", "as found"],
+    ["largest-first", "Largest first (frees space soonest)"],
+    ["smallest-first", "Smallest first (most files soonest)"],
+    ["oldest-first", "Oldest first"],
+    ["discovered", "As found"],
   ],
   on_conflict: [
-    ["quarantine", "quarantine: set it aside for you"],
-    ["rename", "rename: keep both"],
-    ["skip", "skip: leave it here"],
-    ["replace", "replace: move the existing one aside"],
+    ["quarantine", "Ask me; set it aside if I am away"],
+    ["rename", "Keep both"],
+    ["skip", "Skip it"],
+    ["replace", "Replace it, keeping the old one aside"],
   ],
 } as const;
 

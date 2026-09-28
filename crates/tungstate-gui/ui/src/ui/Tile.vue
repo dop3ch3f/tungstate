@@ -20,7 +20,7 @@ const TINT = {
 
 <template>
   <span class="tile" :class="TINT[props.of]" :style="{ width: `${size}px`, height: `${size}px` }" aria-hidden="true">
-    <svg class="line" viewBox="0 0 16 16"><path :d="ICON[props.of]" /></svg>
+    <svg class="tl-glyph" viewBox="0 0 16 16"><path :d="ICON[props.of]" /></svg>
     <Pixels class="px-mark" :of="props.of" :size="Math.round(props.size * 0.66)" />
   </span>
 </template>
@@ -33,10 +33,10 @@ const TINT = {
   border-radius: 24%;
   color: var(--tint-ink);
 }
-.line { width: 64%; height: 64%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.tl-glyph { width: 64%; height: 64%; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
 .px-mark { display: none; }
 /* Retro draws its marks as pixels; every other theme uses the line glyph. */
-:global([data-theme="retro"] .line) { display: none; }
+:global([data-theme="retro"] .tl-glyph) { display: none; }
 :global([data-theme="retro"] .px-mark) { display: block; }
 
 .t-home { background: var(--tint-home); color: var(--tint-home-ink); }

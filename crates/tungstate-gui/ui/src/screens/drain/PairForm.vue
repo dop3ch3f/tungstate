@@ -8,6 +8,7 @@ import Sheet from "../../ui/Sheet.vue";
 import Field from "../../ui/Field.vue";
 import Button from "../../ui/Button.vue";
 import Notice from "../../ui/Notice.vue";
+import PlacePicker from "../../ui/PlacePicker.vue";
 
 const props = defineProps<{ places: Place[] }>();
 const emit = defineEmits<{ dismiss: []; saved: [name: string] }>();
@@ -23,6 +24,10 @@ const form = ref<NewLink>({
   cooldown_secs: 30,
 });
 const saving = ref(false);
+/** Which end the place picker is choosing, when it is open. */
+const choosing = ref<"source" | "destination" | null>(null);
+/** The rarely-changed wait, out of the way until asked for. */
+const more = ref(false);
 const problem = ref<string | null>(null);
 const ready = computed(() => !!(form.value.name.trim() && form.value.source.trim() && form.value.destination.trim()));
 
@@ -50,14 +55,23 @@ async function save() {
 <template>
   <Sheet wide of="drain" title="A saved pair" @dismiss="emit('dismiss')">
     <p class="pf-why">
-      Two folders and what should happen between them. Nothing moves until you run it. A
-      connection is written <span class="mono">name:folder</span>, as on the command line.
+      Two folders and what happens between them. Nothing moves until you run it.
     </p>
 
     <Field label="Called"><input v-model="form.name" autocomplete="off" placeholder="laptop to nas" /></Field>
     <div class="pf-grid">
-      <Field label="From"><input v-model="form.source" list="pf-places" spellcheck="false" placeholder="/Users/you/Movies" /></Field>
-      <Field label="To"><input v-model="form.destination" list="pf-places" spellcheck="false" placeholder="nas:inbox" /></Field>
+      <Field label="From">
+        <span class="pf-place">
+          <input v-model="form.source" list="pf-places" spellcheck="false" placeholder="/Users/you/Movies" />
+          <Button @click="choosing = 'source'">Choose…</Button>
+        </span>
+      </Field>
+      <Field label="To">
+        <span class="pf-place">
+          <input v-model="form.destination" list="pf-places" spellcheck="false" placeholder="nas:inbox" />
+          <Button @click="choosing = 'destination'">Choose…</Button>
+        </span>
+      </Field>
     </div>
     <datalist id="pf-places">
       <option v-for="p in props.places" :key="p.path" :value="p.path">{{ p.label }}</option>
@@ -69,10 +83,20 @@ async function save() {
           <option v-for="[value, says] in group" :key="value" :value="value">{{ says }}</option>
         </select>
       </Field>
+    </div>
+    <Button look="link" class="pf-more" @click="more = !more">{{ more ? "Fewer options" : "More options…" }}</Button>
+    <div class="pf-grid" v-if="more">
       <Field label="Wait after a file is written" note="Seconds a file must sit unchanged before it is taken.">
         <input type="number" min="0" v-model.number="form.cooldown_secs" />
       </Field>
     </div>
+    <PlacePicker
+      v-if="choosing"
+      of="drain"
+      :title="choosing === 'source' ? 'Take files from' : 'Send files to'"
+      @dismiss="choosing = null"
+      @chosen="(at) => { form[choosing!] = at; choosing = null }"
+    />
 
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
     <div class="pf-foot">
@@ -84,5 +108,8 @@ async function save() {
 
 <style scoped>.pf-why { font-size: var(--small); color: var(--text-quiet); margin: var(--s2) 0 var(--s4); line-height: 1.5; }
 .pf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--s3); margin-top: var(--s3); }
+.pf-place { display: flex; gap: var(--s2); }
+.pf-place input { flex: 1; min-width: 0; }
+.pf-more { margin-top: var(--s3); }
 .pf-foot { display: flex; justify-content: flex-end; gap: var(--s2); margin-top: var(--s5); }
 </style>

@@ -429,3 +429,38 @@ What changed in the window:
 
 Left: one list for "Folders you have added" and "Recent tidies", and tidy
 progress, which needs the engine to report it.
+
+### Transfer (critic 6/10 → 8/10)
+
+A bug came out of this round rather than a preference. `Tile.vue` hid its
+line glyph in retro with `:global([data-theme="retro"] .line)`, and `Pane.vue`
+drew a rule under `.line` the same way. `:global` is global: `Empty.vue`'s
+sentence is also `.line`, so in retro every empty state showed its picture
+and no words. Both classes are renamed, and `check-css.mjs` has an eighth
+rule, `global-leak`: a `:global(...)` rule's subject class that another
+component also wears. It found a second one straight away (Notice's `.said`
+reaching the layout table's summary line) and flags the old `Tile.vue`.
+
+What changed in the window:
+
+- Move and Copy ask "Move 3 files to incoming?", say how much and that each
+  original goes only after its copy checks out, and keep the four settings
+  behind Options. The settings read as answers to their labels ("Comparing
+  fingerprints", "Largest first") rather than as config words.
+- The running header's big number is what its bar shows, bytes sent; files
+  "moved and checked" stays the verified count underneath.
+- A finished run is one line (set-aside count included) with failed files
+  under it; the boxed sentence remains only when a run was cut short.
+- Transfers are named by their folders ("to-drain → incoming"), with the
+  whole paths as tooltips.
+- Saved pairs: Run first and filled, Preview beside it, the rest as links;
+  one line of settings; the empty state carries its own Add button. The form
+  has Choose… buttons that open the place picker, and the rarely changed
+  wait sits behind More options.
+- The conflict question names the file and says what setting it aside does.
+  Checking the engine for that sentence showed that quarantine parks the
+  incoming file beside the one there and leaves that one alone; the button
+  says "Set this one aside".
+
+Left: a "…" menu for a pair's lesser actions, place names over the two panes,
+and retry for a failed file, which needs an engine command.

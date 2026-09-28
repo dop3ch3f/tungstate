@@ -41,6 +41,14 @@ onMounted(async () => {
 });
 
 const count = computed(() => props.legs.reduce((n, l) => n + l.names.length, 0));
+/** The settings are there for the few who want them; the defaults are safe. */
+const options = ref(false);
+const leafOf = (path: string) => path.replace(/[/:]+$/, "").split(/[/:]/).pop() || path;
+const title = computed(() => {
+  const n = `${count.value} ${count.value === 1 ? "file" : "files"}`;
+  if (props.legs.length === 2) return `Exchange ${n}?`;
+  return `${props.intent === "move" ? "Move" : "Copy"} ${n} to ${leafOf(props.legs[0]?.destination ?? "")}?`;
+});
 
 const LABELS: Record<keyof typeof CHOICES, string> = {
   source_policy: "What happens to the originals",
@@ -51,13 +59,13 @@ const LABELS: Record<keyof typeof CHOICES, string> = {
 </script>
 
 <template>
-  <Sheet of="drain" :title="props.intent === 'move' ? 'Move files' : 'Copy files'" @dismiss="emit('dismiss')">
+  <Sheet of="drain" :title="title" @dismiss="emit('dismiss')">
 
     <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
     <p class="set-looking" v-else-if="looking">Working out what would happen…</p>
     <div class="set-what" v-else-if="preview">
       <p class="set-line">
-        {{ preview.fresh }} would be sent, {{ bytes(preview.bytes) }} in all.
+        {{ preview.fresh }} {{ preview.fresh === 1 ? "file" : "files" }} to send, {{ bytes(preview.bytes) }}.
       </p>
       <p class="set-line" v-if="preview.same_size">
         {{ preview.same_size }} look identical to what is already there and will be checked rather than resent.
@@ -71,12 +79,13 @@ const LABELS: Record<keyof typeof CHOICES, string> = {
       <Notice tone="hold" v-if="preview.overlapping.length">
         One side is inside the other. That is refused rather than half-done.
       </Notice>
-      <Notice tone="hold" v-else-if="preview.removes_originals">
-        Each original is deleted only once its copy has been verified on the far side.
-      </Notice>
+      <p class="set-line" v-else-if="preview.removes_originals">
+        Each original is deleted here only after its copy checks out on the far side.
+      </p>
     </div>
 
-    <div class="set-opts">
+    <Button look="link" class="set-more" @click="options = !options">{{ options ? "Fewer options" : "Options…" }}</Button>
+    <div class="set-opts" v-if="options">
       <label v-for="(group, field) in CHOICES" :key="field">
         <span class="set-lbl">{{ LABELS[field] }}</span>
         <select
@@ -98,12 +107,12 @@ const LABELS: Record<keyof typeof CHOICES, string> = {
     </div>
 
     <div class="set-feet">
-      <Button @click="emit('dismiss')">Not now</Button>
+      <Button @click="emit('dismiss')">Cancel</Button>
       <Button
         look="primary"
         :disabled="looking || !!preview?.overlapping.length"
         @click="emit('go', request)"
-      >{{ props.intent === "move" ? "Move them" : "Copy them" }}</Button>
+      >{{ props.legs.length === 2 ? "Exchange" : props.intent === "move" ? "Move" : "Copy" }}</Button>
     </div>
   </Sheet>
 </template>
@@ -112,8 +121,9 @@ const LABELS: Record<keyof typeof CHOICES, string> = {
 .set-what { display: flex; flex-direction: column; gap: var(--s2); }
 .set-line { font-size: var(--small); color: var(--text-quiet); margin: 0; line-height: 1.5; }
 
+.set-more { align-self: flex-start; margin-top: var(--s3); }
 .set-opts { display: flex; flex-direction: column; gap: var(--s2); margin-top: var(--s4); }
-.set-opts label { display: grid; grid-template-columns: 116px 1fr; gap: var(--s3); align-items: center; }
+.set-opts label { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .set-lbl { font-size: var(--fine); color: var(--text-faint); }
 .set-opts select, .set-opts input {
   font: inherit;

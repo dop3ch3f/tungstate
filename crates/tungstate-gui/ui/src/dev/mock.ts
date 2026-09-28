@@ -214,7 +214,10 @@ mockIPC((cmd, args) => {
         ? { pairs: ["videos-to-office"], syncs: ["capcut"], unfinished: [], history: 212 }
         : { pairs: [], syncs: [], unfinished: [], history: 38 };
     case "remove_connection": return "retired";
+    case "run_link": return { started: true, waiting: 0, job: 2 };
     case "archives": return [{ name: "2026-09-20T11-02-44", archived_at: Date.now() - 86_400_000, size: 184_320, links: 2, connections: 1, operations: 412 }];
+    case "preview_transfer":
+      return { overlapping: [], fresh: 3, same_size: 0, clashes: 0, too_recent: 0, bytes: 5_452_595, removes_originals: a.request?.source_policy === "delete", items: [] };
     case "preview_link":
       return { overlapping: [], fresh: 3, same_size: 1, clashes: 1, too_recent: 0, bytes: 629_145_600, removes_originals: true,
         items: listings[`${DEMO}/nas/incoming`].entries.map((e, i) => ({ path: e.path, size: e.size, outcome: ["move", "move", "move", "check", "clash"][i] ?? "move", existing: null, towards: "forward" })) };
@@ -553,6 +556,15 @@ const scenes: Record<string, () => unknown> = {
     });
   },
   drain: () => nav.go("drain"),
+  // Three files ticked on the left, so Copy and Move come alive.
+  "drain-picked": async () => {
+    nav.go("drain");
+    const rows = () => Array.from(document.querySelectorAll<HTMLInputElement>(".dh-panes > :first-child input[type=checkbox]")).slice(1);
+    for (let i = 0; i < 20 && rows().length < 3; i++) await tick();
+    const boxes = rows();
+    for (const box of boxes.slice(0, 3)) box.click();
+    await tick();
+  },
   "drain-run": async () => {
     nav.go("drain");
     await tab(1);

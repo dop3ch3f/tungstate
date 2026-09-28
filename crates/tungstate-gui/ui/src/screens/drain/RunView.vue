@@ -3,7 +3,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 import { useTransfer, type Ran } from "../../state/useTransfer";
-import { bytes, ordinal, shortPath } from "../../lib/format";
+import { bytes, ordinal } from "../../lib/format";
 import { alreadyThere, files, inLine, sent } from "../../lib/counts";
 import type { JobView } from "../../engine/types";
 import Button from "../../ui/Button.vue";
@@ -40,10 +40,13 @@ const share = (n: number) => (total.value ? `${Math.min(100, (n / total.value) *
 const now = computed(() => t.current.value ?? t.queue.value.running);
 const waiting = computed(() => t.queue.value.waiting);
 
+/** A transfer by its two folders' names; the whole paths are its tooltip. */
+const leafOf = (path: string) => path.replace(/[/:]+$/, "").split(/[/:]/).pop() || path;
 const route = (job: JobView) =>
   job.source
-    ? `${shortPath(job.source)} ${job.exchange ? "⇄" : "→"} ${shortPath(job.destination)}`
+    ? `${leafOf(job.source)} ${job.exchange ? "⇄" : "→"} ${leafOf(job.destination)}`
     : "A transfer";
+const whole = (job: JobView) => (job.source ? `${job.source} → ${job.destination}` : "");
 const verb = (job: JobView) => (job.exchange ? "Exchange" : job.removes_originals ? "Move" : "Copy");
 const size = (job: JobView) =>
   job.files === null ? "counting…" : `${files(inLine({ ...job, files: job.files }))}, ${bytes(job.bytes ?? 0)}`;
@@ -55,8 +58,9 @@ function outcome(run: Ran): string {
   if (s.destination_lost) return "The far side disappeared";
   if (s.cancelled) return "Stopped";
   const there = s.already_present ? `${files(alreadyThere(s))} already there` : "";
+  const aside = s.quarantined ? `${s.quarantined} set aside` : "";
   const done = s.transferred || !there
-    ? [`${run.job.removes_originals ? "Moved" : "Copied"} ${files(sent(s))}, ${bytes(s.bytes)}`, there].filter(Boolean).join(", ")
+    ? [`${run.job.removes_originals ? "Moved" : "Copied"} ${files(sent(s))}, ${bytes(s.bytes)}`, there, aside].filter(Boolean).join(", ")
     : `Nothing to send: ${there}`;
   return s.failed ? `${done}. ${s.failed} failed` : done;
 }
@@ -82,22 +86,24 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
     <Empty
       v-if="!t.running.value && !waiting.length && !t.finished.value.length"
       art="no-runs"
-      line="Nothing running. Tick some files in the browser and press Copy or Move."
+      line="Nothing running. Tick files under Files to start one."
     />
 
     <section class="run-now" v-if="now">
       <div class="run-head">
-        <h2 class="path run-route">{{ route(now) }}</h2>
+        <h2 class="run-route" :title="whole(now)">{{ route(now) }}</h2>
         <span class="run-verb">{{ verb(now) }}</span>
         <span class="run-spacer"></span>
         <StopPair :stopping="t.stopping.value" :halting="t.halting.value" @stop="t.cancel()" @now="t.stopNow()" />
       </div>
       <div class="run-readout" v-if="planned">
-        <span class="run-mass num">{{ bytes(moved) }}</span>
-        <span class="run-of">moved of {{ bytes(total) }}</span>
-        <span class="run-of" v-if="onTheWay"><b class="num">{{ bytes(onTheWay) }}</b> on the way</span>
+        <!-- The big number is what the bar shows: sent so far. A file counts
+             as moved only once it is verified, so that is the second line. -->
+        <span class="run-mass num">{{ bytes(moved + onTheWay) }}</span>
+        <span class="run-of">of {{ bytes(total) }} sent</span>
         <span class="run-of">
           <b class="num">{{ t.settled.value }}</b> of <b class="num">{{ planned }}</b> files
+          {{ now.removes_originals ? "moved" : "copied" }} and checked
         </span>
       </div>
       <p class="run-quiet" v-else>Working out what to send…</p>
@@ -117,7 +123,7 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
       </div>
       <div class="run-row" v-for="(job, i) in waiting" :key="job.id">
         <span class="run-place num">{{ ordinal(i + 2) }}</span>
-        <span class="path run-row-route">{{ route(job) }}</span>
+        <span class="run-row-route" :title="whole(job)">{{ route(job) }}</span>
         <span class="run-row-what">{{ verb(job) }} · {{ size(job) }}</span>
         <Button look="link" :busy="t.unqueuing(job.id)" @click="t.unqueue(job.id)">Remove</Button>
       </div>
@@ -128,21 +134,22 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
       <template v-for="run in t.finished.value" :key="run.job.id">
         <div class="run-row">
           <span class="run-dot" :class="troubled(run) ? 't-bad' : 't-ok'"></span>
-          <span class="path run-row-route">{{ route(run.job) }}</span>
+          <span class="run-row-route" :title="whole(run.job)">{{ route(run.job) }}</span>
           <span class="run-row-what">{{ outcome(run) }}</span>
           <Button look="link" @click="toggle(run.job.id)">{{ open === run.job.id ? "Hide" : "Details" }}</Button>
         </div>
         <div class="run-open" v-if="open === run.job.id">
           <Notice tone="bad" v-if="run.problem">{{ run.problem }}</Notice>
-          <Notice v-if="run.summary" :tone="run.summary.failed || run.summary.destination_lost ? 'bad' : 'plain'">
+          <!-- The row already says how it ended; this says only what the row
+               cannot: that it was cut short, and what that meant. -->
+          <Notice v-if="run.summary && (run.summary.destination_lost || run.summary.cancelled)" :tone="run.summary.destination_lost ? 'bad' : 'plain'">
             <template v-if="run.summary.destination_lost">
               The far side disappeared part-way through. Nothing was deleted that had not arrived.
             </template>
             <template v-else-if="run.summary.cancelled">Stopped when you asked.</template>
-            <template v-else>Finished.</template>
             {{ run.job.removes_originals ? "Moved" : "Copied" }} {{ files(sent(run.summary)) }}, {{ bytes(run.summary.bytes) }}.
             <template v-if="run.summary.already_present">
-              {{ run.summary.already_present }} were already there.
+              {{ files(alreadyThere(run.summary)) }} already there.
             </template>
             <template v-if="run.summary.quarantined">
               {{ run.summary.quarantined }} set aside for you.
@@ -151,15 +158,12 @@ const toggle = (id: number) => (chosen.value = open.value === id ? -1 : id);
               {{ run.summary.skipped }} left here.
             </template>
             <template v-if="run.summary.failed">
-              {{ run.summary.failed }} could not be moved; their originals are untouched.
+              {{ run.summary.failed }} could not be sent;
+              {{ run.summary.failed === 1 ? "its original is" : "their originals are" }} untouched.
             </template>
             <template v-if="run.summary.pruned">
               {{ run.summary.pruned }} source director{{ run.summary.pruned === 1 ? "y" : "ies" }}
               removed, because the move emptied {{ run.summary.pruned === 1 ? "it" : "them" }}.
-            </template>
-            <template v-if="run.summary.recovered">
-              {{ run.summary.recovered }} unfinished operation{{ run.summary.recovered === 1 ? "" : "s" }}
-              from an earlier run {{ run.summary.recovered === 1 ? "was" : "were" }} cleaned up first.
             </template>
           </Notice>
           <ul class="run-failures" v-if="run.summary?.failures.length">

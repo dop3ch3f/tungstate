@@ -180,7 +180,7 @@ const KIND: Record<string, string> = {
         <div
           v-for="(entry, index) in shown"
           :key="entry.path"
-          class="line"
+          class="pn-row"
           :class="{ on: ticked.has(entry.name) }"
           @click="tick(entry, index, $event)"
           @dblclick="entry.is_dir && load(entry.path)"
@@ -230,7 +230,7 @@ const KIND: Record<string, string> = {
 .where-input { flex: 1; min-width: 0; word-break: normal; text-overflow: ellipsis; }
 .where-input:focus { color: var(--text); border-color: var(--text-faint); }
 
-.cols, .line {
+.cols, .pn-row {
   display: grid;
   grid-template-columns: 22px minmax(0, 1fr) 64px 66px 92px;
   gap: var(--s2);
@@ -243,7 +243,7 @@ const KIND: Record<string, string> = {
   font-weight: 700;
   font-family: var(--font-mono);
 }
-:global([data-theme="retro"] .line) { border-bottom: var(--bw) solid var(--rule); }
+:global([data-theme="retro"] .pn-row) { border-bottom: var(--bw) solid var(--rule); }
 .cols {
   height: 26px;
   border-bottom: var(--bw) solid var(--rule);
@@ -260,12 +260,12 @@ const KIND: Record<string, string> = {
   text-align: left;
   cursor: pointer;
 }
-.cols .r, .line .r { text-align: right; }
+.cols .r, .pn-row .r { text-align: right; }
 
 .rolls { flex: 1; overflow-y: auto; }
-.line { height: 28px; cursor: default; font-size: var(--small); }
-.line:hover { background: var(--surface-hover); }
-.line.on { background: var(--surface-raised); }
+.pn-row { height: 28px; cursor: default; font-size: var(--small); }
+.pn-row:hover { background: var(--surface-hover); }
+.pn-row.on { background: var(--surface-raised); }
 .entryname { display: flex; align-items: center; gap: var(--s2); min-width: 0; }
 /* The ellipsis has to be on the text, not on the flex row around it: a flex
    container clips its children and never shows the dots. */
@@ -278,16 +278,16 @@ const KIND: Record<string, string> = {
 .k-archive { background: var(--kind-archive); }
 .k-doc { background: var(--kind-doc); }
 .k-folder { background: var(--kind-folder); border-radius: 2px 5px 3px 3px; }
-.what, .line .num { color: var(--text-faint); font-size: var(--fine); white-space: nowrap; }
+.what, .pn-row .num { color: var(--text-faint); font-size: var(--fine); white-space: nowrap; }
 /* A narrow pane drops columns rather than starving the name: Type first,
    then Modified. At 860pt, the window's smallest size, a pane is about 310. */
 @container (max-width: 460px) {
-  .cols, .line { grid-template-columns: 22px minmax(0, 1fr) 66px 92px; }
-  .cols > :nth-child(3), .line > .what { display: none; }
+  .cols, .pn-row { grid-template-columns: 22px minmax(0, 1fr) 66px 92px; }
+  .cols > :nth-child(3), .pn-row > .what { display: none; }
 }
 @container (max-width: 330px) {
-  .cols, .line { grid-template-columns: 22px minmax(0, 1fr) 66px; }
-  .cols > :nth-child(5), .line > :last-child { display: none; }
+  .cols, .pn-row { grid-template-columns: 22px minmax(0, 1fr) 66px; }
+  .cols > :nth-child(5), .pn-row > :last-child { display: none; }
 }
 .nothing { font-size: var(--small); color: var(--text-faint); padding: var(--s4) var(--s2); margin: 0; }
 </style>

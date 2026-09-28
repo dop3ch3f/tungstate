@@ -106,7 +106,7 @@ const shape = computed(() => {
           @click="chosen = o.name"
         >
           <span class="wayname">{{ human(o.name) }}</span>
-          <span class="said">
+          <span class="way-said">
             {{ o.summary }}<template v-if="!o.settles"> (these would never settle)</template>
           </span>
           <span class="num n-move">{{ movedBy(o) }}</span>
@@ -232,7 +232,7 @@ h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.
 .way:disabled { cursor: default; opacity: 0.5; }
 
 .wayname { grid-column: 1; grid-row: 1; font-weight: 600; }
-.said { grid-column: 1; grid-row: 2; font-size: var(--small); color: var(--text-quiet); margin-top: 1px; }
+.way-said { grid-column: 1; grid-row: 2; font-size: var(--small); color: var(--text-quiet); margin-top: 1px; }
 .num { grid-row: 1; align-self: baseline; text-align: right; font-variant-numeric: tabular-nums; color: var(--text-quiet); }
 .n-move { color: var(--text); }
 .way.on .num { color: var(--text); }

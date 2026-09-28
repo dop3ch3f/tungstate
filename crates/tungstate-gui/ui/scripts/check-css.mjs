@@ -159,6 +159,11 @@ for (const c of baseClasses) legacyClasses.delete(c);
 
 // --- every file ----------------------------------------------------------
 
+/** Which files' markup names each class, and each `:global(...)` rule's
+ *  subject class, for rule 8 once every file has been read. */
+const usedBy = new Map();
+const globalSubjects = [];
+
 for (const file of walk(SRC)) {
   if (LEGACY.has(file)) continue;
   const text = readFileSync(file, "utf8");
@@ -191,6 +196,14 @@ for (const file of walk(SRC)) {
   if (tpl === null) continue;
 
   const used = classesUsed(tpl, file);
+  for (const name of used) usedBy.set(name, [...(usedBy.get(name) ?? []), file]);
+  // The class a `:global(...)` rule lands on: the last one in its selector.
+  for (const m of css.matchAll(/:global\(([^{]*?)\)\s*\{/g)) {
+    for (const part of m[1].split(",")) {
+      const subject = [...part.matchAll(/\.(-?[a-zA-Z][\w-]*)/g)].pop()?.[1];
+      if (subject) globalSubjects.push({ file, line: lineOf(text, text.indexOf(m[0])), subject });
+    }
+  }
   const defined = classesDefined(css);
   const quoted = quotedIn(text);
 
@@ -237,6 +250,17 @@ for (const file of walk(SRC)) {
     if (!css.includes(`[${attr}`)) {
       fail(file, lineOf(tpl, m.index), "undrawn-state", `${attr} is bound but no [${attr}] rule draws it`);
     }
+  }
+}
+
+// 8. a `:global(...)` rule whose class another component also wears. It is
+//    global, so it lands there too: the section tile's retro rule hid every
+//    `.line` in the app, which was every empty state's sentence.
+for (const g of globalSubjects) {
+  if (baseClasses.has(g.subject)) continue;
+  const others = (usedBy.get(g.subject) ?? []).filter((f) => f !== g.file);
+  if (others.length) {
+    fail(g.file, g.line, "global-leak", `.${g.subject} is styled globally here and also worn in ${others.map((f) => relative(ROOT, f)).join(", ")}; give it a name of its own`);
   }
 }
 

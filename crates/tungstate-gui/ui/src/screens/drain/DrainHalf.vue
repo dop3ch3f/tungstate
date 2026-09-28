@@ -5,7 +5,7 @@
 import { computed, onMounted, ref, shallowRef, useTemplateRef, watch } from "vue";
 import { transfers, links as linkApi } from "../../engine/commands";
 import { useTransfer } from "../../state/useTransfer";
-import { bytes, shortPath } from "../../lib/format";
+import { bytes } from "../../lib/format";
 import type { Leg, Place, TransferRequest } from "../../engine/types";
 import Pane from "./Pane.vue";
 import RunView from "./RunView.vue";
@@ -56,12 +56,14 @@ const legs = computed<Leg[]>(() => {
 });
 const picked = computed(() => leftPicked.value.length + rightPicked.value.length);
 const weight = computed(() => leftWeight.value + rightWeight.value);
+/** Where ticked files would go, by folder name: the panes already show the
+ *  full paths, and two of them cut short wrapped across the footer. */
 const route = computed(() => {
   if (!legs.value.length) return "";
-  if (legs.value.length === 2) return `${shortPath(leftPath.value)} ⇄ ${shortPath(rightPath.value)}`;
-  const leg = legs.value[0];
-  return `${shortPath(leg.source)} → ${shortPath(leg.destination)}`;
+  if (legs.value.length === 2) return `${leafOf(leftPath.value)} ⇄ ${leafOf(rightPath.value)}`;
+  return `→ ${leafOf(legs.value[0]!.destination)}`;
 });
+const leafOf = (path: string) => path.replace(/[/:]+$/, "").split(/[/:]/).pop() || path;
 
 
 // Which folders the panes were showing, kept for the next launch. Debounced,
@@ -117,7 +119,7 @@ cx.browseTo.value = null;
 
 <template>
   <div class="dh">
-    <div class="head"><Tile of="drain" :size="26" /><h1 class="dh-title">Move to another machine</h1></div>
+    <div class="head"><Tile of="drain" :size="26" /><h1 class="dh-title">Copy or move files</h1></div>
     <div class="dh-top">
     <nav class="dh-tabs">
       <button
@@ -138,13 +140,11 @@ cx.browseTo.value = null;
       {{ t.placed.value.line }}
       <Button look="link" @click="where = 'runs'">See the queue</Button>
     </Notice>
-    <Notice tone="hold" v-if="t.stranded.value.length" class="dh-unfinished">
-      {{ t.stranded.value.length === 1 ? "A transfer" : `${t.stranded.value.length} transfers` }}
-      stopped part-way.
-      <template v-for="run in t.stranded.value" :key="run.link">
-        <Button look="link" :busy="t.settling(run.link)" @click="t.resume(run.link); where = 'runs'">Pick up {{ run.link }}</Button>
-        <Button look="link" :busy="t.settling(run.link)" @click="t.discard(run.link)">Clean it up</Button>
-      </template>
+    <Notice tone="hold" v-for="run in t.stranded.value" :key="run.link">
+      {{ run.link }} stopped part-way.
+      <Button look="link" :busy="t.settling(run.link)" @click="t.resume(run.link); where = 'runs'">Resume</Button>
+      or
+      <Button look="link" :busy="t.settling(run.link)" @click="t.discard(run.link)">discard the part-copied files</Button>
     </Notice>
 
     <div class="dh-body" v-if="where === 'files'">
@@ -163,7 +163,7 @@ cx.browseTo.value = null;
       <footer class="dh-act">
         <span class="dh-tally" v-if="picked">{{ picked }} ticked, {{ bytes(weight) }}</span>
         <span class="dh-tally dh-dim" v-else>Tick files on either side.</span>
-        <span class="path dh-route">{{ route }}</span>
+        <span class="dh-route">{{ route }}</span>
         <Button :disabled="!picked" @click="setup = { legs, intent: 'copy' }">Copy</Button>
         <Button look="primary" :disabled="!picked" @click="setup = { legs, intent: 'move' }">Move</Button>
       </footer>
@@ -183,30 +183,29 @@ cx.browseTo.value = null;
     <!-- The two questions a run can stop and ask. `applyAll` is reset after
          every answer: a shared tick that persisted would silently apply the
          first decision to every later file. -->
-    <Sheet v-if="t.conflict.value" of="drain" title="A name is already taken" @dismiss="t.answerConflict('skip', false); applyAll = false">
-      <p class="path">{{ t.conflict.value.path }}</p>
+    <Sheet v-if="t.conflict.value" of="drain" :title="`A different ${leafOf(t.conflict.value.path)} is already there`" @dismiss="t.answerConflict('skip', false); applyAll = false">
       <p class="dh-qw">
-        Coming: {{ bytes(t.conflict.value.incoming_size) }}. Already there:
-        {{ bytes(t.conflict.value.existing_size) }}.
+        This one is {{ bytes(t.conflict.value.incoming_size) }}; the one there is
+        {{ bytes(t.conflict.value.existing_size) }}. Setting it aside leaves the one
+        there alone and puts this one in the set-aside folder beside it, to look at later.
       </p>
-      <label class="dh-tick"><input type="checkbox" v-model="applyAll" /> do this for the rest of them</label>
+      <label class="dh-tick"><input type="checkbox" v-model="applyAll" /> Do the same for the rest</label>
       <div class="dh-qf">
-        <Button @click="t.answerConflict('skip', applyAll); applyAll = false">Leave it here</Button>
+        <Button @click="t.answerConflict('skip', applyAll); applyAll = false">Skip it</Button>
         <Button @click="t.answerConflict('rename', applyAll); applyAll = false">Keep both</Button>
-        <Button look="primary" @click="t.answerConflict('quarantine', applyAll); applyAll = false">Set the other one aside</Button>
+        <Button look="primary" @click="t.answerConflict('quarantine', applyAll); applyAll = false">Set this one aside</Button>
       </div>
     </Sheet>
 
-    <Sheet v-if="t.identical.value" of="drain" title="Already there" @dismiss="t.answerIdentical(false, false); applyAll = false">
-      <p class="path">{{ t.identical.value.path }}</p>
+    <Sheet v-if="t.identical.value" of="drain" :title="`${leafOf(t.identical.value.path)} is already there`" @dismiss="t.answerIdentical(false, false); applyAll = false">
       <p class="dh-qw">
-        Nothing needs sending. You asked to move, so the only question is
-        whether to remove this copy and get back {{ bytes(t.identical.value.size) }}.
+        The copy there is the same, byte for byte, so nothing needs sending.
+        Delete this one to free {{ bytes(t.identical.value.size) }}?
       </p>
-      <label class="dh-tick"><input type="checkbox" v-model="applyAll" /> do this for the rest of them</label>
+      <label class="dh-tick"><input type="checkbox" v-model="applyAll" /> Do the same for the rest</label>
       <div class="dh-qf">
-        <Button @click="t.answerIdentical(false, applyAll); applyAll = false">Keep it</Button>
-        <Button look="primary" @click="t.answerIdentical(true, applyAll); applyAll = false">Remove this copy</Button>
+        <Button @click="t.answerIdentical(false, applyAll); applyAll = false">Keep it here</Button>
+        <Button look="primary" @click="t.answerIdentical(true, applyAll); applyAll = false">Delete it here</Button>
       </div>
     </Sheet>
   </div>
@@ -253,7 +252,6 @@ cx.browseTo.value = null;
 }
 .dh-badge { color: var(--accent); font-size: 9px; vertical-align: 2px; }
 .dh-top { display: flex; align-items: center; justify-content: space-between; gap: var(--s3); }
-.dh-unfinished { display: flex; flex-wrap: wrap; gap: var(--s3); align-items: baseline; }
 
 .dh-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: var(--s3); }
 .dh-pad { padding-right: var(--s1); }
