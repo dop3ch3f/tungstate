@@ -56,7 +56,10 @@ onMounted(async () => {
   await nextTick();
   // Not `focusable()[0]`: that is the title bar's minimise button, and a
   // focus ring on window furniture is not what a question should open on.
-  (card.value?.querySelector<HTMLElement>(".inside button, .inside input") ?? focusable()[0])?.focus();
+  // Focus lands inside so Tab and Enter work at once, but no ring is drawn
+  // for it: the ring is for someone moving with the keyboard, and on a
+  // freshly opened dialog it read as a second outline on the safe button.
+  (card.value?.querySelector<HTMLElement>(".inside button, .inside input") ?? focusable()[0])?.focus({ focusVisible: false } as FocusOptions);
   window.addEventListener("keydown", keydown);
 });
 onBeforeUnmount(() => {

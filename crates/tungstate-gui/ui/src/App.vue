@@ -87,8 +87,8 @@ const WHERE = {
       <button class="waits" v-if="sy.followingNow.value.held.length" title="A sync is waiting for you" @click="nav.go('sync')">
         ● {{ sy.followingNow.value.held.length === 1 ? "A sync needs you" : `${sy.followingNow.value.held.length} syncs need you` }}
       </button>
-      <button class="waits news" v-if="up.ready.value" @click="up.showing.value = true">
-        ● Version {{ up.ready.value.version }} is ready
+      <button class="waits news" v-if="up.ready.value" :title="`Version ${up.ready.value.version} is ready`" @click="up.showing.value = true">
+        ● Update ready
       </button>
       <button class="dest" :class="{ here: nav.view.value === 'settings' }" @click="nav.go('settings')">
         <Tile of="settings" :size="22" />
@@ -177,7 +177,7 @@ const WHERE = {
 .live { color: var(--accent); font-size: 9px; padding: var(--s2); }
 .waits { font: inherit; font-size: var(--fine); color: var(--hold); font-weight: 700; background: none; border: none; text-align: left; padding: var(--s2); cursor: pointer; }
 /* News, not a warning: an update is waiting to be taken, nothing is stuck. */
-.waits.news { color: var(--accent); }
+.waits.news { color: var(--text); }
 
 .stage { flex: 1; position: relative; min-width: 0; }
 </style>

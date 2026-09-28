@@ -737,6 +737,9 @@ const scenes: Record<string, () => unknown> = {
   "dupes-clear-ask": async () => { await scenes["dupes-found"]!(); await tick(); pressIn(".ab", "Set aside 217 files"); await tick(); },
   "dupes-putback-ask": async () => { nav.go("dupes"); await tick(); await tick(); pressIn(".pr-rows", "Put back"); await tick(); },
   settings: () => nav.go("settings"),
+  // What Settings' buttons open.
+  "settings-fresh": async () => { nav.go("settings"); await tick(); await tick(); press("Start fresh…"); await tick(); },
+  "settings-archive-delete": async () => { nav.go("settings"); await tick(); await tick(); pressIn(".st-arch", "…"); await tick(); pressIn(".st-arch", "Delete"); await tick(); },
   "drain-connections": async () => { nav.go("drain"); await tab(3); },
   "drain-runs": async () => { nav.go("drain"); await tab(1); },
   "drain-add-connection": async () => { nav.go("drain"); await tab(3); click(".cx-top button"); },

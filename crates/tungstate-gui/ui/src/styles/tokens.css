@@ -62,6 +62,16 @@
   --edge-strong: var(--raw-edge-strong);
   /* A line between rows, as against the frame of a window or a button. */
   --rule: var(--edge);
+  /* Each theme in miniature, for the Appearance picker: its desk and its ink.
+     Literal because each shows a theme other than the one in force. */
+  --swatch-retro-desk: #eeefe9;
+  --swatch-retro-ink: #151515;
+  --swatch-retro-dark-desk: #1c1b18;
+  --swatch-retro-dark-ink: #c9c4b0;
+  --swatch-graphite-desk: #17181c;
+  --swatch-graphite-ink: #7fd4ff;
+  --swatch-paper-desk: #f6f5f1;
+  --swatch-paper-ink: #1d1c1a;
   /* An ActionBar's paper, how far below the scroll it pins, and its foot
      padding: the window's on a page; a sheet sets its own (ui/Sheet.vue). */
   --ab-bg: var(--window-bg);

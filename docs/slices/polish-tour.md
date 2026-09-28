@@ -582,3 +582,28 @@ You chose to commit Sync and do those next, across the whole app.
 
 The critic's remaining asks (a timeline grouped by run, retry beside a
 failure) need the engine, and are left for later.
+
+### Settings (critic 6 → 6.5)
+
+- Sections are grouped, and every control sits in one right-hand column, so
+  the eye doesn't zigzag.
+- Themes are tiles, each with a swatch of its own colours; the chosen one is
+  raised and ticked.
+- Keeping folders in order is a real switch (Toggle), because it takes
+  effect at once.
+- The version is one line, with Look for updates beside it.
+- One "What Tungstate remembers" section holds export and import, the
+  archives, and Start fresh at its foot:
+  - archives show one human date instead of a date and a raw name;
+  - Restore is a button, and Delete sits behind "…".
+- The sidebar says "Update ready" in ink.
+- A dialog no longer draws a focus ring on its safe button when it opens.
+  Focus still lands there, for the keyboard.
+
+### Where Phase D ended
+
+Every screen has had its rounds. The outside critic settled at 6 to 6.5 on
+each. Its last asks either need the engine (a history grouped by run, retry
+beside a failure, live thumbnails in the harness) or contradicted an earlier
+critic or a choice you had made. So they were brought to you rather than
+chased.

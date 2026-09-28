@@ -15,8 +15,9 @@ import { bytes } from "../lib/format";
 import { ask } from "../ui/useDialog";
 import Button from "../ui/Button.vue";
 import Notice from "../ui/Notice.vue";
-import Empty from "../ui/Empty.vue";
 import Tile from "../ui/Tile.vue";
+import Toggle from "../ui/Toggle.vue";
+import RowMenu from "../ui/RowMenu.vue";
 
 const archives = shallowRef<ArchiveView[]>([]);
 const problem = ref<string | null>(null);
@@ -74,7 +75,7 @@ const importFrom = () =>
 async function startFresh() {
   const answer = await ask({
     title: "Start fresh?",
-    why: "Your connections, saved pairs and history are archived first, then cleared. No file on disk or on the NAS changes, and you can bring it all back from the list below.",
+    why: "Connections, saved pairs and history are archived, then cleared. No file changes, and the archive can bring it all back.",
     choices: [
       { id: "no", label: "Keep everything" },
       { id: "yes", label: "Archive and start fresh", look: "danger" },
@@ -83,19 +84,21 @@ async function startFresh() {
   if (answer.id !== "yes") return;
   await act(async () => {
     const name = await storage.reset();
-    return `Everything was archived as ${name}. Nothing was deleted.`;
+    void name;
+    return "Everything was archived first, so it can be brought back. Nothing was deleted.";
   });
 }
 
 const restore = (archive: ArchiveView) =>
   act(async () => {
     const aside = await storage.restore(archive.name);
-    return `Restored ${archive.name}. What was here is archived as ${aside}, so this can be undone too.`;
+    void aside;
+    return `Restored the archive from ${stamp(archive.archived_at)}. What was here was archived first, so this can be undone too.`;
   });
 
 async function forget(archive: ArchiveView) {
   const answer = await ask({
-    title: `Delete ${archive.name}?`,
+    title: `Delete the archive from ${stamp(archive.archived_at)}?`,
     why: "This archive is gone for good. Your files are not affected.",
     choices: [
       { id: "no", label: "Keep it" },
@@ -105,11 +108,22 @@ async function forget(archive: ArchiveView) {
   if (answer.id !== "yes") return;
   await act(async () => {
     await storage.forget(archive.name);
-    return `Deleted ${archive.name}.`;
+    return `Deleted the archive from ${stamp(archive.archived_at)}.`;
   });
 }
 
-const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
+/** One human date for an archive, the same one its questions use. */
+const stamp = (ms: number) =>
+  ms ? new Date(ms).toLocaleString(undefined, { day: "numeric", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "an unknown time";
+const clock = (ms: number) => new Date(ms).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+// A lookup, because the CSS checker cannot follow a computed class name.
+const SWATCH = {
+  system: "sw-system",
+  retro: "sw-retro",
+  "retro-dark": "sw-retro-dark",
+  graphite: "sw-graphite",
+  paper: "sw-paper",
+} as const;
 </script>
 
 <template>
@@ -120,89 +134,99 @@ const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
       <section class="st-sec">
         <h2>Appearance</h2>
         <div class="st-themes" role="radiogroup" aria-label="Appearance">
-          <label class="st-switch" v-for="t in THEMES" :key="t.id">
-            <input type="radio" name="theme" :value="t.id" :checked="look.choice.value === t.id" @change="look.choose(t.id)" />
-            <span>{{ t.label }}<em>{{ t.note }}</em></span>
-          </label>
+          <button
+            v-for="t in THEMES"
+            :key="t.id"
+            class="st-theme"
+            :class="{ 'st-theme-on': look.choice.value === t.id }"
+            role="radio"
+            :aria-checked="look.choice.value === t.id"
+            @click="look.choose(t.id)"
+          >
+            <span class="st-swatch" :class="SWATCH[t.id]" aria-hidden="true"><i></i><i></i><i v-if="t.id === 'system'"></i><i v-if="t.id === 'system'"></i></span>
+            <span class="st-tick" v-if="look.choice.value === t.id" aria-hidden="true">✓</span>
+            <b>{{ t.label }}</b>
+            <em>{{ t.note }}</em>
+          </button>
         </div>
       </section>
 
       <section class="st-sec">
-        <h2>Keeping folders in order</h2>
-        <label class="st-switch">
-          <input
-            type="checkbox"
-            :checked="w.on.value"
-            @change="w.set(($event.target as HTMLInputElement).checked)"
-          />
-          <span>
-            Keep folders in order while Tungstate is open
-            <em>
-              Folders you have set to enforce are tidied on their own as files
-              arrive and settle. The rest are only ever told about. There is no
-              background service yet, so this stops when you close the window.
-            </em>
-          </span>
-        </label>
+        <h2>While Tungstate is open</h2>
+        <div class="st-row">
+          <div class="st-say">
+            <b>Keep folders in order</b>
+            <em>Folders set to tidy themselves are sorted as files arrive; the others are only noted. It stops when you close the window.</em>
+          </div>
+          <Toggle :on="w.on.value" label="Keep folders in order" @change="(on) => w.set(on)" />
+        </div>
         <p class="st-why" v-if="w.on.value && w.running.value">
           Watching {{ w.watching.value }} folder{{ w.watching.value === 1 ? "" : "s" }}<template
             v-if="w.sweeping.value"
           >, and checking {{ w.sweeping.value }} on a share every hour instead, because a
           share says nothing about a change another machine made</template>.
         </p>
-        <p class="st-why" v-else-if="w.on.value">
-          Nothing to watch yet. Add a folder under Organize.
-        </p>
+        <p class="st-why" v-else-if="w.on.value">Nothing to watch yet. Add a folder under Organize.</p>
       </section>
 
       <section class="st-sec">
         <h2>This version</h2>
-        <p class="st-why">
-          Tungstate {{ version ?? "" }}.
-          <template v-if="up.ready.value">Version {{ up.ready.value.version }} is ready.</template>
-          <template v-else-if="up.checkedAt.value">It is the newest, as of {{ new Date(up.checkedAt.value).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) }}.</template>
-          It looks for a newer one when it opens and once a day, and asks before installing anything.
-        </p>
-        <Notice tone="bad" v-if="up.problem.value && !up.showing.value">{{ up.problem.value }}</Notice>
-        <div class="st-do">
+        <div class="st-row">
+          <div class="st-say">
+            <b>Tungstate {{ version ?? "" }}</b>
+            <em v-if="up.ready.value">{{ up.ready.value.version }} is ready to install.</em>
+            <em v-else-if="up.checkedAt.value">Up to date, checked at {{ clock(up.checkedAt.value) }}. Looked for when the app opens, and once a day.</em>
+            <em v-else>Looked for when the app opens, and once a day.</em>
+          </div>
           <Button look="primary" v-if="up.ready.value" @click="up.showing.value = true">Update and restart…</Button>
-          <Button :busy="up.checking.value" @click="up.look()">Look for updates</Button>
+          <Button v-else :busy="up.checking.value" @click="up.look()">Look for updates</Button>
         </div>
+        <Notice tone="bad" v-if="up.problem.value && !up.showing.value">{{ up.problem.value }}</Notice>
       </section>
 
+      <!-- Everything about what the app keeps, the one thing that clears it last. -->
       <section class="st-sec">
         <h2>What Tungstate remembers</h2>
-        <p class="st-why">
-          Your connections, saved pairs, and the record of every file it has moved.
-          None of this is your files: clearing it changes nothing on disk.
-        </p>
         <Notice tone="bad" v-if="problem">{{ problem }}</Notice>
         <Notice v-if="said">{{ said }}</Notice>
-        <div class="st-do">
-          <Button :disabled="busy" @click="exportTo()">Export…</Button>
-          <Button :disabled="busy" @click="importFrom()">Import…</Button>
-          <Button look="danger" :disabled="busy" @click="startFresh()">Start fresh…</Button>
-        </div>
-      </section>
-
-      <section class="st-sec">
-        <h2>Archives</h2>
-        <p class="st-why">Starting fresh or restoring writes out what was here first. Nothing is thrown away unless you delete it here.</p>
-        <Empty v-if="!archives.length" art="no-archives" line="Nothing archived yet." />
-        <div class="st-row" v-for="a in archives" :key="a.name">
-          <div class="st-who">
-            <span class="st-when">{{ stamp(a.archived_at) }}</span>
-            <span class="st-name">{{ a.name }}</span>
+        <div class="st-row">
+          <div class="st-say">
+            <b>Connections, saved pairs and history</b>
+            <em>The record of every file it has moved. Never your files themselves.</em>
           </div>
-          <span class="st-holds" v-if="a.operations !== null">
-            {{ a.links }} saved pair{{ a.links === 1 ? "" : "s" }}, {{ a.connections }} connection{{ a.connections === 1 ? "" : "s" }}, {{ a.operations }} recorded
+          <span class="st-do">
+            <Button :disabled="busy" @click="importFrom()">Import…</Button>
+            <Button :busy="busy" @click="exportTo()">Export…</Button>
           </span>
-          <span class="st-holds st-bad" v-else>cannot be read</span>
-          <span class="num st-size">{{ bytes(a.size) }}</span>
-          <div class="st-act">
-            <Button :disabled="busy || a.operations === null" @click="restore(a)">Restore</Button>
-            <Button look="danger" :disabled="busy" @click="forget(a)">Delete</Button>
+        </div>
+
+        <div class="st-say st-sub">
+          <b>Archives</b>
+          <em>Starting fresh or restoring saves what was here first. An archive goes only if you delete it.</em>
+        </div>
+        <p class="st-none" v-if="!archives.length">Nothing archived yet.</p>
+        <ul class="st-list" v-else>
+          <li class="st-arch" v-for="a in archives" :key="a.name">
+            <span class="st-when">{{ stamp(a.archived_at) }}</span>
+            <span class="st-holds" v-if="a.operations !== null">
+              {{ a.links }} saved pair{{ a.links === 1 ? "" : "s" }}, {{ a.connections }} connection{{ a.connections === 1 ? "" : "s" }},
+              {{ a.operations }} file {{ a.operations === 1 ? "move" : "moves" }} recorded
+            </span>
+            <span class="st-holds st-bad" v-else>cannot be read</span>
+            <span class="num st-size">{{ bytes(a.size) }}</span>
+            <span class="st-act">
+              <Button :disabled="busy || a.operations === null" @click="restore(a)">Restore</Button>
+              <RowMenu :label="`More for the archive from ${stamp(a.archived_at)}`" :items="[{ id: 'delete', label: 'Delete', danger: true }]" @pick="forget(a)" />
+            </span>
+          </li>
+        </ul>
+
+        <div class="st-row st-sub">
+          <div class="st-say">
+            <b>Start fresh</b>
+            <em>Clears what Tungstate remembers, archiving it first. No file on this Mac or the NAS changes.</em>
           </div>
+          <Button look="danger" :disabled="busy" @click="startFresh()">Start fresh…</Button>
         </div>
       </section>
     </div>
@@ -211,30 +235,91 @@ const stamp = (ms: number) => (ms ? new Date(ms).toLocaleString() : "unknown");
 
 <style scoped>
 .st-wrap { position: absolute; inset: 0; overflow-y: auto; scrollbar-gutter: stable; }
-.st-column { padding: var(--win-pad); }
+/* One measure for every section, lists included. */
+.st-column { padding: var(--win-pad); max-width: 820px; }
 .head { display: flex; align-items: center; gap: var(--s3); }
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 .st-sec { margin-top: var(--s6); display: flex; flex-direction: column; gap: var(--s3); }
-.st-sec h2 { font-size: var(--body); font-weight: 600; margin: 0; }
-.st-switch { display: flex; align-items: flex-start; gap: var(--s2); font-size: var(--small); max-width: 66ch; }
-.st-switch em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.5; margin-top: 3px; }
-.st-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: var(--s3); max-width: 66ch; }
-.st-switch input[type="radio"] { accent-color: var(--control); margin: 2px 0 0; }
-.st-why { font-size: var(--small); color: var(--text-quiet); margin: 0; max-width: 70ch; line-height: 1.5; }
-.st-do { display: flex; gap: var(--s2); }
-.st-row {
+.st-sec h2 { font-size: var(--body); font-weight: 700; margin: 0; padding-bottom: var(--s2); border-bottom: 1px solid var(--rule); }
+.st-why { font-size: var(--small); color: var(--text-quiet); margin: 0; line-height: 1.5; }
+.st-do { display: flex; gap: var(--s2); flex: none; }
+.st-sub { margin-top: var(--s3); }
+.st-none { font-size: var(--small); color: var(--text-faint); margin: 0; }
+/* The chosen one's mark, in the tile's corner over its swatch. */
+.st-tick {
+  position: absolute;
+  top: calc(var(--s2) + 7px);
+  right: calc(var(--s2) + 5px);
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr) 70px auto;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: var(--fine);
+  font-weight: 700;
+  color: var(--panel);
+  background: var(--text);
+  border: var(--bw) solid var(--panel);
+}
+
+/* A setting: what it is on the left, its control on the right. */
+.st-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s5); }
+.st-say { display: flex; flex-direction: column; gap: 2px; min-width: 0; font-size: var(--small); }
+.st-say em { font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.5; }
+
+/* Each theme as a small card with its own colours in miniature. */
+.st-themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--s3); }
+.st-theme {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: var(--s2);
+  font: inherit;
+  font-size: var(--small);
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: var(--bw) solid var(--rule);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+.st-theme em { font-style: normal; font-size: var(--fine); color: var(--text-faint); line-height: 1.4; }
+.st-theme:hover { border-color: var(--edge); }
+/* Chosen as the rail marks the section you are in: filled, outlined, raised. */
+.st-theme-on { background: var(--chosen); color: var(--chosen-ink); border-color: var(--edge); box-shadow: var(--lift); }
+.st-theme-on em { color: var(--text-quiet); }
+.st-swatch { display: flex; width: 100%; height: 34px; margin-bottom: var(--s1); border: 1px solid var(--edge); border-radius: var(--radius); overflow: hidden; }
+.st-swatch i { flex: 1; }
+.sw-retro i:first-child { background: var(--swatch-retro-desk); }
+.sw-retro i:last-child { background: var(--swatch-retro-ink); flex: 0 0 30%; }
+.sw-retro-dark i:first-child { background: var(--swatch-retro-dark-desk); }
+.sw-retro-dark i:last-child { background: var(--swatch-retro-dark-ink); flex: 0 0 30%; }
+.sw-graphite i:first-child { background: var(--swatch-graphite-desk); }
+.sw-graphite i:last-child { background: var(--swatch-graphite-ink); flex: 0 0 30%; }
+.sw-paper i:first-child { background: var(--swatch-paper-desk); }
+.sw-paper i:last-child { background: var(--swatch-paper-ink); flex: 0 0 30%; }
+/* Matching the system is both retros side by side: light, then dark. */
+.sw-system i:nth-child(1) { background: var(--swatch-retro-desk); }
+.sw-system i:nth-child(2) { background: var(--swatch-retro-ink); flex: 0 0 15%; }
+.sw-system i:nth-child(3) { background: var(--swatch-retro-dark-desk); }
+.sw-system i:nth-child(4) { background: var(--swatch-retro-dark-ink); flex: 0 0 15%; }
+
+
+.st-list { list-style: none; margin: 0; padding: 0; }
+.st-arch {
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr) 70px auto;
   gap: var(--s3);
   align-items: center;
   padding: var(--s2) 0;
   border-bottom: 1px solid var(--rule);
+  font-size: var(--small);
 }
-.st-who { display: flex; flex-direction: column; min-width: 0; }
-.st-when { font-size: var(--small); font-weight: 600; }
-.st-name { font-size: var(--fine); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.st-when { font-weight: 600; }
 .st-holds { font-size: var(--fine); color: var(--text-quiet); }
 .st-bad { color: var(--bad); }
 .st-size { font-size: var(--fine); color: var(--text-faint); text-align: right; }
-.st-act { display: flex; gap: var(--s2); }
+.st-act { display: flex; align-items: center; gap: var(--s3); }
 </style>
