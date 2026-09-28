@@ -217,3 +217,137 @@ run and cleared the queue.
 
 The same session found that a pair run twice reported "Copied 0 files, 0 B"
 when every file was already there. The one-line result now says so.
+
+## Phase C: Connections, with S3 and SMB
+
+Three commits of engine and one of window, plus a CI job each for S3 and SMB.
+
+### S3 is one more OpenDAL service
+
+`s3_operator` sits beside `ftp_operator` in `tungstate-backend-opendal`. The
+bucket, region and endpoint live in the connection's `options` map, so the
+journal needed no new columns for them. The access key id is the username and
+the secret key goes in the keychain, as a password does.
+
+Two details are worth knowing. OpenDAL is told `disable_config_load()` and
+`disable_ec2_metadata()`: without them it would also read `~/.aws`, the
+environment and a cloud metadata service, and a connection that quietly worked
+because of some other program's credentials would stop working on the next
+machine. And S3 has no rename, so it takes the no-rename commit path FTP
+already uses.
+
+The HTTPS client needed care. OpenDAL 0.59 moved its HTTP client into a
+separate crate that has to be installed once per process. Its default brings
+`aws-lc-sys`, a C library every release runner would have to build. `ring`
+does the same job and is already in the build through Tauri, so
+`install_https()` installs `ring` as the TLS provider and a reqwest client
+built on it:
+
+```rust
+static ONCE: std::sync::Once = std::sync::Once::new();
+ONCE.call_once(|| {
+    let _ = rustls::crypto::ring::default_provider().install_default();
+    ...
+});
+```
+
+`Once` runs the closure the first time and never again, however many threads
+arrive together. That fits something that must be set up exactly once per
+process.
+
+These dependencies are `optional = true` and switched on by the crate's `s3`
+feature. A feature in Cargo is a named switch that can turn on optional
+dependencies, and `#[cfg(feature = "s3")]` removes code when it is off. A
+build without S3 then fails with `SchemeNotCompiled`, which names the problem,
+instead of failing somewhere obscure.
+
+### SMB is a crate of its own, and synchronous
+
+`tungstate-backend-smb` implements the `Backend` trait over smb-rs. The plan
+was to wrap its async client in a private runtime, as the OpenDAL adapter
+does. smb-rs has a `multi_threaded` feature that builds a synchronous client
+instead, so each `Backend` method just makes a few SMB requests on the thread
+that called it. No runtime, no `dispatch`, no futures moved in and out.
+
+`Settings` implements `Debug` by hand:
+
+```rust
+impl std::fmt::Debug for Settings {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Settings")
+            .field("host", &self.host)
+            ...
+            .finish_non_exhaustive()
+    }
+}
+```
+
+`#[derive(Debug)]` would have printed every field, the password included, into
+any log line that printed the settings. Writing it by hand leaves the password
+out, and `finish_non_exhaustive()` prints `..` so the reader knows something
+was left out.
+
+Three things testing found:
+
+- **Names SMB would read as paths.** On macOS and Linux a single file name
+  can contain `\`, which SMB treats as a separator, and `:`, which starts an
+  alternate data stream. `a\..\b` passes every check a local path would, then
+  climbs out on the server. `path::parts` refuses both characters. Windows CI
+  caught a test that assumed Unix: there `x\y` is already two ordinary parts.
+- **A hang at 8 MiB.** Samba offers 8 MiB per request. smb-rs answers one
+  such read and then never answers the next, past its own timeout. Every size
+  up to 4 MiB worked and ran no faster than 1 MiB, so requests are capped
+  there (`MOST_PER_REQUEST`), with a comment saying why.
+- **A folder not made yet.** A sync lists its new member's folder before
+  anything is in it. OpenDAL's FTP and S3 services answer "empty"; SMB said
+  "not found" and the sync stopped. The link end's own folder now lists as
+  empty, after asking the connection's folder again, so a share that has gone
+  still stops the run.
+
+### Settings are checked once, in the journal crate
+
+`ConnectionSettings::problems()` returns what would stop a connection working
+as data (`SettingsProblem::NeedsShare`, `NeedsBucket` and so on), each with
+its sentence from `thiserror`'s `#[error(...)]`. The CLI prints them before the
+password prompt; the window's form asks `settings_problems` and shows the same
+sentences. `in_the_clear()` answers, for a real connection rather than a
+scheme, what crosses the network unencrypted. An S3 connection is encrypted
+unless its endpoint is plain `http://`; SMB is encrypted when the server asks
+or the connection insists.
+
+### A check is remembered, and a connection can be retired
+
+Journal v14 adds `checked_at`, `check_ok` and `check_note`, written by
+`record_check` from either surface, and `retired_at`. `remove_connection`
+works like `remove_link` does for saved pairs: it tries the `DELETE`, and when
+the database's foreign keys refuse because an old operation names the
+connection, it retires the row instead and renames it `name#id`, which frees
+the name. Before any of that, `connection_uses` names what would break (saved
+pairs, syncs, transfers that stopped part-way) and those refuse the removal
+outright.
+
+`open_connection` opens a `Connection` value that may not be saved yet. That
+is what lets the window's form check its settings before saving. `test_settings`
+builds a `Connection` with id 0, and when a password was typed, a
+`MemoryStore` holding just that password, so nothing touches the keychain
+until Save.
+
+### The window
+
+- `screens/connections/`: the section, with its list, Check all, and the kinds
+  form.
+- `ui/PlacePicker.vue`: the one Choose a place sheet, with this Mac's usual
+  folders, every connection and a folder browser. `browse = false` returns the
+  place as soon as it is chosen, for a Transfer pane, which browses on its
+  own.
+- `Sheet.vue` keeps a module-level stack (a plain `<script>` block beside
+  `<script setup>` runs once for the module, not once per sheet), and only the
+  top sheet answers the keyboard.
+
+### Checked by hand against the NAS
+
+Direct SMB to `area51.local`, share `PlexMediaServer`, inside one dated test
+folder: a move drain with read-back verification, `connection test`, a sync
+that set a changed version aside, then removal of the folder, and a listing of
+the share's top level identical to the one taken before. The NAS accepts
+`encryption=required`.

@@ -154,7 +154,19 @@ releases a held sync; the window calls it after a person has run one. Runs
 started this way report through the same `sync://done` and `sync://error` as a
 pressed Run, and an error that repeats is sent once.
 
-**Connections** — add, list, update, test, remove, set a password.
+**Connections** — add, list, update, test, remove, set a password (polish
+pass, Phase C). Kinds are `fs`, `smb`, `ftps`, `ftp` and `s3`. A
+`ConnectionView` carries `place` (where it points, in its kind's words),
+`clear` (what crosses the network unencrypted, or null) and `last_check`
+(`{ at, ok, note }`, recorded by `test_connection` and by `tungstate
+connection test` alike). `settings_problems` returns the engine's refusals
+for a form, the same `ConnectionSettings::problems` the command line prints,
+and `add_connection`/`update_connection` refuse with them. `test_settings`
+checks a form that is not saved, with the password typed into it or, without
+one, the keychain's. `connection_uses` names the saved pairs, syncs and
+unfinished transfers that stop a removal, and counts the history that does
+not; `remove_connection` answers `"deleted"`, or `"retired"` when History
+still names it.
 
 **Updates** (slice 9f) — the updater and process plugins answer `check`,
 `download`, `install` and `restart` themselves. The engine adds one question:
