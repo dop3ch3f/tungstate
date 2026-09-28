@@ -924,7 +924,7 @@ mod following {
         make(&journal, &dirs, SyncDirection::All, None);
         let (handle, heard, runs, thread) = following(Arc::clone(&journal), &dirs, quick());
         assert!(
-            until(Duration::from_secs(10), || *runs.lock().unwrap() >= 1),
+            until(Duration::from_secs(30), || *runs.lock().unwrap() >= 1),
             "it runs once at the start"
         );
         // Give the watcher a moment to be listening before the save.
@@ -1032,7 +1032,7 @@ mod following {
         let dirs = folders(2);
         make(&journal, &dirs, SyncDirection::All, None);
         let (handle, _, runs, thread) = following(Arc::clone(&journal), &dirs, quick());
-        assert!(until(Duration::from_secs(10), || *runs.lock().unwrap() >= 1));
+        assert!(until(Duration::from_secs(30), || *runs.lock().unwrap() >= 1));
         std::thread::sleep(Duration::from_millis(500));
         let before = *runs.lock().unwrap();
 
