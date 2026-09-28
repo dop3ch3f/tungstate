@@ -12,6 +12,7 @@ import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
 import Working from "../../ui/Working.vue";
 import Tile from "../../ui/Tile.vue";
+import BackLink from "../../ui/BackLink.vue";
 
 const d = useDupes();
 onMounted(() => d.loadAction());
@@ -20,16 +21,11 @@ onMounted(() => d.loadAction());
 <template>
   <div class="dz" :class="{ fills: d.phase.value === 'found' }">
     <div class="dz-inner">
+      <!-- A way out of a result, which otherwise only a scan or a clearing
+           could leave. -->
+      <BackLink v-if="d.phase.value === 'found'" @back="d.again()">Look somewhere else</BackLink>
       <div class="head">
         <Tile of="dupes" :size="26" /><h1>Duplicates</h1>
-        <!-- A way out of a result, which otherwise only a scan or a clearing
-             could leave. -->
-        <Button
-          v-if="d.phase.value === 'found'"
-          look="link"
-          class="head-out"
-          @click="d.again()"
-        >Look somewhere else</Button>
       </div>
 
       <Notice v-if="d.putBackCount.value !== null">
@@ -88,7 +84,6 @@ onMounted(() => d.loadAction());
 .fills .dz-inner { height: 100%; }
 .dz-inner { padding: var(--win-pad); display: flex; flex-direction: column; gap: var(--s4); min-height: 100%; }
 .head { display: flex; align-items: center; gap: var(--s3); }
-.head-out { margin-left: auto; }
 h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
 /* Fills the window, so the bar sits at its foot rather than mid-screen. */
 .dz-done { flex: 1; display: flex; flex-direction: column; gap: var(--s3); }

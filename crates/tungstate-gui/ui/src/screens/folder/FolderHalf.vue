@@ -7,7 +7,6 @@ import FolderStart from "./FolderStart.vue";
 import FolderRead from "./FolderRead.vue";
 import FolderPreview from "./FolderPreview.vue";
 import Working from "../../ui/Working.vue";
-import Button from "../../ui/Button.vue";
 
 const f = useFolders();
 const chosen = ref<string | null>(null);
@@ -29,14 +28,10 @@ watch(() => f.root.value, () => (chosen.value = null));
     <FolderRead v-else-if="f.phase.value === 'choosing'" v-model:chosen="chosen" />
     <FolderPreview v-else />
 
-    <div class="back" v-if="f.phase.value !== 'start'">
-      <Button look="link" @click="f.back()">All folders</Button>
-    </div>
   </div>
 </template>
 
 <style scoped>
 .half { position: absolute; inset: 0; }
 .pending { display: grid; place-items: center; height: 100%; }
-.back { position: absolute; top: var(--s5); right: var(--s6); }
 </style>

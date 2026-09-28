@@ -3,8 +3,8 @@
 <script setup lang="ts">
 import { computed } from "vue";
 import { useSync } from "../../state/useSync";
-import Button from "../../ui/Button.vue";
 import Tile from "../../ui/Tile.vue";
+import BackLink from "../../ui/BackLink.vue";
 import Working from "../../ui/Working.vue";
 import SyncStart from "./SyncStart.vue";
 import SyncMake from "./SyncMake.vue";
@@ -24,14 +24,12 @@ const heading = computed(() => {
 <template>
   <div class="sh">
     <div class="sh-inner">
+      <BackLink
+        v-if="s.phase.value !== 'list' && s.phase.value !== 'running'"
+        @back="s.phase.value = 'list'; s.current.value = null"
+      >All syncs</BackLink>
       <div class="sh-head head">
         <Tile of="sync" :size="26" /><h1>{{ heading }}</h1>
-        <Button
-          v-if="s.phase.value !== 'list' && s.phase.value !== 'running'"
-          look="link"
-          class="sh-out"
-          @click="s.phase.value = 'list'; s.current.value = null"
-        >All syncs</Button>
       </div>
       <div class="sh-pending" v-if="s.phase.value === 'reading'">
         <Working what="Looking at every folder" note="nothing moves; a network folder takes longer" />
@@ -50,6 +48,5 @@ const heading = computed(() => {
 .sh-inner { padding: var(--win-pad); display: flex; flex-direction: column; gap: var(--s4); min-height: 100%; }
 .sh-head { display: flex; align-items: center; gap: var(--s3); }
 .sh-head h1 { font-size: var(--display); font-weight: 700; margin: 0; letter-spacing: -0.01em; }
-.sh-out { margin-left: auto; }
 .sh-pending { display: grid; place-items: center; min-height: 300px; }
 </style>

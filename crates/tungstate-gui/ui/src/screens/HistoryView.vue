@@ -97,7 +97,7 @@ const dir = (path: string | null) => (path ?? "").slice(0, (path ?? "").lastInde
 <template>
   <div class="h-wrap">
     <div class="h-column">
-      <div class="head"><Tile of="history" :size="26" /><h1>What has happened</h1></div>
+      <div class="head"><Tile of="history" :size="26" /><h1>History</h1></div>
       <label class="h-label" for="h-in">Find where a file went, by its path or its fingerprint</label>
       <form class="h-find" @submit.prevent="look()">
         <input

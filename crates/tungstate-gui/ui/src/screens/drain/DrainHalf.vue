@@ -120,7 +120,7 @@ cx.browseTo.value = null;
 
 <template>
   <div class="dh">
-    <div class="head"><Tile of="drain" :size="26" /><h1 class="dh-title">Copy or move files</h1></div>
+    <div class="head"><Tile of="drain" :size="26" /><h1 class="dh-title">Transfer</h1></div>
     <div class="dh-top">
     <nav class="dh-tabs">
       <button

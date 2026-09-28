@@ -12,6 +12,7 @@ import type { Outcome } from "../../engine/types";
 import Button from "../../ui/Button.vue";
 import ActionBar from "../../ui/ActionBar.vue";
 import Tile from "../../ui/Tile.vue";
+import BackLink from "../../ui/BackLink.vue";
 import Notice from "../../ui/Notice.vue";
 
 const f = useFolders();
@@ -64,6 +65,7 @@ const shape = computed(() => {
 <template>
   <div class="read">
     <div class="column">
+      <BackLink @back="f.back()">All folders</BackLink>
       <div class="head"><Tile of="folder" :size="26" /><h1>{{ f.current.value?.name ?? f.root.value?.split("/").pop() }}</h1></div>
       <p class="locus">
         <span class="path">{{ f.root.value }}</span>

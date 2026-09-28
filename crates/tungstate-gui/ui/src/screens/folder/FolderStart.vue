@@ -79,7 +79,7 @@ const STEPS = [
 <template>
   <div class="start">
     <div class="column">
-      <div class="head"><Tile of="folder" :size="26" /><h1>Tidy a folder</h1></div>
+      <div class="head"><Tile of="folder" :size="26" /><h1>Organize</h1></div>
       <p class="intro">
         See how a folder is filed now and what each way of filing would change.
         Nothing moves until you say so.

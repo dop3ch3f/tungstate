@@ -13,6 +13,7 @@ import type { TreeEntry } from "../../engine/types";
 import Button from "../../ui/Button.vue";
 import ActionBar from "../../ui/ActionBar.vue";
 import Tile from "../../ui/Tile.vue";
+import BackLink from "../../ui/BackLink.vue";
 import Notice from "../../ui/Notice.vue";
 import Working from "../../ui/Working.vue";
 import SortHead from "../../ui/SortHead.vue";
@@ -157,6 +158,7 @@ async function confirmPutBack() {
 <template>
   <div class="prev" v-if="p">
     <div class="column">
+      <BackLink @back="f.back()">All folders</BackLink>
       <div class="head"><Tile of="folder" :size="26" /><h1>{{ name }}</h1></div>
       <p class="locus">
         <span class="path">{{ f.root.value }}</span>
