@@ -97,17 +97,21 @@ export function whenItRuns(sync: Pick<SyncView, "launch">): string {
 }
 
 /** What is happening to a member of a sync kept in step, in words. */
+const every = (secs: number | null) => {
+  const s = secs ?? 0;
+  return s < 60 ? `${s} seconds` : s === 60 ? "minute" : `${Math.round(s / 60)} minutes`;
+};
+
 export function following(status: { state: string; every_secs: number | null; why: string | null }): string {
   switch (status.state) {
     case "watching":
       return "watching for changes";
-    case "polling": {
-      const secs = status.every_secs ?? 0;
-      const every = secs < 60 ? `${secs} seconds` : secs === 60 ? "minute" : `${Math.round(secs / 60)} minutes`;
-      return `checked every ${every}`;
-    }
+    case "polling":
+      return `checked every ${every(status.every_secs)}`;
+    // The engine's reason ("no route to host") is for the tooltip; the words
+    // say what is happening about it.
     case "paused":
-      return `out of reach, tried again on its own${status.why ? `: ${status.why}` : ""}`;
+      return status.every_secs ? `out of reach, trying again every ${every(status.every_secs)}` : "out of reach, trying again on its own";
     default:
       return status.state;
   }
@@ -167,9 +171,9 @@ export function missed(m: { member: string; why: string }): string {
 export function refusal(refused: SyncRefusal): string {
   switch (refused.kind) {
     case "hollow":
-      return `${refused.member} looks empty, but after the last run it held ${refused.held} ${refused.held === 1 ? "file" : "files"}. An unplugged drive or a wrong folder looks exactly like everything being deleted.`;
+      return `${refused.member} looks empty, but held ${refused.held} ${refused.held === 1 ? "file" : "files"} after the last run. An unplugged drive looks the same as everything deleted.`;
     case "blast":
-      return `This would remove ${refused.taking_off} of the ${refused.of} ${refused.of === 1 ? "file" : "files"} on ${refused.member}. That is a lot for one run, so it waits for you to say yes.`;
+      return `This would remove ${refused.taking_off} of the ${refused.of} ${refused.of === 1 ? "file" : "files"} on ${refused.member}.`;
   }
 }
 

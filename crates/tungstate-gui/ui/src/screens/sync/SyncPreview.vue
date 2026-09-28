@@ -29,7 +29,7 @@ const keepers = computed(() => {
   return [...names];
 });
 const choiceOf = (path: string) => s.choices.value[path] ?? "leave";
-const unanswered = computed(() => CONFLICTS.find((c) => c.id === sync.value.on_conflict)?.label ?? "");
+const unanswered = computed(() => CONFLICTS.find((c) => c.id === sync.value.on_conflict)?.line ?? "");
 const otherLeft = computed(() => p.value.left_alone.filter((l) => l.why !== "conflict"));
 const deleting = computed(() => p.value.members.reduce((n, m) => n + m.deleting, 0));
 const blocked = computed(() => p.value.refusals.length > 0 && !s.confirmed.value);
@@ -47,33 +47,36 @@ const groups = computed(() => {
 const title = computed(() =>
   s.forgetting.value.length
     ? `Forget ${s.forgetting.value.join(", ")}`
-    : `What a run of ${sync.value.name} would do`,
+    : "What a run would do",
 );
 </script>
 
 <template>
   <div class="sp">
-    <h2 class="sp-title">{{ title }}</h2>
+    <p class="sp-title">{{ title }}</p>
 
     <div class="sp-empty" v-if="p.empty">
       <Pixels of="in-step" :size="64" class="sp-art" />
-      <p>Nothing to do: every folder already holds what it should.</p>
+      <p class="sp-empty-say">Already in step</p>
+      <p class="sp-empty-why">Every folder holds what it should, so a run would change nothing.</p>
+      <Button look="primary" @click="s.back()">Back to {{ sync.name }}</Button>
     </div>
 
     <template v-else>
       <ul class="sp-members">
         <li v-for="m in p.members" :key="m.name" class="sp-member">
-          <b>{{ m.name }}</b>
-          <span class="path sp-at">{{ m.at }}</span>
+          <span class="sp-who"><b>{{ m.name }}</b><span class="path sp-at" :title="m.at">{{ m.at }}</span></span>
+          <span class="sp-changes">
           <span class="sp-line" v-if="m.arriving">{{ files(arriving(m)) }} arriving, {{ bytes(m.arriving_bytes) }}</span>
           <span class="sp-line" v-if="m.leaving">{{ files(leaving(m)) }} copied to the others</span>
           <span class="sp-line" v-if="m.replacing">
             {{ files(replacing(m)) }} replaced, the old {{ m.replacing === 1 ? "version" : "versions" }} {{ m.deleting ? "deleted" : "set aside" }}
           </span>
-          <span class="sp-line sp-off" v-if="m.removing">{{ files(removing(m)) }} removed, {{ m.deleting ? "deleted for good" : "kept in the set-aside area" }}</span>
+          <span class="sp-line sp-off" v-if="m.removing">{{ files(removing(m)) }} {{ m.deleting ? "deleted for good" : "set aside" }}</span>
           <span class="sp-line" v-if="m.renaming">{{ files(renaming(m)) }} renamed</span>
           <span class="sp-line" v-if="m.parking">{{ files(parking(m)) }} parked beside the {{ m.parking === 1 ? "file it conflicts with" : "files they conflict with" }}</span>
           <span class="sp-line sp-quiet" v-if="!m.arriving && !m.leaving && !m.replacing && !m.removing && !m.renaming && !m.parking">nothing changes here</span>
+          </span>
           <span class="sp-holds">holds {{ files(holds(m)) }}</span>
         </li>
       </ul>
@@ -91,21 +94,22 @@ const title = computed(() =>
     <Notice tone="bad" v-if="!p.reversible">
       This run cannot be put back: it deletes {{ deleting }} {{ deleting === 1 ? "file" : "files" }} outright.
     </Notice>
-    <template v-if="p.refusals.length">
-      <Notice tone="hold" v-for="r in p.refusals" :key="`${r.kind}${r.member}`">{{ refusal(r) }}</Notice>
+    <!-- One notice for everything that needs a yes, with the yes inside it. -->
+    <Notice tone="hold" v-if="p.refusals.length">
+      <span class="sp-refusal" v-for="r in p.refusals" :key="`${r.kind}${r.member}`">{{ refusal(r) }}</span>
       <label class="sp-yes">
         <input type="checkbox" v-model="s.confirmed.value" />
         I have looked at this, and it is what I mean. Run it anyway.
       </label>
-    </template>
+    </Notice>
     <section class="sp-panel" v-if="s.seen.value.length">
-      <h2><Pixels of="conflict" :size="20" class="sp-icon" /> Changed differently on more than one folder</h2>
-      <p class="sp-note">Choose for each, or for all of them. Any left alone: {{ unanswered.toLowerCase() }}.</p>
+      <h2><Pixels of="conflict" :size="20" class="sp-icon" /> Changed in more than one place</h2>
+      <p class="sp-note">Choose for each, or for all of them. Any you leave: {{ unanswered.charAt(0).toLowerCase() + unanswered.slice(1) }}</p>
       <div class="sp-all">
         <span>For all of them:</span>
         <Button v-for="k in keepers" :key="k" @click="s.chooseAll(k)">Keep {{ k }}'s</Button>
         <Button @click="s.chooseAll('both')">{{ keepers.length > 2 ? "Keep all" : "Keep both" }}</Button>
-        <Button look="link" @click="s.chooseAll('leave')">Leave them</Button>
+        <Button look="link" @click="s.chooseAll('leave')">Leave all</Button>
       </div>
       <ul class="sp-conflicts">
         <li v-for="c in s.seen.value" :key="c.path" class="sp-conflict">
@@ -163,41 +167,45 @@ const title = computed(() =>
 
     <Notice tone="bad" v-if="s.problem.value">{{ s.problem.value }}</Notice>
 
-    <footer class="sp-foot">
-      <Button look="primary" v-if="!p.empty" :disabled="blocked || s.rechecking.value" @click="s.run()">
-        {{ s.rechecking.value ? "Checking again…" : s.forgetting.value.length ? "Forget it" : "Run" }}
+    <footer class="sp-foot" v-if="!p.empty">
+      <Button :look="p.reversible ? 'primary' : 'danger'" :disabled="blocked || s.rechecking.value" @click="s.run()">
+        {{ s.rechecking.value ? "Checking again…" : s.forgetting.value.length ? "Forget it" : p.reversible ? "Run" : `Run and delete ${deleting} ${deleting === 1 ? "file" : "files"}` }}
       </Button>
-      <Button look="link" @click="s.back()">{{ p.empty ? "Back" : "Not now" }}</Button>
-      <span class="sp-hint" v-if="!p.empty && p.reversible">Every run can be put back afterwards, from this sync's page.</span>
+      <Button look="link" @click="s.back()">Not now</Button>
+      <span class="sp-hint sp-block" v-if="blocked">Tick the box above to run.</span>
+      <span class="sp-hint" v-else-if="p.reversible">Every run can be put back afterwards, from this sync's page.</span>
     </footer>
   </div>
 </template>
 
 <style scoped>
 .sp { display: flex; flex-direction: column; gap: var(--s4); }
-.sp-title { font-size: var(--title); font-weight: 700; margin: 0; }
+.sp-title { font-size: var(--body); color: var(--text-quiet); margin: calc(-1 * var(--s2)) 0 0; }
 h2 { display: flex; align-items: center; gap: var(--s2); font-size: var(--small); font-weight: 700; margin: 0 0 var(--s2); }
-.sp-empty { display: flex; align-items: center; gap: var(--s4); font-size: var(--body); color: var(--text-quiet); }
+.sp-empty { display: flex; flex-direction: column; align-items: center; gap: var(--s2); padding: var(--s6) 0; text-align: center; }
+.sp-empty-say { font-size: var(--title); font-weight: 700; margin: var(--s2) 0 0; }
+.sp-empty-why { font-size: var(--small); color: var(--text-quiet); margin: 0 0 var(--s3); }
 .sp-art { color: var(--control); }
 .sp-icon { color: var(--control); }
-.sp-members { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: var(--s3); }
+/* Rows on the same columns as the sync's own page: who, what happens to
+   it, how much it holds. */
+.sp-members { list-style: none; margin: 0; padding: 0; border-top: var(--bw) solid var(--rule); }
 .sp-member {
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  padding: var(--s3);
-  background: var(--panel);
-  border: var(--bw) solid var(--edge);
-  border-radius: var(--radius-lg);
-  box-shadow: var(--lift);
+  display: grid;
+  grid-template-columns: 200px minmax(0, 1fr) 120px;
+  gap: var(--s3);
+  align-items: baseline;
+  padding: var(--s3) 0;
+  border-bottom: var(--bw) solid var(--rule);
   font-size: var(--small);
-  min-width: 0;
 }
-.sp-at { font-size: var(--fine); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; margin-bottom: var(--s1); }
-.sp-line { font-size: var(--small); }
-.sp-off { color: var(--hold); font-weight: 600; }
+.sp-who { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sp-changes { display: flex; flex-direction: column; gap: 2px; }
+.sp-line { color: var(--text); }
+.sp-off { font-weight: 600; }
 .sp-quiet { color: var(--text-faint); }
-.sp-holds { font-size: var(--fine); color: var(--text-faint); margin-top: var(--s1); }
+.sp-at { font-size: var(--fine); color: var(--text-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-holds { justify-self: end; font-size: var(--fine); color: var(--text-faint); }
 .sp-legs { margin: 0; padding-left: 1.1em; font-size: var(--small); color: var(--text-quiet); line-height: 1.6; }
 .sp-panel {
   padding: var(--s3) var(--s4);
@@ -232,8 +240,33 @@ h2 { display: flex; align-items: center; gap: var(--s2); font-size: var(--small)
 .sp-group + .sp-group { margin-top: var(--s3); }
 .sp-why { font-size: var(--small); color: var(--text-quiet); margin: 0 0 var(--s2); }
 .sp-read { font-size: var(--fine); color: var(--text-faint); margin: 0; }
-.sp-yes { display: flex; align-items: center; gap: var(--s2); font-size: var(--small); }
-.sp-foot { display: flex; align-items: center; gap: var(--s3); flex-wrap: wrap; }
+.sp-refusal { display: block; }
+.sp-yes { margin-top: var(--s2); display: flex; align-items: center; gap: var(--s2); font-size: var(--small); }
+/* Pinned to the bottom of the page, so Run is in reach however long the
+   preview; it stays where it would be when the preview is short. */
+.sp-foot {
+  position: sticky;
+  bottom: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  flex-wrap: wrap;
+  /* Wider than the column by the cards' hard shadow, so a card scrolling
+     under it is covered whole rather than showing an edge beside it. */
+  margin: 0 calc(-1 * var(--s2));
+  padding: var(--s3) var(--s2);
+  z-index: 1;
+  background: var(--window-bg);
+}
+.sp-foot::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: var(--s2);
+  right: var(--s2);
+  border-top: var(--bw) solid var(--rule);
+}
 .sp-hint { font-size: var(--fine); color: var(--text-faint); }
+.sp-block { color: var(--hold); }
 :global([data-theme="retro"] .sp-seg-on) { background: var(--chosen); color: var(--chosen-ink); box-shadow: inset 0 0 0 var(--bw) var(--edge), var(--lift); }
 </style>

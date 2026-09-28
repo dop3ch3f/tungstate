@@ -1,6 +1,7 @@
 <!-- The Sync section: the list, a new sync, one sync, its preview, its run.
      The way back is on every screen after the first. -->
 <script setup lang="ts">
+import { computed } from "vue";
 import { useSync } from "../../state/useSync";
 import Button from "../../ui/Button.vue";
 import Tile from "../../ui/Tile.vue";
@@ -12,13 +13,19 @@ import SyncPreview from "./SyncPreview.vue";
 import SyncRun from "./SyncRun.vue";
 
 const s = useSync();
+/** One heading per page, as Organize has: the sync you are in, by name. */
+const heading = computed(() => {
+  if (s.phase.value === "make") return "New sync";
+  if (s.phase.value !== "list" && s.current.value) return s.current.value.name;
+  return "Sync";
+});
 </script>
 
 <template>
   <div class="sh">
     <div class="sh-inner">
       <div class="sh-head">
-        <Tile of="sync" :size="26" /><h1>Sync</h1>
+        <Tile of="sync" :size="26" /><h1>{{ heading }}</h1>
         <Button
           v-if="s.phase.value !== 'list' && s.phase.value !== 'running'"
           look="link"

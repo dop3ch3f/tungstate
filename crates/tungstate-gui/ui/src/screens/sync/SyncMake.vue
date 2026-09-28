@@ -84,7 +84,6 @@ async function make() {
 
 <template>
   <div class="mk">
-    <h2 class="mk-title">New sync</h2>
 
     <Field label="Name" note="How you will find it: capcut, photos, the NAS archive.">
       <input v-model="name" placeholder="capcut" />
@@ -145,7 +144,6 @@ async function make() {
 
 <style scoped>
 .mk { display: flex; flex-direction: column; gap: var(--s4); max-width: 820px; }
-.mk-title { font-size: var(--title); font-weight: 700; margin: 0; }
 .mk-block h2 { font-size: var(--small); font-weight: 700; margin: 0 0 var(--s2); }
 .mk-places { list-style: none; margin: 0 0 var(--s2); padding: 0; border-top: var(--bw) solid var(--rule); }
 .mk-place { display: grid; grid-template-columns: minmax(0, 1fr) 180px auto; gap: var(--s3); align-items: center; padding: 6px 0; border-bottom: var(--bw) solid var(--rule); }

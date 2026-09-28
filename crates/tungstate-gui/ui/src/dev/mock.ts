@@ -114,7 +114,7 @@ const syncList: T.SyncView[] = [
     name: "capcut", direction: "all", exact: true, anchor: null, ...syncSettings,
     // Only the launch scene has anything marked to run at launch, or its
     // sheet would sit over every other scene.
-    launch: sceneName === "sync-launch" ? "ask" : sceneName === "sync-following" || sceneName === "sync-held" ? "continuous" : "no",
+    launch: sceneName === "sync-launch" ? "ask" : sceneName === "sync-following" || sceneName.startsWith("sync-held") ? "continuous" : "no",
     members: [member("laptop", "~/Movies/CapCut"), member("nas", "nas:capcut", true)],
   },
   {
@@ -233,13 +233,13 @@ mockIPC((cmd, args) => {
     case "transfer_queue": return { running: null, waiting: [] };
     case "list_syncs": return syncList;
     case "following_state":
-      if (sceneName === "sync-following" || sceneName === "sync-held") {
+      if (sceneName === "sync-following" || sceneName.startsWith("sync-held")) {
         return {
           members: [
             { sync: "capcut", member: "laptop", state: "watching", every_secs: null, why: null },
-            { sync: "capcut", member: "nas", state: sceneName === "sync-held" ? "polling" : "paused", every_secs: 120, why: sceneName === "sync-held" ? null : "no route to host" },
+            { sync: "capcut", member: "nas", state: sceneName.startsWith("sync-held") ? "polling" : "paused", every_secs: 120, why: sceneName.startsWith("sync-held") ? null : "no route to host" },
           ],
-          held: sceneName === "sync-held" ? ["capcut"] : [],
+          held: sceneName.startsWith("sync-held") ? ["capcut"] : [],
         };
       }
       return { members: [], held: [] };
@@ -861,7 +861,12 @@ const scenes: Record<string, () => unknown> = {
     await syncAt(0);
     await sy.putBack("capcut", 31);
   },
-  "sync-settings": async () => { await syncAt(0); await tick(); document.querySelectorAll<HTMLButtonElement>(".so-acts button")[1]?.click(); },
+  // What each of a sync's own buttons opens.
+  "sync-add": async () => { await syncAt(0); await tick(); document.querySelectorAll<HTMLButtonElement>(".so-acts button")[1]?.click(); },
+  "sync-forget": async () => { await syncAt(0); await tick(); document.querySelectorAll<HTMLButtonElement>(".so-acts button")[2]?.click(); },
+  "sync-remove": async () => { await syncAt(0); await tick(); document.querySelector<HTMLButtonElement>(".so-says button")?.click(); await tick(); document.querySelector<HTMLButtonElement>(".so-foot .control-danger")?.click(); },
+  "sync-putback-ask": async () => { await syncAt(0); await tick(); document.querySelector<HTMLButtonElement>(".sr-rows button")?.click(); },
+  "sync-settings": async () => { await syncAt(0); await tick(); document.querySelector<HTMLButtonElement>(".so-says button")?.click(); },
   "sync-done-busy": async () => {
     await scenes["sync-done"]();
     sy.busy.value = 31;

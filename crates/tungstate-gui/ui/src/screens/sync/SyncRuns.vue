@@ -24,7 +24,7 @@ const props = defineProps<{
 const emit = defineEmits<{ putBack: [run: PastSync] }>();
 
 const state = (run: PastSync) =>
-  run.undone ? "put back" : run.undoable ? "can be put back" : "deleted outright";
+  run.undone ? "was put back" : run.undoable ? "can be put back" : "deleted outright";
 
 const table = useTable(toRef(props, "runs"), {
   columns: [
@@ -111,7 +111,9 @@ const table = useTable(toRef(props, "runs"), {
 .sr-sub { color: var(--text-faint); font-size: var(--fine); }
 .sr-when { color: var(--text-faint); font-size: var(--fine); }
 .sr-act { white-space: nowrap; }
-.sr-state { color: var(--text-faint); font-size: var(--fine); }
+/* A status in words beside the actions column's links; never underlined, so
+   it cannot be read as a link that is switched off. */
+.sr-state { color: var(--text-faint); font-size: var(--fine); font-style: italic; }
 .sr-nomatch { font-size: var(--small); color: var(--text-quiet); margin: var(--s3) 0 0; }
 :global([data-theme="retro"] .sr > :first-child) { padding: 6px 7px 6px var(--s3); }
 :global([data-theme="retro"] .sr-head) { background: var(--surface-raised); color: var(--text); font-weight: 700; font-family: var(--font-mono); }

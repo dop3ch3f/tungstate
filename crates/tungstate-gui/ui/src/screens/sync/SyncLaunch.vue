@@ -41,7 +41,7 @@ function lookAt(sync: SyncView) {
 </script>
 
 <template>
-  <Sheet v-if="asking.length" wide of="sync" title="Syncs to run now the app is open" @dismiss="asking = []">
+  <Sheet v-if="asking.length" wide of="sync" title="Ready to sync" @dismiss="asking = []">
     <!-- Its own section's colours, wherever in the window it opens: the
          sheet is teleported to the frame, so the scope is set in here. -->
     <div data-half="sync" class="la">
@@ -51,8 +51,8 @@ function lookAt(sync: SyncView) {
         <span class="la-way">{{ way(one.sync) }}</span>
         <span class="la-what">
           {{ files(arrivingAcross(one.preview)) }} to copy<template v-if="removingAcross(one.preview)">,
-          {{ files(removingAcross(one.preview)) }} removed, and kept in the set-aside area</template><template v-if="one.preview.conflicts.length">,
-          {{ one.preview.conflicts.length }} changed on more than one folder</template>
+          {{ files(removingAcross(one.preview)) }} to set aside</template><template v-if="one.preview.conflicts.length">,
+          {{ one.preview.conflicts.length }} changed in more than one place</template>
         </span>
         <Notice tone="hold" v-for="r in one.preview.refusals" :key="`${r.kind}${r.member}`">{{ refusal(r) }}</Notice>
         <Notice tone="bad" v-if="!one.preview.reversible">This one deletes outright and cannot be put back.</Notice>

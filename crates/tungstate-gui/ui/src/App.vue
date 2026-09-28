@@ -85,7 +85,7 @@ const WHERE = {
       <span class="live" v-if="t.running.value" title="A transfer is running">●</span>
       <span class="live" v-if="sy.running.value" title="A sync is running">●</span>
       <button class="waits" v-if="sy.followingNow.value.held.length" title="A sync is waiting for you" @click="nav.go('sync')">
-        ● {{ sy.followingNow.value.held.length === 1 ? "A sync is waiting for you" : `${sy.followingNow.value.held.length} syncs are waiting for you` }}
+        ● {{ sy.followingNow.value.held.length === 1 ? "A sync needs you" : `${sy.followingNow.value.held.length} syncs need you` }}
       </button>
       <button class="waits news" v-if="up.ready.value" @click="up.showing.value = true">
         ● Version {{ up.ready.value.version }} is ready

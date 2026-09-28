@@ -488,3 +488,46 @@ and retry for a failed file, which needs an engine command.
 Left, for shared pieces: a "…" menu for rows with many actions (here and on
 saved pairs). And the engine's check wording ("refused the credentials it
 was given", "6 things in media") could be shorter at the source.
+
+### Sync (critic 6.5/10 → 6.5/10, and why that is where it stopped)
+
+- One heading per page: the sync's own name, as Organize has a folder's.
+  The second "Sync" and the extra h2 are gone.
+- A sync's page reads top down:
+  - its settings in one line, with Change;
+  - its folders on fixed columns, each with a status dot;
+  - one main button, Preview a run, with Add a folder and Forget a file
+    beside it;
+  - its runs.
+
+  Remove moved into the settings sheet, whose Save and Remove are pinned to
+  the bottom.
+- Add a folder asks where first, then what to call it, with Cancel and Add.
+- The preview:
+  - lists folders on the same columns;
+  - puts everything that needs a yes in one notice, with the yes inside it;
+  - pins Run to the bottom, covering what scrolls under it.
+
+  A run that deletes outright has a red "Run and delete 4 files". A blocked
+  Run says "Tick the box above to run". A conflict left unanswered is
+  explained in the setting's own words.
+- Nothing to do is a centred "Already in step" with a way back.
+- A run shows an overall bar, as a transfer does. When it ends:
+  - the result leads in one line, with a box only if it was stopped;
+  - "Not done" lists each file with its reason beside it;
+  - Done comes first, and Put it back sits apart from it.
+- The list marks a waiting sync with a chip by its name, rows end in a
+  chevron, and each says when it last ran. An undone run's state is quiet
+  italic words, never mistaken for a link. The sidebar says "A sync needs
+  you" on one line.
+- Refusals are shorter: the fact, then the one reason it matters.
+
+The score held at 6.5 across three rounds. Its reasons had moved to pieces
+every section shares:
+- five notice styles;
+- tables framed as windows inside windows;
+- minimise and maximise buttons on dialogs;
+- blue focus rings;
+- one shadow on everything.
+
+You chose to commit Sync and do those next, across the whole app.
