@@ -152,15 +152,15 @@ jobs:
             chrislusf/seaweedfs@sha256:4e61d15fd35994cb1e43e1e553dff106794841fd9a99ade2fc8c8bfce4d7872d \
             server -s3 -s3.config=/etc/s3.json -dir=/data
 
-          # Ready means the bucket exists and the S3 port answers. Up to three
-          # minutes: its master elects itself leader first, which has been
-          # seen to take over a minute on a busy runner. Pinned by digest so a
-          # new release cannot change what "ready" takes under us.
-          # Each check's own answer is kept, so a service that never comes up
-          # says which check it failed and why.
+          # Ready means the bucket exists and the S3 port answers. Creating the
+          # bucket fails once it exists, so its answer is not a gate: when it
+          # was, a bucket made while the S3 port was still starting failed
+          # every later round and the check could never pass. Each check's
+          # answer is kept, so a service that never comes up says why. The
+          # image is pinned by digest so a new release cannot change this.
           for _ in $(seq 1 180); do
-            made=$(docker exec tungstate-s3 sh -c "echo 's3.bucket.create -name tungstate' | weed shell" 2>&1) \
-              && listed=$(docker exec tungstate-s3 sh -c "echo 's3.bucket.list' | weed shell" 2>&1) \
+            made=$(docker exec tungstate-s3 sh -c "echo 's3.bucket.create -name tungstate' | weed shell" 2>&1) || true
+            listed=$(docker exec tungstate-s3 sh -c "echo 's3.bucket.list' | weed shell" 2>&1) \
               && echo "$listed" | grep -q tungstate \
               && answered=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ 2>&1) \
               && { echo "s3 service is ready (http $answered)"; exit 0; }
