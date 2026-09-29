@@ -156,16 +156,20 @@ jobs:
           # minutes: its master elects itself leader first, which has been
           # seen to take over a minute on a busy runner. Pinned by digest so a
           # new release cannot change what "ready" takes under us.
+          # Each check's own answer is kept, so a service that never comes up
+          # says which check it failed and why.
           for _ in $(seq 1 180); do
-            if docker exec tungstate-s3 sh -c "echo 's3.bucket.create -name tungstate' | weed shell" >/dev/null 2>&1 \
-              && docker exec tungstate-s3 sh -c "echo 's3.bucket.list' | weed shell" 2>/dev/null | grep -q tungstate \
-              && curl -s -o /dev/null http://127.0.0.1:9000/; then
-              echo "s3 service is ready"
-              exit 0
-            fi
+            made=$(docker exec tungstate-s3 sh -c "echo 's3.bucket.create -name tungstate' | weed shell" 2>&1) \
+              && listed=$(docker exec tungstate-s3 sh -c "echo 's3.bucket.list' | weed shell" 2>&1) \
+              && echo "$listed" | grep -q tungstate \
+              && answered=$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1:9000/ 2>&1) \
+              && { echo "s3 service is ready (http $answered)"; exit 0; }
             sleep 1
           done
           echo "s3 service never came up" >&2
+          echo "bucket.create said: $made" >&2
+          echo "bucket.list said: $listed" >&2
+          echo "curl said: $answered" >&2
           exit 1
 
       - uses: dtolnay/rust-toolchain@stable
