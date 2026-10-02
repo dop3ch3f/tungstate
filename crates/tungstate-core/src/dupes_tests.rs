@@ -608,3 +608,23 @@ fn a_group_nobody_ticked_produces_nothing() {
 
     assert!(dealings.is_empty());
 }
+
+#[test]
+fn the_candidates_are_the_files_sharing_a_size_and_nothing_else() {
+    let snapshot = folder(&[
+        at("a.mp4", 100, Some(1)),
+        at("b.mp4", 100, Some(2)),
+        at("alone.mp4", 7, Some(3)),
+        // A second name for c.mp4 is never read, so it is not a candidate.
+        linked("c.mp4", 100, Some(4), "inode-1"),
+        linked("deep/c.mp4", 100, Some(4), "inode-1"),
+    ]);
+
+    assert_eq!(
+        dupes::candidates(&snapshot),
+        ["a.mp4", "b.mp4", "c.mp4"]
+            .into_iter()
+            .map(String::from)
+            .collect::<BTreeSet<_>>()
+    );
+}

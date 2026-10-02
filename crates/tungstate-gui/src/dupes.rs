@@ -275,11 +275,22 @@ fn place(target: &str, journal: &Journal) -> Result<Place, String> {
 ///
 /// The probe policy, as `learn` uses: duplicate-finding has nothing to do with
 /// rules, so needing a governed folder would be a rule invented by plumbing.
-fn look(backend: &dyn Backend) -> Result<tungstate_core::Snapshot, String> {
+///
+/// A listing and nothing more unless `sniff`: identical files are found by
+/// size and then by reading, and a file's kind comes from its extension, so
+/// opening every file here would cost a request each over a network for
+/// nothing. Looking for files that are nearly the same does use the media
+/// type, and only ever runs on this machine, where reading it is cheap.
+fn look(backend: &dyn Backend, sniff: bool) -> Result<tungstate_core::Snapshot, String> {
     let probe = tungstate_core::policy::Policy::parse(tungstate_core::learn::PROBE)
         .expect("the probe policy parses")
         .policy;
-    tungstate_attrs::survey(backend, &probe).map_err(|error| error.to_string())
+    let tier = if sniff {
+        probe.required_tier()
+    } else {
+        tungstate_attrs::Tier::Stat
+    };
+    tungstate_attrs::survey_at(backend, &probe, tier).map_err(|error| error.to_string())
 }
 
 /// Scan, reporting progress through `watcher` and stopping when asked.
@@ -302,7 +313,7 @@ pub fn scan(
                 .to_string(),
         );
     }
-    let snapshot = look(place.backend.as_ref())?;
+    let snapshot = look(place.backend.as_ref(), also_similar)?;
     let stop = scan.begin();
     let files = snapshot
         .entries
@@ -598,7 +609,7 @@ pub fn clear(
         return Err("the trash is this machine's; set aside instead".to_string());
     }
 
-    let snapshot = look(place.backend.as_ref())?;
+    let snapshot = look(place.backend.as_ref(), also_similar)?;
     let stop = scan_state.begin();
     let wanted: std::collections::BTreeSet<String> = paths.iter().cloned().collect();
     let mut digest = Cached::new(place.backend.as_ref(), journal, &place.root)
@@ -746,7 +757,7 @@ fn under<'a>(
 /// A sentence, from opening the place or from the undo itself.
 pub fn put_back(target: &str, plan: i64, journal: &Journal) -> Result<usize, String> {
     let place = place(target, journal)?;
-    let snapshot = look(place.backend.as_ref())?;
+    let snapshot = look(place.backend.as_ref(), false)?;
     let undone = tungstate_execute::undo(
         tungstate_journal::plans::PlanId(plan),
         &snapshot,

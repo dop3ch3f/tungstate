@@ -448,3 +448,42 @@ fn a_survey_of_an_unreachable_folder_is_an_error_not_an_empty_folder() {
     let backend = LocalBackend::new(d.path().join("not-here"));
     assert!(survey(&backend, &surveying_policy()).is_err());
 }
+
+#[test]
+fn a_listing_reads_nothing_and_deepening_reads_only_what_is_named() {
+    let dir = dir();
+    std::fs::write(
+        dir.path().join("a.jpg"),
+        jpeg_with_exif_date("2021:06:01 10:00:00"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("b.jpg"),
+        jpeg_with_exif_date("2022:06:01 10:00:00"),
+    )
+    .unwrap();
+    let counting = Counting::new(dir.path());
+    let probe = policy(tungstate_core::learn::PROBE);
+    assert_eq!(probe.required_tier(), Tier::Meta);
+
+    let mut snapshot = survey_at(&counting, &probe, Tier::Stat).unwrap();
+    assert!(counting.prefixes().is_empty(), "a listing reads no file");
+    assert!(snapshot.entries.iter().all(|entry| entry.mime.is_none()));
+
+    let named: BTreeSet<String> = std::iter::once("b.jpg".to_string()).collect();
+    deepen(&counting, &mut snapshot, &named, Tier::Meta).unwrap();
+    assert_eq!(
+        counting.prefixes(),
+        vec![Tier::META_BYTES],
+        "one read, for b.jpg"
+    );
+    let mime = |path: &str| {
+        snapshot
+            .entries
+            .iter()
+            .find(|entry| entry.relative_path() == path)
+            .and_then(|entry| entry.mime.clone())
+    };
+    assert_eq!(mime("a.jpg"), None);
+    assert_eq!(mime("b.jpg").as_deref(), Some("image/jpeg"));
+}

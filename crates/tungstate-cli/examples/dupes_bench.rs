@@ -119,7 +119,8 @@ fn pass(backend: &dyn Backend, journal: &Journal, root: &str, tally: &Tally) -> 
         .expect("the probe policy parses")
         .policy;
     tally.enter(Stage::List);
-    let snapshot = tungstate_attrs::survey(backend, &probe).expect("the folder lists");
+    let snapshot = tungstate_attrs::survey_at(backend, &probe, tungstate_attrs::Tier::Stat)
+        .expect("the folder lists");
     let listed = snapshot
         .entries
         .iter()

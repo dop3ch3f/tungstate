@@ -1983,6 +1983,34 @@ fn a_second_look_reads_nothing() {
 }
 
 #[test]
+fn the_copy_already_in_place_is_kept_even_when_only_its_contents_say_so() {
+    // The rule matches on the media type, which a listing does not know: it
+    // is read later, and only for the files that share a size.
+    let home = sandbox();
+    let root = home.path().join("Downloads");
+    std::fs::create_dir_all(root.join(".tungstate")).unwrap();
+    std::fs::create_dir_all(root.join("Photos")).unwrap();
+    std::fs::write(
+        root.join(".tungstate/policy.toml"),
+        "[folder]\nname = \"p\"\n[defaults]\ncooldown = \"0s\"\n\n[[rule]]\nname = \"photos\"\npath = \"Photos\"\nmatch = { mime = \"image/*\" }\n",
+    )
+    .unwrap();
+    let photo = tungstate_attrs::jpeg_with_exif_date("2023:12:25 08:30:00");
+    std::fs::write(root.join("a"), &photo).unwrap();
+    std::fs::write(root.join("Photos/a longer name"), &photo).unwrap();
+
+    let output = sandboxed(&home)
+        .args(["dedupe", root.to_str().unwrap(), "--json"])
+        .output()
+        .unwrap();
+    let found: serde_json::Value = serde_json::from_slice(&output.stdout).expect("json");
+
+    let group = &found["groups"][0];
+    assert_eq!(group["keep"], "Photos/a longer name", "{found}");
+    assert_eq!(group["why"], "settled", "{found}");
+}
+
+#[test]
 fn timings_say_what_each_stage_cost() {
     let home = governed();
     let root = home.path().join("Downloads");

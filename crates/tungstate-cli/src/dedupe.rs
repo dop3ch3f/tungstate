@@ -82,7 +82,7 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
     let tally = Arc::new(Tally::new());
     let counted = Counted::new(&backend, Arc::clone(&tally));
     tally.enter(Stage::List);
-    let snapshot = match tungstate_attrs::survey(&counted, &loaded.policy) {
+    let snapshot = match look(&counted, &loaded.policy, asked.similar) {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::fail(&error),
     };
@@ -176,6 +176,30 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
         &journal,
         &root,
     )
+}
+
+/// The folder, read as far as the search needs.
+///
+/// A listing first, because size decides who could be a duplicate. The rules'
+/// attributes are then read only for files that share a size with another:
+/// they decide which copy is already in place, and a file alone at its size
+/// is never in a group. Looking for files that are nearly the same reads
+/// everything the rules would, since it compares every picture.
+fn look(
+    backend: &dyn tungstate_backend::Backend,
+    policy: &tungstate_core::Policy,
+    similar: bool,
+) -> Result<tungstate_core::Snapshot, tungstate_attrs::GatherError> {
+    let wanted = policy.required_tier();
+    if similar {
+        return tungstate_attrs::survey_at(backend, policy, wanted);
+    }
+    let mut snapshot = tungstate_attrs::survey_at(backend, policy, tungstate_attrs::Tier::Stat)?;
+    if wanted > tungstate_attrs::Tier::Stat {
+        let candidates = dupes::candidates(&snapshot);
+        tungstate_attrs::deepen(backend, &mut snapshot, &candidates, wanted)?;
+    }
+    Ok(snapshot)
 }
 
 /// Confirm every unconfirmed group, and drop the ones the samples got wrong.

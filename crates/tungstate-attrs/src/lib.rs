@@ -64,11 +64,24 @@ pub fn gather(backend: &dyn Backend, path: &Path, tier: Tier) -> Result<Attribut
         .modified
         .and_then(|time| Timestamp::try_from(time).ok());
     attrs.identity = meta.identity;
+    fill(backend, &mut attrs, tier)?;
+    Ok(attrs)
+}
 
+/// Read what `tier` allows beyond a listing into `attrs`: the media type and
+/// EXIF from a prefix, or the hash from every byte. The listing's half is
+/// already there and costs no request.
+fn fill(backend: &dyn Backend, attrs: &mut Attributes, tier: Tier) -> Result<()> {
     // A directory or a link has no content worth sniffing, whatever the tier.
-    if meta.is_dir || meta.is_symlink {
-        return Ok(attrs);
+    if attrs.is_dir || attrs.is_symlink {
+        return Ok(());
     }
+    let relative = attrs.relative_path();
+    let path = Path::new(&relative);
+    let failed = |source: BackendError| GatherError::Backend {
+        path: relative.clone(),
+        source,
+    };
 
     if let Some(len) = tier.prefix_len() {
         let head = backend.read_prefix(path, len).map_err(failed)?;
@@ -96,8 +109,7 @@ pub fn gather(backend: &dyn Backend, path: &Path, tier: Tier) -> Result<Attribut
             attrs.exif = read_exif(&head);
         }
     }
-
-    Ok(attrs)
+    Ok(())
 }
 
 /// Walk a whole folder and gather what `policy` needs about everything in it.
@@ -116,8 +128,19 @@ pub fn gather(backend: &dyn Backend, path: &Path, tier: Tier) -> Result<Attribut
 /// # Errors
 /// [`GatherError::Backend`] if the walk or any file cannot be read.
 pub fn survey(backend: &dyn Backend, policy: &Policy) -> Result<Snapshot> {
+    survey_at(backend, policy, policy.required_tier())
+}
+
+/// [`survey`], reading what `tier` allows rather than what the policy asks.
+///
+/// `Tier::Stat` is a listing and nothing more: what the duplicate pass needs,
+/// since size and time are all it compares before it reads. Anything else a
+/// caller wants it can [`deepen`] for the few files that turn out to matter.
+///
+/// # Errors
+/// As [`survey`].
+pub fn survey_at(backend: &dyn Backend, policy: &Policy, tier: Tier) -> Result<Snapshot> {
     let taken = Timestamp::now();
-    let tier = policy.required_tier();
     let failed = |path: &str| {
         let path = path.to_string();
         move |source: BackendError| GatherError::Backend { path, source }
@@ -165,6 +188,25 @@ pub fn survey(backend: &dyn Backend, policy: &Policy) -> Result<Snapshot> {
         directories,
         backend.capabilities().case_sensitive,
     ))
+}
+
+/// Read what `tier` allows for each of `paths` in a snapshot taken at a
+/// lower one. Entries not named are left as they were.
+///
+/// # Errors
+/// [`GatherError::Backend`] if a named file cannot be read.
+pub fn deepen(
+    backend: &dyn Backend,
+    snapshot: &mut Snapshot,
+    paths: &BTreeSet<String>,
+    tier: Tier,
+) -> Result<()> {
+    for attrs in &mut snapshot.entries {
+        if paths.contains(&attrs.relative_path()) {
+            fill(backend, attrs, tier)?;
+        }
+    }
+    Ok(())
 }
 
 /// The path with forward slashes, as the policy language spells paths.

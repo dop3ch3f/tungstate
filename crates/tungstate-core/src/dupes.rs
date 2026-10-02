@@ -323,12 +323,25 @@ fn stopped_or(path: &str, why: String) -> Trouble {
     }
 }
 
-/// Find the duplicates in a snapshot.
+/// The paths a pass will read: files that share their size with another.
 ///
-/// # Errors
-/// [`Trouble::Unreadable`] if the digest fails, [`Trouble::TwoPins`] if two
-/// pinned paths are the same content.
-pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Result<Found, Trouble> {
+/// Everything else is alone at its size and cannot be a duplicate, so a
+/// caller that wants more than a listing knows about a file (its media type,
+/// say) only has to ask about these.
+#[must_use]
+pub fn candidates(snapshot: &Snapshot) -> BTreeSet<String> {
+    let (_, by_size) = sized(snapshot);
+    by_size
+        .values()
+        .filter(|same| same.len() > 1)
+        .flatten()
+        .map(|file| file.relative_path())
+        .collect()
+}
+
+/// Files by size, each file once: names for a file that already has one go
+/// into the hard-link report instead.
+fn sized(snapshot: &Snapshot) -> (Vec<Linked>, BTreeMap<u64, Vec<&Attributes>>) {
     let all: Vec<&Attributes> = snapshot
         .entries
         .iter()
@@ -374,6 +387,16 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
     for file in files {
         by_size.entry(file.size).or_default().push(file);
     }
+    (linked, by_size)
+}
+
+/// Find the duplicates in a snapshot.
+///
+/// # Errors
+/// [`Trouble::Unreadable`] if the digest fails, [`Trouble::TwoPins`] if two
+/// pinned paths are the same content.
+pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Result<Found, Trouble> {
+    let (linked, by_size) = sized(snapshot);
 
     let mut found = Found {
         linked,
