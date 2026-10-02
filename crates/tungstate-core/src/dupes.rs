@@ -45,6 +45,34 @@ pub trait Digest {
     /// # Errors
     /// Whatever reading the file failed with, as a sentence.
     fn whole(&mut self, path: &str) -> Result<String, String>;
+
+    /// [`Digest::partial`] of each of `paths`, answered in the order asked.
+    ///
+    /// The pass asks for every candidate at once so that an implementation
+    /// reading over a network can have several requests in flight. The
+    /// default asks one at a time, which is right for anything that is not
+    /// waiting on a round trip.
+    ///
+    /// # Errors
+    /// [`Trouble::Unreadable`] naming a file that could not be read, or
+    /// [`Trouble::Stopped`].
+    fn partials(&mut self, paths: &[String]) -> Result<Vec<String>, Trouble> {
+        paths
+            .iter()
+            .map(|path| self.partial(path).map_err(|why| stopped_or(path, why)))
+            .collect()
+    }
+
+    /// [`Digest::whole`] of each of `paths`, as [`Digest::partials`].
+    ///
+    /// # Errors
+    /// As [`Digest::partials`].
+    fn wholes(&mut self, paths: &[String]) -> Result<Vec<String>, Trouble> {
+        paths
+            .iter()
+            .map(|path| self.whole(path).map_err(|why| stopped_or(path, why)))
+            .collect()
+    }
 }
 
 /// What the caller wants of a pass.
@@ -402,33 +430,37 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
         linked,
         ..Found::default()
     };
-    let mut by_hash: BTreeMap<String, Vec<&Attributes>> = BTreeMap::new();
-    for (_, candidates) in by_size.iter().filter(|(_, same)| same.len() > 1) {
-        // 2. The ends of the file, which splits most same-size sets apart.
-        let mut by_partial: BTreeMap<String, Vec<&Attributes>> = BTreeMap::new();
-        for file in candidates {
-            let path = file.relative_path();
-            let mark = digest
-                .partial(&path)
-                .map_err(|why| stopped_or(&path, why))?;
-            found.digested += 1;
-            by_partial.entry(mark).or_default().push(file);
-        }
+    // 2. A sample of each, which splits most same-size sets apart. Asked for
+    //    all at once, so the reading can overlap; grouped afterwards, in the
+    //    same order whatever order the answers arrived in.
+    let candidates: Vec<&Attributes> = by_size
+        .values()
+        .filter(|same| same.len() > 1)
+        .flatten()
+        .copied()
+        .collect();
+    let marks = digest.partials(&paths_of(&candidates))?;
+    found.digested += candidates.len();
+    let mut by_partial: BTreeMap<(u64, String), Vec<&Attributes>> = BTreeMap::new();
+    for (file, mark) in candidates.into_iter().zip(marks) {
+        by_partial.entry((file.size, mark)).or_default().push(file);
+    }
 
-        // 3. Every byte, and only now are two files called the same. Skipped
-        //    on a network volume, where that means pulling both files across
-        //    it; the samples stand in, and the group says it is unconfirmed.
-        for (sampled, same_ends) in by_partial.iter().filter(|(_, same)| same.len() > 1) {
-            for file in same_ends {
-                if wants.sampled {
-                    by_hash.entry(sampled.clone()).or_default().push(file);
-                    continue;
-                }
-                let path = file.relative_path();
-                let whole = digest.whole(&path).map_err(|why| stopped_or(&path, why))?;
-                found.read_whole += 1;
-                by_hash.entry(whole).or_default().push(file);
-            }
+    // 3. Every byte, and only now are two files called the same. Skipped on
+    //    a network volume, where that means pulling both files across it; the
+    //    samples stand in, and the group says it is unconfirmed.
+    let mut by_hash: BTreeMap<String, Vec<&Attributes>> = BTreeMap::new();
+    let same_ends = by_partial.into_iter().filter(|(_, same)| same.len() > 1);
+    if wants.sampled {
+        for ((_, sampled), files) in same_ends {
+            by_hash.entry(sampled).or_default().extend(files);
+        }
+    } else {
+        let to_read: Vec<&Attributes> = same_ends.flat_map(|(_, files)| files).collect();
+        let wholes = digest.wholes(&paths_of(&to_read))?;
+        found.read_whole += to_read.len();
+        for (file, whole) in to_read.into_iter().zip(wholes) {
+            by_hash.entry(whole).or_default().push(file);
         }
     }
 
@@ -468,6 +500,10 @@ pub fn find(snapshot: &Snapshot, digest: &mut dyn Digest, wants: &Wants) -> Resu
             .then_with(|| a.keep.cmp(&b.keep))
     });
     Ok(found)
+}
+
+fn paths_of(files: &[&Attributes]) -> Vec<String> {
+    files.iter().map(|file| file.relative_path()).collect()
 }
 
 /// Turn "these paths share a digest" into "this one stays, those go".

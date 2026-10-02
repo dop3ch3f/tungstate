@@ -18,6 +18,9 @@ tungstate-core = { path = "../tungstate-core" }
 tungstate-backend = { path = "../tungstate-backend" }
 tungstate-journal = { path = "../tungstate-journal" }
 tungstate-likeness = { path = "../tungstate-likeness" }
+# The width a transfer settles on, and its back-off when refused, reused so
+# reading for duplicates asks a NAS for no more than a copy would.
+tungstate-transfer = { path = "../tungstate-transfer" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 jiff = { workspace = true }

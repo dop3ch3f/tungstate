@@ -23,7 +23,7 @@ pub use conflict::{
     Conflict, ConflictResolver, Decision, FixedResolver, Identical, IdenticalAction,
     InteractiveResolver,
 };
-pub use governor::{Governor, Limits};
+pub use governor::{Governor, Limits, is_overload};
 pub use stop::{Halt, Stop};
 
 use std::collections::BTreeMap;

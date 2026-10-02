@@ -1058,3 +1058,203 @@ fn recovery_on_a_connection_leaves_another_places_work_alone() {
     assert!(resolved.is_empty());
     assert_eq!(fixture.journal.incomplete().unwrap().len(), 1);
 }
+
+/// A [`Cached`](crate::digest::Cached) asked one file at a time, as the pass
+/// asked before it could ask for several: the reference the others match.
+struct OneByOne<'a>(crate::digest::Cached<'a>);
+
+impl tungstate_core::dupes::Digest for OneByOne<'_> {
+    fn partial(&mut self, path: &str) -> std::result::Result<String, String> {
+        self.0.partial(path)
+    }
+    fn whole(&mut self, path: &str) -> std::result::Result<String, String> {
+        self.0.whole(path)
+    }
+}
+
+/// Files that share sizes, some identical, some alike only at the ends.
+fn a_library() -> impl Strategy<Value = Vec<(usize, u8, bool)>> {
+    // (which name, which content, whether its middle differs). Two lengths:
+    // a few bytes, and long enough that all four samples are taken.
+    proptest::collection::vec((0_usize..12, 0_u8..3, any::<bool>()), 0..12)
+}
+
+proptest! {
+    #![proptest_config(ProptestConfig::with_cases(24))]
+
+    #[test]
+    fn reading_several_at_once_finds_what_reading_one_at_a_time_does(
+        files in a_library(),
+        sampled in any::<bool>(),
+    ) {
+        use tungstate_core::dupes::{Wants, find};
+        let fixture = Fixture::new(inert(), &[]);
+        for (name, content, middle) in &files {
+            let long = *name % 2 == 0;
+            let mut bytes = vec![*content; if long { 300_000 } else { 9 }];
+            if *middle {
+                let half = bytes.len() / 2;
+                bytes[half] ^= 0xFF;
+            }
+            let dir = fixture.dir.path().join(format!("d{}", name % 3));
+            std::fs::create_dir_all(&dir).expect("dir");
+            std::fs::write(dir.join(format!("f{name}.bin")), bytes).expect("file");
+        }
+        let snapshot = fixture.survey();
+        let wants = Wants { sampled, ..Wants::default() };
+        let backend = fixture.backend();
+        let root = fixture.root();
+
+        // A fresh journal each, so nothing is remembered from the run before.
+        let journals: Vec<Journal> = (0..3).map(|_| Journal::open_in_memory().expect("journal")).collect();
+        let mut one_by_one = OneByOne(crate::digest::Cached::new(&backend, &journals[0], &root));
+        let expected = find(&snapshot, &mut one_by_one, &wants).expect("the pass runs");
+        for (width, journal) in [1, 8].into_iter().zip(&journals[1..]) {
+            let mut digest = crate::digest::Cached::new(&backend, journal, &root)
+                .knowing(&snapshot)
+                .at_once(width);
+            let found = find(&snapshot, &mut digest, &wants).expect("the pass runs");
+            prop_assert_eq!(&found, &expected, "at {} at once", width);
+        }
+    }
+}
+
+/// The local backend, except that its first few ranged reads are refused the
+/// way a busy FTP server refuses: `421`, too many connections.
+struct Busy {
+    inner: LocalBackend,
+    refusals: std::sync::atomic::AtomicUsize,
+}
+
+impl tungstate_backend::Backend for Busy {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.inner.capabilities()
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        self.inner.root_token()
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.inner.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.inner.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.inner.open_read(path)
+    }
+    fn read_range(&self, path: &Path, offset: u64, len: u64) -> tungstate_backend::Result<Vec<u8>> {
+        use std::sync::atomic::Ordering;
+        let refuse = self
+            .refusals
+            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+                left.checked_sub(1)
+            })
+            .is_ok();
+        if refuse {
+            return Err(BackendError::Remote {
+                endpoint: "busy".to_string(),
+                operation: "read",
+                source: "421 There are too many connections from your internet address".into(),
+            });
+        }
+        self.inner.read_range(path, offset, len)
+    }
+    fn create_write(
+        &self,
+        path: &Path,
+    ) -> tungstate_backend::Result<Box<dyn tungstate_backend::WriteFinish>> {
+        self.inner.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.create_dir_all(path)
+    }
+}
+
+/// Six pairs of identical files, so there is plenty to read at once.
+fn pairs() -> Fixture {
+    let files: Vec<(String, String)> = (0..6)
+        .flat_map(|n| {
+            let body = format!("content number {n}");
+            [
+                (format!("a/{n}.bin"), body.clone()),
+                (format!("b/{n}.bin"), body),
+            ]
+        })
+        .collect();
+    let borrowed: Vec<(&str, &str)> = files
+        .iter()
+        .map(|(p, b)| (p.as_str(), b.as_str()))
+        .collect();
+    Fixture::new(inert(), &borrowed)
+}
+
+#[test]
+fn a_refusal_means_fewer_at_once_and_the_file_is_asked_for_again() {
+    let fixture = pairs();
+    let snapshot = fixture.survey();
+    let busy = Busy {
+        inner: fixture.backend(),
+        refusals: std::sync::atomic::AtomicUsize::new(2),
+    };
+    let wants = tungstate_core::dupes::Wants {
+        sampled: true,
+        ..tungstate_core::dupes::Wants::default()
+    };
+
+    let mut digest = crate::digest::Cached::new(&busy, &fixture.journal, &fixture.root())
+        .knowing(&snapshot)
+        .at_once(4);
+    let found = tungstate_core::dupes::find(&snapshot, &mut digest, &wants)
+        .expect("the refused files were asked for again");
+    assert_eq!(found.extra_files(), 6, "every pair was found: {found:?}");
+}
+
+#[test]
+fn a_refusal_with_nobody_else_reading_is_a_failure() {
+    let fixture = pairs();
+    let snapshot = fixture.survey();
+    let busy = Busy {
+        inner: fixture.backend(),
+        refusals: std::sync::atomic::AtomicUsize::new(1),
+    };
+    let wants = tungstate_core::dupes::Wants {
+        sampled: true,
+        ..tungstate_core::dupes::Wants::default()
+    };
+
+    let mut digest = crate::digest::Cached::new(&busy, &fixture.journal, &fixture.root())
+        .knowing(&snapshot)
+        .at_once(1);
+    let trouble = tungstate_core::dupes::find(&snapshot, &mut digest, &wants)
+        .expect_err("one at a time is as few as it gets");
+    assert!(
+        matches!(trouble, tungstate_core::dupes::Trouble::Unreadable { .. }),
+        "{trouble:?}"
+    );
+}
+
+#[test]
+fn a_scan_asked_to_stop_stops() {
+    let fixture = pairs();
+    let snapshot = fixture.survey();
+    let backend = fixture.backend();
+    let mut digest = crate::digest::Cached::new(&backend, &fixture.journal, &fixture.root())
+        .knowing(&snapshot)
+        .stopping_when(Box::new(|| true));
+    let stopped = tungstate_core::dupes::find(
+        &snapshot,
+        &mut digest,
+        &tungstate_core::dupes::Wants::default(),
+    );
+    assert_eq!(stopped, Err(tungstate_core::dupes::Trouble::Stopped));
+    assert_eq!(digest.reads(), 0, "and finished nothing it had not started");
+}
