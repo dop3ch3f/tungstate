@@ -9,12 +9,15 @@
 //! reads nothing at all; a file edited in place keeps its name, so the check
 //! is what makes a remembered digest safe rather than merely fast.
 
+use std::collections::HashMap;
 use std::io::Read;
 use std::path::Path;
 use std::time::UNIX_EPOCH;
 
+use jiff::Timestamp;
 use tungstate_backend::Backend;
 use tungstate_backend::counted::{Stage, Tally};
+use tungstate_core::Snapshot;
 use tungstate_core::dupes::{Digest, STOPPED};
 use tungstate_journal::{Journal, Remembered};
 
@@ -69,7 +72,13 @@ pub struct Cached<'a> {
     /// is safe because this only ever reads.
     stop: Option<Asked<'a>>,
     looked: usize,
+    /// Size and mtime by path, as the listing saw them. Each digest needs
+    /// both, and asking the storage again costs a round trip per file.
+    known: HashMap<String, Stamp>,
 }
+
+/// Size, and mtime in whole seconds, as the cache keys a file.
+type Stamp = (u64, Option<i64>);
 
 impl<'a> Cached<'a> {
     /// A digest for one folder.
@@ -86,7 +95,33 @@ impl<'a> Cached<'a> {
             watcher: None,
             stop: None,
             looked: 0,
+            known: HashMap::new(),
         }
+    }
+
+    /// Take each file's size and mtime from `snapshot` rather than asking the
+    /// storage for them again.
+    ///
+    /// For a pass over a listing taken moments ago. Not for confirming a
+    /// group before acting on it: that wants the file as it is now, so a
+    /// change since the listing is a cache miss and a fresh read.
+    #[must_use]
+    pub fn knowing(mut self, snapshot: &Snapshot) -> Self {
+        self.known = snapshot
+            .entries
+            .iter()
+            .filter(|entry| !entry.is_dir)
+            .map(|entry| {
+                // Whole seconds since 1970, as `stamp` reads a `SystemTime`:
+                // nothing before it, and truncated rather than rounded.
+                let mtime = entry
+                    .mtime
+                    .filter(|at| *at >= Timestamp::UNIX_EPOCH)
+                    .map(Timestamp::as_second);
+                (entry.relative_path(), (entry.size, mtime))
+            })
+            .collect();
+        self
     }
 
     /// Report progress to `watcher` as the pass goes.
@@ -149,7 +184,10 @@ impl<'a> Cached<'a> {
 
     /// Size and mtime as the cache keys them: mtime in whole seconds, because
     /// that is the most every backend agrees on (FTP rounds to the minute).
-    fn stamp(&self, path: &str) -> Result<(u64, Option<i64>), String> {
+    fn stamp(&self, path: &str) -> Result<Stamp, String> {
+        if let Some(known) = self.known.get(path) {
+            return Ok(*known);
+        }
         let meta = self
             .backend
             .stat(Path::new(path))

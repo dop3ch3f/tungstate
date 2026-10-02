@@ -913,6 +913,41 @@ fn a_sample_reads_its_samples_and_nothing_in_between() {
 }
 
 #[test]
+fn a_digest_asks_the_storage_nothing_the_listing_already_said() {
+    use tungstate_backend::counted::{Counted, Stage, Tally};
+    use tungstate_core::dupes::Digest as _;
+
+    let fixture = Fixture::new(inert(), &[]);
+    std::fs::write(fixture.dir.path().join("clip.mp4"), vec![3_u8; 1 << 20]).expect("file");
+    let snapshot = fixture.survey();
+    let local = fixture.backend();
+    let tally = std::sync::Arc::new(Tally::new());
+    let counted = Counted::new(&local, std::sync::Arc::clone(&tally));
+
+    tally.enter(Stage::Sample);
+    crate::digest::Cached::new(&counted, &fixture.journal, &fixture.root())
+        .knowing(&snapshot)
+        .partial("clip.mp4")
+        .expect("a digest");
+    assert_eq!(
+        tally.spent(Stage::Sample).requests,
+        4,
+        "four samples, four reads, and no stat"
+    );
+
+    tally.enter(Stage::Whole);
+    crate::digest::Cached::new(&counted, &fixture.journal, &fixture.root())
+        .knowing(&snapshot)
+        .partial("clip.mp4")
+        .expect("remembered");
+    assert_eq!(
+        tally.spent(Stage::Whole).requests,
+        0,
+        "a remembered digest costs no request at all"
+    );
+}
+
+#[test]
 fn a_hash_a_transfer_already_recorded_costs_no_reading() {
     let fixture = Fixture::new(inert(), &[("clip.mp4", "the same bytes")]);
     let backend = fixture.backend();

@@ -130,7 +130,7 @@ fn pass(backend: &dyn Backend, journal: &Journal, root: &str, tally: &Tally) -> 
         sampled: backend.capabilities().networked,
         ..Wants::default()
     };
-    let mut digest = Cached::new(backend, journal, root);
+    let mut digest = Cached::new(backend, journal, root).knowing(&snapshot);
     let found = dupes::find(&snapshot, &mut Staged::new(&mut digest, tally), &wants)
         .expect("the pass runs");
     tally.stop();

@@ -92,7 +92,7 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
     let networked = backend.capabilities().networked;
     let wants = wanted(asked, &loaded.policy, &snapshot, networked);
 
-    let mut digest = Cached::new(&counted, &journal, &root);
+    let mut digest = Cached::new(&counted, &journal, &root).knowing(&snapshot);
     let found = match dupes::find(&snapshot, &mut Staged::new(&mut digest, &tally), &wants) {
         Ok(found) => found,
         Err(trouble) => {

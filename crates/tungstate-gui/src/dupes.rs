@@ -324,6 +324,7 @@ pub fn scan(
     let found = {
         let stop = Arc::clone(&stop);
         let mut digest = Cached::new(place.backend.as_ref(), journal, &place.root)
+            .knowing(&snapshot)
             .watched_by(Box::new(|watch: &Watch| {
                 watcher(&ScanProgress {
                     looked: watch.looked,
@@ -613,12 +614,20 @@ pub fn clear(
     let stop = scan_state.begin();
     let wanted: std::collections::BTreeSet<String> = paths.iter().cloned().collect();
     let mut digest = Cached::new(place.backend.as_ref(), journal, &place.root)
-        .stopping_when(Box::new(move || stop.load(Ordering::Relaxed)));
+        .knowing(&snapshot)
+        .stopping_when(Box::new({
+            let stop = Arc::clone(&stop);
+            move || stop.load(Ordering::Relaxed)
+        }));
     let wants = Wants {
         sampled: place.networked,
         ..Wants::default()
     };
     let found = dupes::find(&snapshot, &mut digest, &wants).map_err(describe)?;
+    // Confirming asks the storage for each file as it is now, not as the
+    // listing saw it, so a file changed since then is read again.
+    let mut digest = Cached::new(place.backend.as_ref(), journal, &place.root)
+        .stopping_when(Box::new(move || stop.load(Ordering::Relaxed)));
 
     // Samples are enough to show a group and never enough to move a file, so
     // anything ticked that was matched on samples is read in full first, and
