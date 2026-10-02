@@ -9,6 +9,7 @@
 //! makes "tungstate cannot touch anything outside the folder it governs" a
 //! property of the code rather than a promise in a comment.
 
+pub mod counted;
 pub mod local;
 pub mod walk;
 

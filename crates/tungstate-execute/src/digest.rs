@@ -14,6 +14,7 @@ use std::path::Path;
 use std::time::UNIX_EPOCH;
 
 use tungstate_backend::Backend;
+use tungstate_backend::counted::{Stage, Tally};
 use tungstate_core::dupes::{Digest, STOPPED};
 use tungstate_journal::{Journal, Remembered};
 
@@ -298,5 +299,34 @@ impl Digest for Cached<'_> {
             },
         )?;
         Ok(digest)
+    }
+}
+
+/// A [`Digest`] that tells a [`Tally`] which stage its reads belong to.
+///
+/// The pass asks for samples and whole files in turn, and the backend cannot
+/// tell the two apart, so the switch happens here, one call above it.
+pub struct Staged<'a> {
+    inner: &'a mut dyn Digest,
+    tally: &'a Tally,
+}
+
+impl<'a> Staged<'a> {
+    /// Count `inner`'s reads into `tally`, by stage.
+    #[must_use]
+    pub fn new(inner: &'a mut dyn Digest, tally: &'a Tally) -> Self {
+        Self { inner, tally }
+    }
+}
+
+impl Digest for Staged<'_> {
+    fn partial(&mut self, path: &str) -> Result<String, String> {
+        self.tally.enter(Stage::Sample);
+        self.inner.partial(path)
+    }
+
+    fn whole(&mut self, path: &str) -> Result<String, String> {
+        self.tally.enter(Stage::Whole);
+        self.inner.whole(path)
     }
 }

@@ -1982,6 +1982,29 @@ fn a_second_look_reads_nothing() {
     assert!(said.contains("0 opened"), "{said}");
 }
 
+#[test]
+fn timings_say_what_each_stage_cost() {
+    let home = governed();
+    let root = home.path().join("Downloads");
+    std::fs::write(root.join("one.bin"), "same bytes").unwrap();
+    std::fs::write(root.join("two.bin"), "same bytes").unwrap();
+
+    let output = sandboxed(&home)
+        .args(["dedupe", root.to_str().unwrap(), "--timings"])
+        .output()
+        .unwrap();
+    let said = String::from_utf8_lossy(&output.stdout);
+
+    assert!(said.contains("timings"), "{said}");
+    // A local folder is read whole, so both copies show up in the last row.
+    let row = said
+        .lines()
+        .find(|line| line.trim_start().starts_with("whole files"))
+        .unwrap_or_else(|| panic!("a row for whole files: {said}"));
+    let columns: Vec<&str> = row.split_whitespace().collect();
+    assert_eq!(columns[2], "2", "two files read whole: {row}");
+}
+
 // ---------------------------------------------------------------------------
 // `watch`
 

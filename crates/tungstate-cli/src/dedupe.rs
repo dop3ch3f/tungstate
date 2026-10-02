@@ -11,12 +11,14 @@ use std::collections::BTreeSet;
 use std::io::{IsTerminal, Write};
 use std::path::Path;
 use std::process::ExitCode;
+use std::sync::Arc;
 
 use tungstate_backend::Backend as _;
+use tungstate_backend::counted::{Counted, Stage, Tally};
 use tungstate_backend::local::LocalBackend;
 use tungstate_core::dupes::{self, Dealing, Extras, Found, Kept, Wants};
 use tungstate_core::similar::{self, Band, Resembling};
-use tungstate_execute::digest::Cached;
+use tungstate_execute::digest::{Cached, Staged};
 use tungstate_execute::eye::Eye;
 use tungstate_journal::Journal;
 
@@ -51,6 +53,8 @@ pub struct Asked {
     pub json: bool,
     /// Do not stop to ask anything.
     pub yes: bool,
+    /// Say what each stage of the search cost.
+    pub timings: bool,
 }
 
 /// `tungstate dedupe [PATH] [--apply] [--extras ...] [--keep PATH] [--json]`.
@@ -73,7 +77,12 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
 
     let backend = LocalBackend::new(located.root.clone());
     let root = located.root.to_string_lossy().to_string();
-    let snapshot = match tungstate_attrs::survey(&backend, &loaded.policy) {
+    // Always counted, printed only when asked: an atomic add per request is
+    // nothing beside the request itself.
+    let tally = Arc::new(Tally::new());
+    let counted = Counted::new(&backend, Arc::clone(&tally));
+    tally.enter(Stage::List);
+    let snapshot = match tungstate_attrs::survey(&counted, &loaded.policy) {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::fail(&error),
     };
@@ -83,19 +92,26 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
     let networked = backend.capabilities().networked;
     let wants = wanted(asked, &loaded.policy, &snapshot, networked);
 
-    let mut digest = Cached::new(&backend, &journal, &root);
-    let found = match dupes::find(&snapshot, &mut digest, &wants) {
+    let mut digest = Cached::new(&counted, &journal, &root);
+    let found = match dupes::find(&snapshot, &mut Staged::new(&mut digest, &tally), &wants) {
         Ok(found) => found,
         Err(trouble) => {
             eprintln!("error: {trouble}");
             return ExitCode::FAILURE;
         }
     };
+    tally.stop();
+    let timings = asked.timings.then(|| timings(&tally, &snapshot, &found));
 
     if asked.json {
         match serde_json::to_string_pretty(&found) {
             Ok(text) => println!("{text}"),
             Err(error) => return crate::fail(&error),
+        }
+        // Beside the JSON rather than in it, so a script reading one never
+        // has to skip the other.
+        if let Some(timings) = timings {
+            eprint!("{timings}");
         }
         return ExitCode::SUCCESS;
     }
@@ -110,6 +126,9 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
             digest.recorded()
         )
     );
+    if let Some(timings) = timings {
+        print!("\n{timings}");
+    }
     // The second pass, over what the first one did not already account for.
     let resembling = if asked.similar {
         match resemblances(&located.root, networked, &snapshot, &found, &journal) {
@@ -479,6 +498,38 @@ fn bytes(count: u64) -> String {
     } else {
         format!("{size:.1} {}", UNITS[unit])
     }
+}
+
+/// What each stage of the search cost, as a table.
+///
+/// Requests and bytes are what decide the speed over a network; seconds are
+/// what this run happened to take.
+fn timings(tally: &Tally, snapshot: &tungstate_core::Snapshot, found: &Found) -> String {
+    use std::fmt::Write as _;
+    let listed = snapshot
+        .entries
+        .iter()
+        .filter(|entry| !entry.is_dir)
+        .count();
+    let files = [listed, found.digested, found.read_whole];
+    let names = ["listing", "samples", "whole files"];
+    let mut out = String::from("timings\n");
+    let _ = writeln!(
+        out,
+        "  {:<12} {:>8} {:>9} {:>10} {:>9}",
+        "stage", "files", "requests", "read", "seconds"
+    );
+    for ((stage, name), files) in Stage::ALL.into_iter().zip(names).zip(files) {
+        let spent = tally.spent(stage);
+        let _ = writeln!(
+            out,
+            "  {name:<12} {files:>8} {:>9} {:>10} {:>9.2}",
+            spent.requests,
+            bytes(spent.bytes),
+            spent.time.as_secs_f64()
+        );
+    }
+    out
 }
 
 /// What the pass is being asked for, given the folder's own rules.

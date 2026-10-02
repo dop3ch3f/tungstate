@@ -154,6 +154,10 @@ enum Command {
         /// Do not stop to ask; sets extra copies aside, which loses nothing.
         #[arg(long)]
         yes: bool,
+        /// Say what each stage of the search cost: files, requests, bytes
+        /// read and seconds.
+        #[arg(long)]
+        timings: bool,
     },
 
     /// Keep governed folders in order while this runs.
@@ -434,6 +438,7 @@ fn main() -> std::process::ExitCode {
             similar,
             json,
             yes,
+            timings,
         } => {
             let chosen = match extras.as_deref() {
                 None => None,
@@ -454,6 +459,7 @@ fn main() -> std::process::ExitCode {
                     similar,
                     json,
                     yes,
+                    timings,
                 },
             )
         }
