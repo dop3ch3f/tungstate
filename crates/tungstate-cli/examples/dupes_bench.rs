@@ -162,15 +162,28 @@ const BYTES_PER_SECOND: f64 = 50e6;
 
 impl Pipe {
     /// Wait until `bytes` would have arrived, behind everything already sent.
+    ///
+    /// Reads come 8 KiB at a time and a sleep that short overshoots by more
+    /// than it lasts, so time is owed until there is enough to sleep through,
+    /// and an overshoot is credited to the next read rather than lost. Only a
+    /// pipe idle for longer than `IDLE` starts again from now.
     fn carry(&self, bytes: u64) {
+        const IDLE: Duration = Duration::from_millis(50);
+        const SETTLE: Duration = Duration::from_millis(5);
         #[allow(clippy::cast_precision_loss)]
         let takes = Duration::from_secs_f64(bytes as f64 / BYTES_PER_SECOND);
-        let done = {
+        let now = Instant::now();
+        let owed = {
             let mut free_at = self.free_at.lock().unwrap_or_else(PoisonError::into_inner);
-            *free_at = (*free_at).max(Instant::now()) + takes;
-            *free_at
+            if *free_at + IDLE < now {
+                *free_at = now;
+            }
+            *free_at += takes;
+            free_at.saturating_duration_since(now)
         };
-        std::thread::sleep(done.saturating_duration_since(Instant::now()));
+        if owed >= SETTLE {
+            std::thread::sleep(owed);
+        }
     }
 }
 
