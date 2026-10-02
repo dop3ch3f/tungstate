@@ -202,6 +202,28 @@ impl SmbBackend {
         self.client.create_file(&self.unc(name), args)
     }
 
+    /// A file opened for reading, from the start.
+    fn reader(&self, path: &Path) -> Result<SmbRead> {
+        let name = self.name(path)?;
+        let access = FileAccessMask::new()
+            .with_generic_read(true)
+            .with_synchronize(true);
+        let resource = self
+            .open(&name, &FileCreateArgs::make_open_existing(access))
+            .map_err(|error| self.failure("read", path, error))?;
+        let Resource::File(file) = resource else {
+            return Err(BackendError::Io {
+                path: path.to_path_buf(),
+                source: std::io::Error::other("not a file"),
+            });
+        };
+        Ok(SmbRead {
+            file: Some(file),
+            offset: 0,
+            most: self.max_read,
+        })
+    }
+
     /// A failure as the engine reads it: a missing file is an ordinary
     /// not-found, which it takes to mean "nothing is there".
     fn failure(&self, operation: &'static str, path: &Path, error: smb::Error) -> BackendError {
@@ -447,38 +469,27 @@ impl Backend for SmbBackend {
     }
 
     fn open_read(&self, path: &Path) -> Result<Box<dyn Read + Send>> {
-        let name = self.name(path)?;
-        let access = FileAccessMask::new()
-            .with_generic_read(true)
-            .with_synchronize(true);
-        let resource = self
-            .open(&name, &FileCreateArgs::make_open_existing(access))
-            .map_err(|error| self.failure("read", path, error))?;
-        let Resource::File(file) = resource else {
-            return Err(BackendError::Io {
-                path: path.to_path_buf(),
-                source: std::io::Error::other("not a file"),
-            });
-        };
-        Ok(Box::new(SmbRead {
-            file: Some(file),
-            offset: 0,
-            most: self.max_read,
-        }))
+        Ok(Box::new(self.reader(path)?))
     }
 
     fn read_prefix(&self, path: &Path, len: u64) -> Result<Vec<u8>> {
-        let mut reader = self.open_read(path)?;
-        let mut prefix = Vec::new();
+        self.read_range(path, 0, len)
+    }
+
+    fn read_range(&self, path: &Path, offset: u64, len: u64) -> Result<Vec<u8>> {
+        let mut reader = self.reader(path)?;
+        // Every SMB read is a request at an offset, never a stream, so
+        // starting the reader further in is all a ranged read needs.
+        reader.offset = offset;
+        let mut bytes = Vec::new();
         reader
-            .by_ref()
             .take(len)
-            .read_to_end(&mut prefix)
+            .read_to_end(&mut bytes)
             .map_err(|source| BackendError::Io {
                 path: path.to_path_buf(),
                 source,
             })?;
-        Ok(prefix)
+        Ok(bytes)
     }
 
     fn set_modified(&self, path: &Path, at: SystemTime) -> Result<bool> {

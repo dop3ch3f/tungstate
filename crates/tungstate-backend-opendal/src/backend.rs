@@ -303,26 +303,38 @@ impl Backend for OpendalBackend {
     }
 
     fn read_prefix(&self, path: &Path, len: u64) -> Result<Vec<u8>> {
+        self.read_range(path, 0, len)
+    }
+
+    fn read_range(&self, path: &Path, offset: u64, len: u64) -> Result<Vec<u8>> {
+        if len == 0 {
+            return Ok(Vec::new());
+        }
         let operator = self.operator.clone();
         let owned = self.key(path)?;
-        // A real ranged request: on FTP that is `REST 0` and a `RETR` the
-        // client closes after `len` bytes, so classifying a 4 GB video costs
-        // 8 KiB of transfer rather than 4 GB.
+        let end = offset.saturating_add(len);
+        // A real ranged request: on FTP that is `REST offset` and a `RETR`
+        // the client closes after `len` bytes, so classifying a 4 GB video
+        // costs 8 KiB of transfer rather than 4 GB.
         let buffer = dispatch(async move {
-            match operator.read_with(&owned).range(0..len).await {
-                // A range past the end means the file is shorter than the
-                // prefix, so reading it whole costs fewer bytes than asked.
-                Err(error) if error.kind() == ErrorKind::RangeNotSatisfied => {
-                    operator.read(&owned).await
-                }
-                // FTP says the same thing as a short read ("reader got too
-                // little data"). Asked about only once a read has failed, so a
-                // file longer than the prefix costs no extra round trip.
+            match operator.read_with(&owned).range(offset..end).await {
+                // A range past the end is refused outright by some services
+                // (`RangeNotSatisfied`) and comes back from FTP as a short
+                // read ("reader got too little data"). Either way the file is
+                // shorter than asked, so ask again for what it does have. The
+                // size is only fetched once a read has failed, so a file that
+                // is long enough costs no extra round trip.
                 Err(error) => match operator.stat(&owned).await {
-                    Ok(meta) if meta.content_length() < len => operator.read(&owned).await,
+                    Ok(meta) if meta.content_length() <= offset => Ok(Buffer::new()),
+                    Ok(meta) if meta.content_length() < end => {
+                        operator
+                            .read_with(&owned)
+                            .range(offset..meta.content_length())
+                            .await
+                    }
                     _ => Err(error),
                 },
-                other => other,
+                read => read,
             }
         })
         .map_err(|error| self.failure("read", path, error))?;

@@ -893,6 +893,26 @@ fn a_digest_is_read_once_and_remembered() {
 }
 
 #[test]
+fn a_sample_reads_its_samples_and_nothing_in_between() {
+    // Before ranged reads, every sample past the first read the whole file up
+    // to where it started: about twice the file, for "four 64 KiB pieces".
+    let fixture = Fixture::new(inert(), &[]);
+    let big = fixture.dir.path().join("clip.mp4");
+    std::fs::write(&big, vec![9_u8; 10 * 1024 * 1024]).expect("file");
+    let local = fixture.backend();
+    let tally = std::sync::Arc::new(tungstate_backend::counted::Tally::new());
+    let counted = tungstate_backend::counted::Counted::new(&local, std::sync::Arc::clone(&tally));
+
+    let mut digest = crate::digest::Cached::new(&counted, &fixture.journal, &fixture.root());
+    tally.enter(tungstate_backend::counted::Stage::Sample);
+    tungstate_core::dupes::Digest::partial(&mut digest, "clip.mp4").expect("a digest");
+
+    let read = tally.spent(tungstate_backend::counted::Stage::Sample).bytes;
+    assert!(read <= 256 * 1024, "read {read} bytes for four samples");
+    assert_eq!(read, digest.bytes(), "and says so");
+}
+
+#[test]
 fn a_hash_a_transfer_already_recorded_costs_no_reading() {
     let fixture = Fixture::new(inert(), &[("clip.mp4", "the same bytes")]);
     let backend = fixture.backend();

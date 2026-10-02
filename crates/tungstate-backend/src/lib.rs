@@ -236,6 +236,31 @@ pub trait Backend: Send + Sync {
         Ok(bytes)
     }
 
+    /// Read at most `len` bytes of `path`, starting `offset` bytes in.
+    ///
+    /// What sampling a file rests on: four 64 KiB pieces of a 4 GB video
+    /// should cost 256 KiB, not the 3 GB in front of the last one. Defaulted,
+    /// as `read_prefix` is, so every backend keeps compiling; the default
+    /// reads and discards everything before `offset`, which is correct and,
+    /// over a network, slow. `LocalBackend`, the `OpenDAL` adapter and SMB
+    /// override it with a real ranged read.
+    ///
+    /// Short when the file ends first, and empty when it ends before `offset`.
+    ///
+    /// # Errors
+    /// As [`Backend::open_read`].
+    fn read_range(&self, path: &Path, offset: u64, len: u64) -> Result<Vec<u8>> {
+        let failed = |source| BackendError::Io {
+            path: path.to_path_buf(),
+            source,
+        };
+        let mut reader = self.open_read(path)?;
+        std::io::copy(&mut (&mut reader).take(offset), &mut std::io::sink()).map_err(failed)?;
+        let mut bytes = Vec::with_capacity(usize::try_from(len).unwrap_or(0).min(1 << 20));
+        reader.take(len).read_to_end(&mut bytes).map_err(failed)?;
+        Ok(bytes)
+    }
+
     /// Set a file's modification time, where the storage allows it.
     ///
     /// `Ok(false)` means "cannot here", which is not a failure: a sync carries

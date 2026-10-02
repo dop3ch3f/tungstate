@@ -98,6 +98,19 @@ fn a_file_larger_than_one_request_streams_intact() {
         backend.read_prefix(Path::new("big.bin"), 10).unwrap(),
         &big[..10]
     );
+    // Across a request boundary, and running off the end.
+    assert_eq!(
+        backend
+            .read_range(Path::new("big.bin"), 13_000_000, 2_000_000)
+            .unwrap(),
+        &big[13_000_000..15_000_000]
+    );
+    assert_eq!(
+        backend
+            .read_range(Path::new("big.bin"), 20_000_000, 10)
+            .unwrap(),
+        &big[20_000_000..]
+    );
 }
 
 #[test]

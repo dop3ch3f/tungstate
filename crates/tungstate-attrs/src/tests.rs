@@ -167,6 +167,40 @@ fn the_default_read_prefix_and_both_overrides_agree() {
 }
 
 #[test]
+fn the_default_read_range_and_every_override_agree() {
+    let dir = dir();
+    let body: Vec<u8> = (0..100_000_u32).map(|i| (i % 251) as u8).collect();
+    std::fs::write(dir.path().join("blob.bin"), &body).unwrap();
+
+    let local = LocalBackend::new(dir.path().to_path_buf());
+    let defaulted = Defaulted(LocalBackend::new(dir.path().to_path_buf()));
+    let remote = over_opendal(dir.path());
+
+    // Inside, straddling the end, starting at the end, and past it.
+    for (offset, len) in [
+        (0_u64, 10_u64),
+        (33_000, 64 * 1024),
+        (99_990, 64 * 1024),
+        (100_000, 10),
+        (200_000, 10),
+        (500, 0),
+    ] {
+        let from = usize::try_from(offset).unwrap().min(body.len());
+        let to = usize::try_from(offset + len).unwrap().min(body.len());
+        for (name, backend) in [
+            ("local", &local as &dyn Backend),
+            ("default", &defaulted),
+            ("opendal", remote.as_ref()),
+        ] {
+            let got = backend
+                .read_range(Path::new("blob.bin"), offset, len)
+                .unwrap();
+            assert_eq!(got, &body[from..to], "{name} disagreed at {offset}+{len}");
+        }
+    }
+}
+
+#[test]
 fn a_stat_only_policy_never_opens_the_file() {
     let dir = dir();
     std::fs::write(dir.path().join("big.zip"), vec![0_u8; 1 << 20]).unwrap();

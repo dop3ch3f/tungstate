@@ -249,6 +249,20 @@ impl Backend for LocalBackend {
         Ok(bytes)
     }
 
+    fn read_range(&self, path: &Path, offset: u64, len: u64) -> Result<Vec<u8>> {
+        use std::io::{Read as _, Seek as _, SeekFrom};
+        let full = self.guarded(path, Tail::MustNotBeLink)?;
+        let mut file = std::fs::File::open(&full).map_err(io_at(&full))?;
+        // Seeking past the end is allowed and reads nothing, which is the
+        // contract for a range that starts after the file does.
+        file.seek(SeekFrom::Start(offset)).map_err(io_at(&full))?;
+        let mut bytes = Vec::new();
+        file.take(len)
+            .read_to_end(&mut bytes)
+            .map_err(io_at(&full))?;
+        Ok(bytes)
+    }
+
     fn create_write(&self, path: &Path) -> Result<Box<dyn WriteFinish>> {
         let full = self.guarded(path, Tail::MustNotBeLink)?;
         let file = std::fs::File::create(&full).map_err(io_at(&full))?;

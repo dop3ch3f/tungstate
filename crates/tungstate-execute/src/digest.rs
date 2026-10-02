@@ -179,24 +179,10 @@ impl<'a> Cached<'a> {
     /// one. Over FTP that is `REST` then `RETR`, so a sample of a 4 GB video
     /// costs 64 KiB rather than 4 GB.
     fn read_at(&mut self, path: &str, offset: u64, len: u64) -> Result<Vec<u8>, String> {
-        let bytes = if offset == 0 {
-            self.backend
-                .read_prefix(Path::new(path), len)
-                .map_err(|error| error.to_string())?
-        } else {
-            let mut reader = self
-                .backend
-                .open_read(Path::new(path))
-                .map_err(|error| error.to_string())?;
-            std::io::copy(&mut (&mut reader).take(offset), &mut std::io::sink())
-                .map_err(|error| error.to_string())?;
-            let mut buffer = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
-            reader
-                .take(len)
-                .read_to_end(&mut buffer)
-                .map_err(|error| error.to_string())?;
-            buffer
-        };
+        let bytes = self
+            .backend
+            .read_range(Path::new(path), offset, len)
+            .map_err(|error| error.to_string())?;
         self.bytes += bytes.len() as u64;
         Ok(bytes)
     }

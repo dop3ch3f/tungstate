@@ -202,6 +202,10 @@ impl Backend for Counted<'_> {
         self.bytes(self.inner.read_prefix(path, len))
     }
 
+    fn read_range(&self, path: &Path, offset: u64, len: u64) -> Result<Vec<u8>> {
+        self.bytes(self.inner.read_range(path, offset, len))
+    }
+
     fn set_modified(&self, path: &Path, at: SystemTime) -> Result<bool> {
         self.ask(self.inner.set_modified(path, at))
     }

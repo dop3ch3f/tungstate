@@ -237,6 +237,12 @@ impl Backend for Slow<'_> {
         Ok(bytes)
     }
 
+    fn read_range(&self, path: &Path, offset: u64, len: u64) -> Result<Vec<u8>> {
+        let bytes = delayed(self.inner.read_range(path, offset, len))?;
+        self.pipe.carry(bytes.len() as u64);
+        Ok(bytes)
+    }
+
     fn set_modified(&self, path: &Path, at: SystemTime) -> Result<bool> {
         delayed(self.inner.set_modified(path, at))
     }
