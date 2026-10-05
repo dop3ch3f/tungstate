@@ -55,6 +55,19 @@ pub fn plan(target: Option<&str>, policy: Option<&Path>, json: bool) -> ExitCode
             "{}",
             render(&plan, &here.shown, &here.policy_name, &here.loaded)
         );
+        // Said before `apply`, because there it is a copy and a delete per
+        // file, and over FTP every byte comes down and goes back up.
+        if !here.backend.capabilities().atomic_rename && plan.blast.bytes > 0 {
+            let how = if here.backend.copies_on_server() {
+                "the server copies each file, then the original is deleted"
+            } else {
+                "each file comes down to this machine and goes back up, then the original is deleted"
+            };
+            println!(
+                "note: this storage cannot rename, so {how}: {} to copy.",
+                crate::human_bytes(plan.blast.bytes)
+            );
+        }
     }
     print_warnings(&here.policy_name, &here.text, &here.loaded.warnings);
     ExitCode::SUCCESS

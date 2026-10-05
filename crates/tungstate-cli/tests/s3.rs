@@ -307,3 +307,39 @@ fn an_exact_sync_deletes_from_a_bucket_when_told_to() {
     assert!(raw::fetch(&format!("{root}/capcut/a.mp4")).is_none());
     assert_eq!(fetch(&format!("{root}/capcut/b.mp4")), b"stays");
 }
+
+#[test]
+fn a_folder_in_a_bucket_is_tidied_by_server_copies_and_put_back() {
+    // An object store has no rename, so a move is the bucket's own copy and
+    // a delete, and nothing comes down to this machine. Slice 13b.
+    let home = tempfile::tempdir().unwrap();
+    let root = unique("tidy");
+    connect(&home, &service().secret, &root);
+    raw::put(&format!("{root}/inbox/notes.txt"), b"words");
+    raw::put(&format!("{root}/inbox/clip.mp4"), b"frames");
+    raw::put(
+        &format!("{root}/inbox/.tungstate/policy.toml"),
+        b"[folder]\nname = \"inbox\"\n[defaults]\ncooldown = \"0s\"\n\n\
+          [[rule]]\nname = \"text\"\npath = \"Text\"\nmatch = { ext = \"txt\" }\n",
+    );
+
+    cli(&home)
+        .args(["plan", "nas:inbox"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("the server copies each file"));
+    cli(&home)
+        .args(["apply", "nas:inbox", "--yes"])
+        .assert()
+        .success();
+    assert_eq!(fetch(&format!("{root}/inbox/Text/notes.txt")), b"words");
+    assert!(raw::fetch(&format!("{root}/inbox/notes.txt")).is_none());
+
+    cli(&home).args(["undo", "nas:inbox"]).assert().success();
+    assert_eq!(
+        fetch(&format!("{root}/inbox/notes.txt")),
+        b"words",
+        "put back"
+    );
+    assert!(raw::fetch(&format!("{root}/inbox/Text/notes.txt")).is_none());
+}

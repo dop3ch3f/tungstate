@@ -156,6 +156,19 @@ pub struct PreviewView {
     pub tidy: bool,
     /// The reorganisation that can be put back, if there is one.
     pub undoable: Option<i64>,
+    /// What a tidy here copies, where the storage cannot rename and every
+    /// move is a copy and a delete. `None` where moves are renames.
+    pub copies: Option<CopyCost>,
+}
+
+/// What moving by copy will cost, said before the button.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct CopyCost {
+    /// Bytes copied, which is what the moving files weigh.
+    pub bytes: u64,
+    /// The server makes the copies (S3), rather than every byte coming down
+    /// to this machine and going back up (FTP).
+    pub on_server: bool,
 }
 
 /// Load a folder's rules, or say why not.
@@ -233,6 +246,12 @@ pub fn preview(spot: &Spot, journal: &Journal) -> Result<PreviewView, String> {
         longest_wait: plan.longest_wait(),
         tidy: plan.ops.is_empty(),
         undoable,
+        copies: (!spot.backend.capabilities().atomic_rename && plan.blast.bytes > 0).then(|| {
+            CopyCost {
+                bytes: plan.blast.bytes,
+                on_server: spot.backend.copies_on_server(),
+            }
+        }),
     })
 }
 

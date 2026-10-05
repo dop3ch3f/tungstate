@@ -73,17 +73,6 @@ pub enum ExecuteError {
         root: String,
     },
 
-    /// The storage cannot rename, and every move in a tidy is a rename. Found
-    /// before anything was attempted, so nothing has changed.
-    #[error(
-        "`{root}` cannot rename files where they are, so tidying it in place is not possible yet. \
-         FTP and S3 storage cannot rename; move the files with a transfer instead"
-    )]
-    CannotRename {
-        /// The folder.
-        root: String,
-    },
-
     /// The backend refused.
     #[error("could not {doing}")]
     Backend {
@@ -209,7 +198,6 @@ pub fn apply_at(
     at: &Endpoint,
 ) -> Result<Applied> {
     let root = &at.path.to_string_lossy().into_owned();
-    refuse_without_rename(&plan.ops, backend, root)?;
     let planned = tungstate_core::plan::fingerprint(fresh);
     if planned != plan.snapshot {
         return Err(ExecuteError::Stale {
@@ -271,21 +259,6 @@ pub fn apply_at(
     }
 
     Ok(applied)
-}
-
-/// Refused as a whole, before anything moves, where the storage cannot
-/// rename: every move and set-aside would fail one by one, after the plan was
-/// already recorded as begun.
-fn refuse_without_rename(ops: &[Op], backend: &dyn Backend, root: &str) -> Result<()> {
-    let moves = ops
-        .iter()
-        .any(|op| matches!(op, Op::Move { .. } | Op::Quarantine { .. }));
-    if moves && !backend.capabilities().atomic_rename {
-        return Err(ExecuteError::CannotRename {
-            root: root.to_string(),
-        });
-    }
-    Ok(())
 }
 
 /// An error's whole chain, as one sentence.
@@ -373,7 +346,7 @@ fn perform(op: &Op, backend: &dyn Backend) -> std::result::Result<(), BackendErr
     match op {
         Op::MkDir { path } => backend.create_dir_all(Path::new(path)),
         Op::RmDir { path } => backend.remove_dir(Path::new(path)),
-        Op::Move { from, to, .. } => backend.rename(Path::new(from), Path::new(to)),
+        Op::Move { from, to, .. } => move_file(backend, Path::new(from), Path::new(to)),
         Op::Quarantine { from, to, .. } => {
             // Quarantine makes its own directory on the way, the way the drain
             // does. A plan does not spell that out, because where a parked
@@ -383,7 +356,7 @@ fn perform(op: &Op, backend: &dyn Backend) -> std::result::Result<(), BackendErr
             {
                 backend.create_dir_all(parent)?;
             }
-            backend.rename(Path::new(from), Path::new(to))
+            move_file(backend, Path::new(from), Path::new(to))
         }
         Op::Trash { path, .. } => {
             // The desktop trash is this machine's. A backend that cannot say
@@ -405,6 +378,49 @@ fn perform(op: &Op, backend: &dyn Backend) -> std::result::Result<(), BackendErr
             })
         }
     }
+}
+
+/// Move one file: a rename where the storage has one, otherwise a copy, a
+/// check and a delete.
+///
+/// FTP and S3 cannot rename (`OpenDAL`'s FTP service refuses to, and an object
+/// store has no such thing), so there a move is a copy the server makes, or
+/// one that passes through this machine, and the original goes only once the
+/// copy is the same size. Interrupted between the two, both files exist, and
+/// `recover` finishes or undoes it by the same size check.
+fn move_file(
+    backend: &dyn Backend,
+    from: &Path,
+    to: &Path,
+) -> std::result::Result<(), BackendError> {
+    if backend.capabilities().atomic_rename {
+        return backend.rename(from, to);
+    }
+    let source = backend.stat(from)?;
+    if source.is_dir {
+        // A whole folder (a photo library kept as one unit) would be copied
+        // file by file, and nothing here can undo that half way.
+        return Err(BackendError::Io {
+            path: from.to_path_buf(),
+            source: std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "a folder cannot be moved where the storage cannot rename",
+            ),
+        });
+    }
+    backend.copy(from, to)?;
+    let copied = backend.stat(to)?;
+    if copied.len != source.len {
+        let _ = backend.remove_file(to);
+        return Err(BackendError::Io {
+            path: to.to_path_buf(),
+            source: std::io::Error::other(format!(
+                "the copy is {} bytes and the original {}, so the original was kept",
+                copied.len, source.len
+            )),
+        });
+    }
+    backend.remove_file(from)
 }
 
 /// Whether this failure says the *plan* is wrong rather than this one file.

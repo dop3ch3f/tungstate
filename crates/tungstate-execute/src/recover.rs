@@ -104,6 +104,29 @@ fn belongs_to(op: &JournalOp, root: &str) -> bool {
         .is_some_and(|l| l.root.to_string_lossy() == root)
 }
 
+/// A move by copy that stopped with both files there: finish it if the copy
+/// is whole, take it back if not.
+fn settle_a_copy(op: &JournalOp, backend: &dyn Backend) -> Resolution {
+    let (Some(from), Some(to)) = (op.source.as_ref(), op.destination.as_ref()) else {
+        return Resolution::Unclear;
+    };
+    let (from, to) = (Path::new(&from.path), Path::new(&to.path));
+    let (Ok(source), Ok(copy)) = (backend.stat(from), backend.stat(to)) else {
+        return Resolution::Unclear;
+    };
+    if copy.len == source.len {
+        if backend.remove_file(from).is_ok() {
+            Resolution::Committed
+        } else {
+            Resolution::Unclear
+        }
+    } else if backend.remove_file(to).is_ok() {
+        Resolution::Abandoned
+    } else {
+        Resolution::Unclear
+    }
+}
+
 /// Ask the filesystem which side of the rename won.
 fn look(op: &JournalOp, backend: &dyn Backend) -> Resolution {
     let exists =
@@ -131,6 +154,10 @@ fn look(op: &JournalOp, backend: &dyn Backend) -> Resolution {
                 (false, true) => Resolution::Committed,
                 // It never started.
                 (true, false) => Resolution::Abandoned,
+                // Where there is no rename, a move is a copy and then a
+                // delete, so both is exactly what stopping between them
+                // leaves. A whole copy finishes the move; a short one goes.
+                (true, true) if !backend.capabilities().atomic_rename => settle_a_copy(op, backend),
                 // Both, or neither. A rename cannot leave both, so this is
                 // someone else's doing -- or the file is simply missing, which
                 // is not something to guess about.

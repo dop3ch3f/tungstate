@@ -665,3 +665,42 @@ fn a_listing_over_ftp_says_what_a_stat_would() {
     }
     assert_eq!(seen, 3, "a.jpg, 2024 and 2024/b.mp4");
 }
+
+const BY_EXT: &[u8] = b"[folder]\nname = \"inbox\"\n[defaults]\ncooldown = \"0s\"\n\n\
+    [[rule]]\nname = \"text\"\npath = \"Text\"\nmatch = { ext = \"txt\" }\n";
+
+#[test]
+fn a_folder_on_ftp_is_tidied_by_copying_and_put_back() {
+    // FTP cannot rename through OpenDAL, so every move is a copy through this
+    // machine, a size check, and a delete. Slice 13b.
+    let home = tempfile::tempdir().unwrap();
+    connect(&home, &server().password);
+    let end = unique_end("tidy");
+    put(&format!("{end}/notes.txt"), b"words");
+    put(&format!("{end}/clip.mp4"), b"frames");
+    put(&format!("{end}/.tungstate/policy.toml"), BY_EXT);
+
+    cli(&home)
+        .args(["folder", "add", &format!("nas:{end}")])
+        .assert()
+        .success();
+    cli(&home)
+        .args(["plan", &format!("nas:{end}")])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Text/notes.txt"))
+        .stdout(predicates::str::contains("comes down to this machine"));
+    cli(&home)
+        .args(["apply", &format!("nas:{end}"), "--yes"])
+        .assert()
+        .success();
+    assert_eq!(fetch(&format!("{end}/Text/notes.txt")), b"words");
+    assert!(!exists(&format!("{end}/notes.txt")), "the original went");
+
+    cli(&home)
+        .args(["undo", &format!("nas:{end}")])
+        .assert()
+        .success();
+    assert_eq!(fetch(&format!("{end}/notes.txt")), b"words", "put back");
+    assert!(!exists(&format!("{end}/Text/notes.txt")));
+}

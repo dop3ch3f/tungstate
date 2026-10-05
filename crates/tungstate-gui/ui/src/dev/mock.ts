@@ -83,7 +83,10 @@ const links: T.Link[] = [
 ];
 
 const listings = fx.listings as Record<string, T.Listing>;
-const previews = fx.preview as Record<string, T.PreviewView>;
+// Recorded before a preview could say what copying costs: none of them copy.
+const previews = Object.fromEntries(
+  Object.entries(fx.preview).map(([name, view]) => [name, { copies: null, ...view }]),
+) as unknown as Record<string, T.PreviewView>;
 const byRoot = (root: string) => previews[root.split("/").pop()!] ?? previews["messy-downloads"];
 
 /** `?bare=1` answers every list with nothing, which is how the empty states
@@ -585,6 +588,11 @@ const scenes: Record<string, () => unknown> = {
     document.querySelectorAll<HTMLButtonElement>(".way")[3]?.click();
   },
   "folder-preview": async () => { nav.go("folder"); await f.listRegistered(); await f.open(DL); },
+  // A folder on FTP, which cannot rename: the preview says what copying costs.
+  "folder-preview-copies": async () => {
+    nav.go("folder"); await f.listRegistered(); await f.open(DL);
+    f.preview.value = { ...f.preview.value!, copies: { bytes: f.preview.value!.bytes, on_server: false } };
+  },
   "folder-tidied": async () => {
     nav.go("folder"); await f.listRegistered(); await f.open(DL);
     f.tidied.value = { moved: 28, skipped: 1, failed: 0, already_tidy: false };

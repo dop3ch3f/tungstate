@@ -81,6 +81,9 @@ export interface PreviewView {
   tidy: boolean;
   /** The reorganisation that can be put back, if there is one. */
   undoable: number | null;
+  /** Where the storage cannot rename, every move is a copy and a delete:
+   *  how much that copies, and whether the server does it or this computer. */
+  copies: { bytes: number; on_server: boolean } | null;
 }
 
 /**

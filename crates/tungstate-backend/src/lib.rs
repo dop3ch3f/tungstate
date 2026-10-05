@@ -336,6 +336,32 @@ pub trait Backend: Send + Sync {
     /// rename fails.
     fn rename(&self, from: &Path, to: &Path) -> Result<()>;
 
+    /// Copy the file at `from` to `to` within this storage, replacing `to`.
+    ///
+    /// What a move becomes where there is no rename (FTP, S3): copy, check,
+    /// delete. Defaulted to streaming the bytes through this machine, which
+    /// is correct everywhere; a backend whose service copies on the server
+    /// overrides it, and says so with [`Backend::copies_on_server`].
+    ///
+    /// # Errors
+    /// As [`Backend::open_read`] and [`Backend::create_write`].
+    fn copy(&self, from: &Path, to: &Path) -> Result<()> {
+        let mut reader = self.open_read(from)?;
+        let mut writer = self.create_write(to)?;
+        std::io::copy(&mut reader, &mut writer).map_err(|source| BackendError::Io {
+            path: to.to_path_buf(),
+            source,
+        })?;
+        writer.finish()
+    }
+
+    /// Whether [`Backend::copy`] happens on the server, so the bytes never
+    /// cross the network twice. The preview says which before a tidy that
+    /// has to copy begins.
+    fn copies_on_server(&self) -> bool {
+        false
+    }
+
     /// Delete the file at `path`.
     ///
     /// # Errors

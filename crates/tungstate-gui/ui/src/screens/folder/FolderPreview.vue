@@ -124,14 +124,26 @@ const leaf = (path: string) => path.slice(cut(path));
 const label = (e: TreeEntry) => (e.is_dir ? e.path : leaf(e.path));
 const nested = (e: TreeEntry) => !e.is_dir && e.path.includes("/");
 
+/** Where a move is a copy and a delete, what that costs, in one sentence. */
+const copyLine = computed(() => {
+  const c = p.value?.copies;
+  if (!c) return null;
+  return c.on_server
+    ? `This storage cannot rename, so each file is copied on the server and then the original deleted: ${bytes(c.bytes)} in all.`
+    : `This storage cannot rename, so each file comes down to this computer, goes back up, and then the original is deleted: ${bytes(c.bytes)} each way.`;
+});
+
 async function confirmTidy() {
   const view = p.value;
   if (!view) return;
+  const undo = "Everything it does can be put back from this screen.";
   const answer = await ask({
     title: `Tidy ${name.value}?`,
-    why: view.large
-      ? `That is a large change: ${files(wouldMove(view))} of ${outOf(view)} move. Everything it does can be put back from this screen.`
-      : "Everything it does can be put back from this screen.",
+    why: [
+      view.large ? `That is a large change: ${files(wouldMove(view))} of ${outOf(view)} move.` : "",
+      copyLine.value ?? "",
+      undo,
+    ].filter(Boolean).join(" "),
     choices: [
       { id: "no", label: "Not now" },
       { id: "yes", label: "Tidy up", look: "primary" },
@@ -174,6 +186,7 @@ async function confirmPutBack() {
       </Notice>
 
       <Notice tone="bad" v-if="f.problem.value">{{ sentence(f.problem.value) }}</Notice>
+      <Notice tone="hold" v-if="copyLine && !justTidied">{{ copyLine }}</Notice>
 
       <!-- Property 1 and 5: what would move, and what would happen to the
            shape, before any button exists. -->

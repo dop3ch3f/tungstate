@@ -411,6 +411,30 @@ impl Backend for OpendalBackend {
         }))
     }
 
+    fn copy(&self, from: &Path, to: &Path) -> Result<()> {
+        if !self.copies_on_server() {
+            // Through this machine, as the trait's default does it. Spelled
+            // out because a method cannot call the default it overrides.
+            let mut reader = self.open_read(from)?;
+            let mut writer = self.create_write(to)?;
+            std::io::copy(&mut reader, &mut writer).map_err(|source| BackendError::Io {
+                path: to.to_path_buf(),
+                source,
+            })?;
+            return writer.finish();
+        }
+        let (a, b) = (self.key(from)?, self.key(to)?);
+        let operator = self.operator.clone();
+        dispatch(async move { operator.copy(&a, &b).await })
+            .map(|_| ())
+            .map_err(|error| self.failure("copy", from, error))
+    }
+
+    fn copies_on_server(&self) -> bool {
+        // S3's CopyObject: the bucket copies, and nothing comes down.
+        self.operator.info().capability().copy
+    }
+
     fn rename(&self, from: &Path, to: &Path) -> Result<()> {
         let (a, b) = (self.key(from)?, self.key(to)?);
         let operator = self.operator.clone();

@@ -157,7 +157,6 @@ pub fn undo_at(
     }
 
     let ops = invert(&journal.ops_for_plan(plan)?);
-    crate::refuse_without_rename(&ops, backend, &at.path.to_string_lossy())?;
 
     // Refused as a whole, before anything moves, by asking slice 6's paper
     // model whether this order is executable against the folder as it is now.

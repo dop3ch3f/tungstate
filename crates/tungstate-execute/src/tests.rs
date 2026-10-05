@@ -1381,25 +1381,114 @@ impl tungstate_backend::Backend for NoRename {
 }
 
 #[test]
-fn a_tidy_on_storage_that_cannot_rename_is_refused_before_anything_happens() {
-    let fixture = Fixture::new(BY_EXT, &[("a.txt", "one")]);
+fn a_tidy_and_its_undo_move_by_copy_where_the_storage_cannot_rename() {
+    let fixture = Fixture::new(
+        BY_EXT,
+        &[("a.txt", "one"), ("c.mp4", "three"), ("old/b.txt", "two")],
+    );
     let before = fixture.shape();
-    let refused = apply_at(
+    let storage = NoRename(fixture.backend());
+    let at = Endpoint::local(fixture.root());
+
+    let applied = apply_at(
         Purpose::Tidy,
         &fixture.plan(),
         &fixture.survey(),
-        &NoRename(fixture.backend()),
+        &storage,
         &fixture.journal,
-        &Endpoint::local(fixture.root()),
+        &at,
+    )
+    .expect("a tidy by copy succeeds");
+    assert!(applied.complete(), "{applied:?}");
+    assert_ne!(fixture.shape(), before);
+    assert_eq!(
+        std::fs::read_to_string(fixture.dir.path().join("Text/a.txt")).unwrap(),
+        "one",
+        "the copy is the file"
     );
     assert!(
-        matches!(refused, Err(ExecuteError::CannotRename { .. })),
-        "{refused:?}"
+        !fixture.dir.path().join("a.txt").exists(),
+        "and the original went"
     );
-    assert_eq!(fixture.shape(), before, "nothing moved");
+
+    undo_at(
+        applied.plan,
+        &fixture.survey(),
+        &storage,
+        &fixture.journal,
+        &at,
+    )
+    .expect("an undo by copy succeeds");
+    assert_eq!(fixture.shape(), before);
+}
+
+/// A move by copy cut off between the copy and the delete, as a crash would
+/// leave it: the operation begun and never finished, both files there.
+fn cut_off(fixture: &Fixture, copy: &str) -> tungstate_journal::OpId {
+    std::fs::create_dir_all(fixture.dir.path().join("Text")).unwrap();
+    std::fs::write(fixture.dir.path().join("Text/a.txt"), copy).unwrap();
+    fixture
+        .journal
+        .begin(&NewOp {
+            kind: tungstate_journal::OpKind::Rename,
+            source: Some(Location::new(fixture.root(), "a.txt")),
+            destination: Some(Location::new(fixture.root(), "Text/a.txt")),
+            size: Some(3),
+            link: None,
+            link_id: None,
+        })
+        .unwrap()
+}
+
+#[test]
+fn a_move_by_copy_cut_off_with_a_whole_copy_is_finished() {
+    let fixture = Fixture::new(BY_EXT, &[("a.txt", "one")]);
+    cut_off(&fixture, "one");
+    let resolved = resolve_interrupted(
+        &NoRename(fixture.backend()),
+        &fixture.journal,
+        &fixture.root(),
+    )
+    .unwrap();
+    assert_eq!(resolved, [("a.txt".to_string(), Resolution::Committed)]);
+    assert!(
+        !fixture.dir.path().join("a.txt").exists(),
+        "the original went"
+    );
+    assert!(fixture.dir.path().join("Text/a.txt").is_file());
+}
+
+#[test]
+fn a_move_by_copy_cut_off_with_a_short_copy_is_taken_back() {
+    let fixture = Fixture::new(BY_EXT, &[("a.txt", "one")]);
+    cut_off(&fixture, "o");
+    let resolved = resolve_interrupted(
+        &NoRename(fixture.backend()),
+        &fixture.journal,
+        &fixture.root(),
+    )
+    .unwrap();
+    assert_eq!(resolved, [("a.txt".to_string(), Resolution::Abandoned)]);
     assert_eq!(
-        fixture.journal.recent_plans(5).unwrap().len(),
-        0,
-        "and nothing was recorded as begun"
+        std::fs::read_to_string(fixture.dir.path().join("a.txt")).unwrap(),
+        "one",
+        "the original stays"
     );
+    assert!(
+        !fixture.dir.path().join("Text/a.txt").exists(),
+        "the short copy went"
+    );
+}
+
+#[test]
+fn both_files_after_a_rename_is_still_left_alone() {
+    // Where rename exists, both files means someone else's doing, and
+    // deleting either would be a guess.
+    let fixture = Fixture::new(BY_EXT, &[("a.txt", "one")]);
+    cut_off(&fixture, "one");
+    let resolved =
+        resolve_interrupted(&fixture.backend(), &fixture.journal, &fixture.root()).unwrap();
+    assert_eq!(resolved, [("a.txt".to_string(), Resolution::Unclear)]);
+    assert!(fixture.dir.path().join("a.txt").is_file());
+    assert!(fixture.dir.path().join("Text/a.txt").is_file());
 }
