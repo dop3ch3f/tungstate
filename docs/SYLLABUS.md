@@ -55,6 +55,8 @@ The "Teaches" column below is adjusted for a Rust newcomer: ownership and borrow
 | 10 | **On hold (2026-09-27), see scope changes.** Daemon: axum API, SSE event stream, service install, CLI-as-client with fallback | set-and-forget on the laptop | first async: `tokio`, `axum`, `spawn_blocking` bridging to the sync engine, `launchd`/`systemd`/Windows service |
 | 10b | **On hold with 10 (2026-09-27).** Nodes: Linux musl builds, pairing, peer transfer protocol (`tungstate://` destination), mDNS discovery | drain laptop → NAS with native verification and exact resume, NAS self-governs | HTTP range semantics, TLS pinning, cross-compilation |
 | 11 | **Dropped (2026-09-27).** ~~TUI: link progress, folder drift, plan review~~ | ~~watch the drain in a terminal~~ | `ratatui`, event loops, API client |
+| 12a | [WebDAV](slices/12-webdav-sftp.md) — [tour](slices/12a-tour.md): OpenDAL lists, reads, renames and deletes; uploads are our own streamed `PUT`, because OpenDAL's writer takes one write | **`connection add box --scheme webdav --endpoint https://nas.local:5006`, then drain and sync over it** | a bounded channel as backpressure, `Drop` as cancel, features that switch each other on |
+| 12b | [SFTP](slices/12-webdav-sftp.md) — [tour](slices/12b-tour.md): hand-rolled on `russh`, a server's key trusted once and kept on the connection, password or key file, many requests in flight | **`connection trust nas` shows the fingerprint; a drain lands over SSH** | when pinned release candidates collide, a handler that cannot ask mid-handshake, a race found by the tests |
 | 12 | (S3 arrived early, in the polish pass; see scope changes.) WebDAV and S3 backends + ingest links + remote polling (FTP landed in 4c; SFTP is hand-rolled on `russh`, see DESIGN.md §6) | a WebDAV drop folder ingests into the laptop folder | capability flags, integration tests with `testcontainers` |
 | 13 | Govern remote folders in place (tiered attribute fetch, non-atomic rename planning, remote trash) | reorganise the NAS over SFTP | cost-aware planning |
 | 14 | Web GUI | phone-viewable drain progress | chosen web stack |
@@ -76,6 +78,8 @@ Slices 0–4g are "v0.1: the drain works and I trust it, over a mount and over F
 
 
 ## Scope changes made during the build
+
+- **Slice 12 split in two and shipped as 12a WebDAV and 12b SFTP (2026-10-05).** Ingest links and remote polling, the rest of the old row 12, stay later. WebDAV uploads are our own streamed `PUT` because OpenDAL's WebDAV writer refuses a second write. SFTP keeps a trusted server's key as the connection's `host_key` option rather than a `known_hosts` file, and uses `russh` 0.55, because later versions pin cryptography release candidates that cannot sit beside smb-rs's.
 
 - **Selling it, planned last (2026-10-05).** Asked whether tungstate could be sold. Decided: one-time purchase with paid upgrades, a time-limited trial rather than a free tier, NAS owners with messy media as the first buyers, kept cheap. The work is slices M1 to M5, and they come after every development slice, so nothing in flight changes. Costs: the Apple account already exists, Windows signing is free through the Store and about $120 a year direct, a domain about $12 a year, and the merchant of record takes a share of each sale rather than a fee.
 

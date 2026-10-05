@@ -103,8 +103,12 @@ connection factory like SMB.
   - The first connection to an unknown server stops and reports
     `SHA256:…`. `connection test` asks; the window shows it in a dialog with
     Trust and Cancel.
-  - A trusted key goes into Tungstate's own `known_hosts`, beside the
-    journal, not `~/.ssh`.
+  - A trusted key is kept on the connection itself, as its `host_key`
+    option, not in a `known_hosts` file. Checking is then an exact
+    comparison with no file format to parse. The trust travels with the
+    connection through export and import, and goes when the connection
+    does. (Changed while building 12b; the first plan was a `known_hosts`
+    beside the journal.)
   - If a server's key ever changes, every connection to it stops, and says
     so in plain words, until the user looks.
 - **Sign-in: password and key file (chosen).**
