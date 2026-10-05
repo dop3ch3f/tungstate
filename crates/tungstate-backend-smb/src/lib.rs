@@ -468,6 +468,12 @@ impl Backend for SmbBackend {
         Ok(entries)
     }
 
+    fn listing_is_complete(&self) -> bool {
+        // Both go through `meta` with the same three fields: the size, the
+        // attributes and the last write time.
+        true
+    }
+
     fn open_read(&self, path: &Path) -> Result<Box<dyn Read + Send>> {
         Ok(Box::new(self.reader(path)?))
     }

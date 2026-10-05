@@ -54,12 +54,18 @@ impl Backend for Defaulted {
     }
 }
 
-/// Records every read: which prefix lengths were asked for, and how many
-/// times the whole file was opened.
+/// Records every read: which prefix lengths were asked for, how many times
+/// the whole file was opened, and how many `stat`s were asked.
+///
+/// Says its listing is incomplete unless [`Counting::trusting`] made it, so
+/// a walk's own `stat`s show up here. `LocalBackend` builds its listing with
+/// its own `stat`, which this does not see.
 struct Counting {
     inner: LocalBackend,
     prefixes: Mutex<Vec<u64>>,
     opens: Mutex<usize>,
+    stats: Mutex<usize>,
+    complete_listing: bool,
 }
 
 impl Counting {
@@ -68,7 +74,18 @@ impl Counting {
             inner: LocalBackend::new(root.to_path_buf()),
             prefixes: Mutex::new(Vec::new()),
             opens: Mutex::new(0),
+            stats: Mutex::new(0),
+            complete_listing: false,
         }
+    }
+    fn trusting(root: &Path) -> Self {
+        Self {
+            complete_listing: true,
+            ..Self::new(root)
+        }
+    }
+    fn stats(&self) -> usize {
+        *self.stats.lock().unwrap()
     }
     fn prefixes(&self) -> Vec<u64> {
         self.prefixes.lock().unwrap().clone()
@@ -86,10 +103,14 @@ impl Backend for Counting {
         self.inner.root_token()
     }
     fn stat(&self, path: &Path) -> BackendResult<Meta> {
+        *self.stats.lock().unwrap() += 1;
         self.inner.stat(path)
     }
     fn read_dir(&self, path: &Path) -> BackendResult<Vec<Entry>> {
         self.inner.read_dir(path)
+    }
+    fn listing_is_complete(&self) -> bool {
+        self.complete_listing
     }
     fn open_read(&self, path: &Path) -> BackendResult<Box<dyn Read + Send>> {
         *self.opens.lock().unwrap() += 1;
@@ -440,6 +461,43 @@ fn every_entry_is_stamped_with_one_moment() {
     let d = messy();
     let snapshot = surveyed(&d);
     assert!(snapshot.entries.iter().all(|e| e.now == snapshot.taken));
+}
+
+#[test]
+fn a_complete_listing_is_taken_as_listed_and_says_what_stat_would() {
+    let d = messy();
+    std::fs::write(
+        d.path().join("nested/shot.jpg"),
+        jpeg_with_exif_date("2021:06:01 10:00:00"),
+    )
+    .unwrap();
+    let probe = policy(tungstate_core::learn::PROBE);
+    let asking = Counting::new(d.path());
+    let trusting = Counting::trusting(d.path());
+
+    let asked = survey_at(&asking, &probe, Tier::Meta).unwrap();
+    let listed = survey_at(&trusting, &probe, Tier::Meta).unwrap();
+
+    assert_eq!(trusting.stats(), 0, "no second ask per entry");
+    assert_eq!(asking.stats(), asked.entries.len(), "one ask per entry");
+    // Everything but the moment each walk began, including what the prefix
+    // read found, which the listing path must still fetch.
+    let at_one_moment = |snapshot: &Snapshot| {
+        let mut entries = snapshot.entries.clone();
+        for entry in &mut entries {
+            entry.now = Timestamp::UNIX_EPOCH;
+        }
+        entries
+    };
+    assert_eq!(at_one_moment(&listed), at_one_moment(&asked));
+    assert_eq!(listed.directories, asked.directories);
+    let shot = listed
+        .entries
+        .iter()
+        .find(|entry| entry.relative_path() == "nested/shot.jpg")
+        .unwrap();
+    assert!(shot.mime.is_some(), "the prefix was still read");
+    assert_ne!(shot.exif, BTreeMap::new(), "and its EXIF found");
 }
 
 #[test]

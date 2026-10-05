@@ -613,3 +613,55 @@ fn an_exact_sync_deletes_over_ftp_when_told_to() {
     assert!(!exists(&format!("{end}/a.mp4")));
     assert_eq!(fetch(&format!("{end}/b.mp4")), b"stays");
 }
+
+#[test]
+fn a_listing_over_ftp_says_what_a_stat_would() {
+    // What lets a walk skip a `stat` per file, which over FTP lists the whole
+    // folder again for each file in it.
+    use std::path::Path;
+    use tungstate_journal::{Endpoint, Journal, NewConnection, Scheme};
+    use tungstate_secret::SecretStore as _;
+
+    let server = server();
+    let end = unique_end("listing");
+    put(&format!("{end}/a.jpg"), b"a");
+    put(&format!("{end}/2024/b.mp4"), b"bb");
+
+    let journal = Journal::open_in_memory().unwrap();
+    let id = journal
+        .create_connection(&NewConnection {
+            name: "nas".to_string(),
+            scheme: Scheme::Ftp,
+            host: Some(server.host.clone()),
+            port: Some(server.port.parse().expect("port")),
+            username: Some(server.user.clone()),
+            root: server.root.clone(),
+            options: std::collections::BTreeMap::new(),
+        })
+        .unwrap();
+    let secrets = tungstate_secret::MemoryStore::new();
+    secrets
+        .set(&tungstate_secret::connection_key("nas"), &server.password)
+        .unwrap();
+    let backend = tungstate_backend_opendal::open(
+        &Endpoint::remote(id, std::path::PathBuf::from(&end)),
+        &journal,
+        &secrets,
+    )
+    .unwrap();
+
+    assert!(backend.listing_is_complete());
+    let mut seen = 0;
+    for folder in ["", "2024"] {
+        for entry in backend.read_dir(Path::new(folder)).unwrap() {
+            assert_eq!(
+                entry.meta,
+                backend.stat(&entry.path).unwrap(),
+                "{}",
+                entry.path.display()
+            );
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 3, "a.jpg, 2024 and 2024/b.mp4");
+}

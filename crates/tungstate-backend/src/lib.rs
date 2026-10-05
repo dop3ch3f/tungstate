@@ -205,6 +205,18 @@ pub trait Backend: Send + Sync {
     /// readable directory.
     fn read_dir(&self, path: &Path) -> Result<Vec<Entry>>;
 
+    /// True when each [`Entry`] from [`Backend::read_dir`] carries exactly
+    /// what [`Backend::stat`] would say about it, so a walk need not ask
+    /// again.
+    ///
+    /// Over a network that second ask is a round trip per file. Defaulted to
+    /// `false`, which is always correct and only slower, so a wrapper that
+    /// forgets to forward this costs time, never accuracy. FTP's listing has
+    /// coarser times than its `stat`, and S3's finer, so they keep the default.
+    fn listing_is_complete(&self) -> bool {
+        false
+    }
+
     /// Open `path` for streaming reads.
     ///
     /// Returns a boxed reader rather than bytes so a 40 GB video is never held

@@ -11,7 +11,7 @@ use std::path::Path;
 
 use jiff::Timestamp;
 use tungstate_backend::walk::Walk;
-use tungstate_backend::{Backend, BackendError};
+use tungstate_backend::{Backend, BackendError, Meta};
 pub use tungstate_core::{Attributes, Snapshot, Tier};
 use tungstate_core::{Policy, snapshot};
 
@@ -57,15 +57,21 @@ pub fn gather(backend: &dyn Backend, path: &Path, tier: Tier) -> Result<Attribut
     };
 
     let meta = backend.stat(path).map_err(failed)?;
-    let mut attrs = Attributes::new(&relative, meta.len, Timestamp::now());
+    let mut attrs = described(&relative, meta, Timestamp::now());
+    fill(backend, &mut attrs, tier)?;
+    Ok(attrs)
+}
+
+/// What a `stat`, or a listing that says as much, tells about one entry.
+fn described(relative: &str, meta: Meta, now: Timestamp) -> Attributes {
+    let mut attrs = Attributes::new(relative, meta.len, now);
     attrs.is_dir = meta.is_dir;
     attrs.is_symlink = meta.is_symlink;
     attrs.mtime = meta
         .modified
         .and_then(|time| Timestamp::try_from(time).ok());
     attrs.identity = meta.identity;
-    fill(backend, &mut attrs, tier)?;
-    Ok(attrs)
+    attrs
 }
 
 /// Read what `tier` allows beyond a listing into `attrs`: the media type and
@@ -161,6 +167,7 @@ pub fn survey_at(backend: &dyn Backend, policy: &Policy, tier: Tier) -> Result<S
                 .is_none()
     });
 
+    let trust_listing = backend.listing_is_complete();
     let mut entries = Vec::new();
     let mut directories = BTreeSet::new();
     for entry in walk {
@@ -172,10 +179,16 @@ pub fn survey_at(backend: &dyn Backend, policy: &Policy, tier: Tier) -> Result<S
         if entry.meta.is_dir {
             directories.insert(path.clone());
         }
-        // Directories go through `gather` too: it returns early for one at any
-        // tier, so this costs a `stat` and keeps one description of what an
-        // entry is.
-        let mut attrs = gather(backend, &entry.path, tier)?;
+        // Where the listing says all a `stat` would, asking again is one
+        // round trip per file for nothing. `fill` returns early for a
+        // directory at any tier, so directories cost nothing more either.
+        let mut attrs = if trust_listing {
+            let mut attrs = described(&relative_string(&entry.path)?, entry.meta, taken);
+            fill(backend, &mut attrs, tier)?;
+            attrs
+        } else {
+            gather(backend, &entry.path, tier)?
+        };
         // `gather` stamps its own `now`, which would leave two files read a
         // microsecond apart answering `age` differently for no reason.
         attrs.now = taken;

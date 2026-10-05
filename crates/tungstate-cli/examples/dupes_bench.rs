@@ -237,6 +237,10 @@ impl Backend for Slow<'_> {
         delayed(self.inner.read_dir(path))
     }
 
+    fn listing_is_complete(&self) -> bool {
+        self.inner.listing_is_complete()
+    }
+
     fn open_read(&self, path: &Path) -> Result<Box<dyn Read + Send>> {
         let inner = delayed(self.inner.open_read(path))?;
         Ok(Box::new(SlowRead {

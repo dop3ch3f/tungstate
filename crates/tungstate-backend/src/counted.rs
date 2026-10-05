@@ -190,6 +190,10 @@ impl Backend for Counted<'_> {
         self.ask(self.inner.read_dir(path))
     }
 
+    fn listing_is_complete(&self) -> bool {
+        self.inner.listing_is_complete()
+    }
+
     fn open_read(&self, path: &Path) -> Result<Box<dyn Read + Send>> {
         let inner = self.ask(self.inner.open_read(path))?;
         Ok(Box::new(CountedRead {

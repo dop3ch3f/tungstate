@@ -232,6 +232,11 @@ impl Backend for LocalBackend {
         Ok(entries)
     }
 
+    fn listing_is_complete(&self) -> bool {
+        // `read_dir` above builds each entry with `stat` itself.
+        true
+    }
+
     fn open_read(&self, path: &Path) -> Result<Box<dyn std::io::Read + Send>> {
         let full = self.guarded(path, Tail::MustNotBeLink)?;
         let file = std::fs::File::open(&full).map_err(io_at(&full))?;

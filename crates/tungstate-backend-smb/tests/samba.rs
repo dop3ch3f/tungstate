@@ -271,3 +271,27 @@ fn a_modification_time_can_be_set_and_is_read_back() {
         1_700_000_000
     );
 }
+
+#[test]
+fn a_listing_says_what_a_stat_would() {
+    // What lets a walk skip a `stat` per file: a round trip each over SMB.
+    let (backend, _) = own("complete");
+    backend.create_dir_all(Path::new("2024")).unwrap();
+    put(&backend, "a.jpg", b"a");
+    put(&backend, "2024/b.mp4", b"bb");
+
+    assert!(backend.listing_is_complete());
+    let mut seen = 0;
+    for folder in ["", "2024"] {
+        for entry in backend.read_dir(Path::new(folder)).unwrap() {
+            assert_eq!(
+                entry.meta,
+                backend.stat(&entry.path).unwrap(),
+                "{}",
+                entry.path.display()
+            );
+            seen += 1;
+        }
+    }
+    assert_eq!(seen, 3, "a.jpg, 2024 and 2024/b.mp4");
+}

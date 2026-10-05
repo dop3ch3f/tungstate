@@ -52,6 +52,9 @@ pub struct OpendalBackend {
     /// scheme at construction, because `OpenDAL` does not report it back and
     /// the duplicate pass needs to know what a full read costs.
     networked: bool,
+    /// Whether a listing says all a `stat` would. See
+    /// [`OpendalBackend::with_complete_listing`].
+    complete_listing: bool,
 }
 
 /// How a backend answers "is the connection still there?".
@@ -95,7 +98,18 @@ impl OpendalBackend {
             anchor,
             endpoint,
             networked,
+            complete_listing: false,
         }
+    }
+
+    /// Mark this service's listing as saying all a `stat` would, so a walk
+    /// takes each entry as listed. Off unless asked for: true only where the
+    /// service's `stat` is built from the same answer, which `OpenDAL` does
+    /// not report.
+    #[must_use]
+    pub fn with_complete_listing(mut self, complete: bool) -> Self {
+        self.complete_listing = complete;
+        self
     }
 
     /// A caller's relative path as a key inside this link end.
@@ -279,6 +293,10 @@ impl Backend for OpendalBackend {
             });
         }
         Ok(entries)
+    }
+
+    fn listing_is_complete(&self) -> bool {
+        self.complete_listing
     }
 
     fn open_read(&self, path: &Path) -> Result<Box<dyn Read + Send>> {

@@ -161,13 +161,16 @@ pub fn open_connection(
     // A folder reached through the local-filesystem adapter is on this
     // machine; everything else is a network away.
     let networked = !matches!(connection.scheme, Scheme::Fs);
-    Ok(Box::new(OpendalBackend::new(
-        operator,
-        prefix,
-        anchor,
-        connection.name.clone(),
-        networked,
-    )))
+    // `OpenDAL`'s FTP `stat` is a `LIST` of the parent folder, filtered to
+    // one name: the listing already said the same, and asking again per file
+    // lists the whole folder once per file in it. S3's listing has finer
+    // times than its `HEAD`, and `fs` follows links in `stat` but not in a
+    // listing, so both still ask.
+    let complete_listing = matches!(connection.scheme, Scheme::Ftp | Scheme::Ftps);
+    Ok(Box::new(
+        OpendalBackend::new(operator, prefix, anchor, connection.name.clone(), networked)
+            .with_complete_listing(complete_listing),
+    ))
 }
 
 /// Confirm a connection is usable, without transferring anything.
