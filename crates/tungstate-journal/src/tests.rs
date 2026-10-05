@@ -2766,3 +2766,37 @@ fn a_webdav_connection_is_a_url_and_says_when_it_is_in_the_clear() {
     assert_eq!(Scheme::WebDav.as_str(), "webdav");
     assert!(Scheme::WebDav.can_rename());
 }
+
+#[test]
+fn an_sftp_connection_needs_a_server_and_a_user_and_is_never_in_the_clear() {
+    use crate::SettingsProblem as P;
+    let nobody = ConnectionSettings {
+        username: None,
+        ..settings(Scheme::Sftp, None, "/volume1/media", &[])
+    };
+    assert_eq!(nobody.problems(), [P::NeedsHost, P::NeedsUser]);
+
+    let keyed = settings(
+        Scheme::Sftp,
+        Some("nas"),
+        "",
+        &[
+            ("key", "/Users/me/.ssh/id_ed25519"),
+            ("host_key", "ssh-ed25519 AAAA"),
+        ],
+    );
+    // No root is fine: it means where the account lands.
+    assert_eq!(keyed.problems(), [] as [connections::SettingsProblem; 0]);
+    assert!(keyed.in_the_clear().is_none());
+
+    // A trusted key means nothing on any other kind of connection.
+    let stray = settings(
+        Scheme::Ftp,
+        Some("nas"),
+        "/v",
+        &[("host_key", "ssh-ed25519 AAAA")],
+    );
+    assert_eq!(stray.problems(), [P::UnusedOption("host_key")]);
+    assert_eq!(Scheme::Sftp.default_port(), Some(22));
+    assert_eq!(Scheme::parse("sftp"), Some(Scheme::Sftp));
+}

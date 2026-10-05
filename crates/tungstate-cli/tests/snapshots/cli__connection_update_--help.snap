@@ -40,6 +40,9 @@ Options:
       --share <SHARE>
           SMB: the share, which the root then continues inside. `--share media --root backups` is the same as `--root media/backups`
 
+      --key <PATH>
+          SFTP: sign in with this private key file instead of a password. The secret asked for is then the key's passphrase, if it has one
+
       --option <KEY=VALUE>
           Set one per-scheme extra, as `key=value`. Repeatable
 

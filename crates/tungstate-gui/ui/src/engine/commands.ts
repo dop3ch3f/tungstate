@@ -148,6 +148,8 @@ export const connections = {
   /** What would stop these settings working, one sentence each. */
   problems: (form: T.ConnectionForm) => invoke<string[]>("settings_problems", { form }),
   uses: (name: string) => invoke<T.ConnectionUses>("connection_uses", { name }),
+  /** Keep an SFTP server's key with a saved connection, once agreed. */
+  trust: (name: string, key: string) => invoke<void>("trust_server", { name, key }),
   /** Retired, rather than deleted, when History still names it. */
   remove: (name: string) => invoke<"deleted" | "retired">("remove_connection", { name }),
 };

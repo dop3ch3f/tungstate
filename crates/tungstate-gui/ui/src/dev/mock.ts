@@ -212,8 +212,18 @@ mockIPC((cmd, args) => {
       // What the found scene ticks by default: the folder copy and its files.
       return { files: 217, bytes: 3_404_000_000, plan: 7, reversible: true, dropped: 1, failed: [] };
     case "list_connections": return savedConnections;
-    case "test_connection": return { entries: 14, root: "/volume1/media", names: ["Movies", "Photos"], accepts_files: true };
-    case "test_settings": return { entries: 6, root: "media/backups", names: ["2024/", "2025/", "2026/", "CapCut/", "Photos/", "notes.txt"], accepts_files: true };
+    case "test_connection": {
+      // The SFTP ones stop at their server's key until it is trusted.
+      const saved = savedConnections.find((c) => c.name === a.name);
+      if (saved?.scheme === "sftp" && !trustedHere.has(String(a.name))) {
+        return { ...waitingProbe, server: { ...serverKey, changed: a.name === "vault" } };
+      }
+      return { entries: 14, root: "/volume1/media", names: ["Movies", "Photos"], accepts_files: true, server: null };
+    }
+    case "test_settings":
+      if (a.form?.scheme === "sftp" && !a.form?.options?.host_key) return { ...waitingProbe, server: { ...serverKey, changed: false } };
+      return { entries: 6, root: "media/backups", names: ["2024/", "2025/", "2026/", "CapCut/", "Photos/", "notes.txt"], accepts_files: true, server: null };
+    case "trust_server": trustedHere.add(String(a.name)); return null;
     case "settings_problems":
       return a.form?.scheme === "smb" && !a.form?.root ? ["the root has to start with the share's name, as in media/backups"] : [];
     case "connection_uses":
@@ -485,6 +495,15 @@ async function tab(n: number) {
   await tick();
 }
 
+/** An SFTP server's identity, as a first check shows it. */
+const serverKey = {
+  fingerprint: "SHA256:20RPCT+89WI8EApEhyt7TBc5EdPwKzd0ZjuDfF6rc7M",
+  key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAXRvSCexample",
+};
+const waitingProbe = { entries: 0, root: "/volume1/media", names: [] as string[], accepts_files: null };
+/** Servers trusted during this harness session. */
+const trustedHere = new Set<string>();
+
 /** Every kind of connection, each at a different point in its life. */
 const savedConnections: T.Connection[] = (() => {
   const base = { port: null as number | null, encrypted: true, networked: true, rootless: null, clear: null as string | null, options: {} as Record<string, string>, last_check: null as T.ConnectionCheck | null };
@@ -498,6 +517,10 @@ const savedConnections: T.Connection[] = (() => {
       last_check: { at: now - 2 * 3_600_000, ok: false, note: "`offsite` refused the credentials it was given" } },
     { ...base, name: "photos-b2", scheme: "s3", host: null, username: "0045a1b2c3", root: "2026", place: "bucket family-photos at s3.us-west-004.backblazeb2.com › 2026",
       options: { bucket: "family-photos", endpoint: "https://s3.us-west-004.backblazeb2.com", region: "us-west-004" }, last_check: null },
+    { ...base, name: "ssh-nas", scheme: "sftp", host: "nas.local", username: "me", root: "/volume1/media", place: "nas.local › volume1/media",
+      last_check: null },
+    { ...base, name: "vault", scheme: "sftp", host: "vault.example.net", username: "backup", root: "backups", place: "vault.example.net › backups",
+      options: { host_key: "ssh-ed25519 AAAAold" }, last_check: { at: now - 6 * day, ok: true, note: "3 things in backups" } },
     { ...base, name: "dav", scheme: "webdav", host: null, username: "me", root: "media", place: "nas.local:5006 › media",
       options: { endpoint: "https://nas.local:5006" }, last_check: { at: now - 20 * 60_000, ok: true, note: "14 things in media" } },
     { ...base, name: "usb-drive", scheme: "fs", host: null, username: null, root: "/Volumes/Samsung T7", place: "/Volumes/Samsung T7", networked: false,
@@ -698,6 +721,45 @@ const scenes: Record<string, () => unknown> = {
     await tick();
     fill(["dav", "http://nas.local:5005", "media", "me", "hunter2"]);
     await tick();
+  },
+  "connections-add-sftp": async () => {
+    await scenes["connections-add"]!();
+    press("SFTP");
+    await tick();
+    fill(["nas", "nas.local", "", "/volume1/media", "me", "hunter2"]);
+    await tick();
+    press("Check", true);
+    await tick(); await tick();
+  },
+  // Trusted from the form: the check goes in.
+  "connections-add-sftp-trusted": async () => {
+    await scenes["connections-add-sftp"]!();
+    press("Trust it");
+    await tick(); await tick();
+    await new Promise((done) => setTimeout(done, 600));
+  },
+  "connections-add-sftp-key": async () => {
+    await scenes["connections-add"]!();
+    press("SFTP");
+    await tick();
+    press("Key file");
+    await tick();
+    fill(["nas", "nas.local", "", "/volume1/media", "~/.ssh/id_ed25519", "me"]);
+    await tick();
+  },
+  // A saved SFTP connection checked for the first time: asked on the spot.
+  "connections-trust": async () => {
+    nav.go("connections"); await tick();
+    pressIn(".cn-row:nth-child(5)", "Check");
+    await tick(); await tick();
+    await new Promise((done) => setTimeout(done, 600));
+  },
+  // A trusted server that now shows another key.
+  "connections-trust-changed": async () => {
+    nav.go("connections"); await tick();
+    pressIn(".cn-row:nth-child(6)", "Check");
+    await tick(); await tick();
+    await new Promise((done) => setTimeout(done, 600));
   },
   // A row's "…" menu, open.
   "connections-menu": async () => { nav.go("connections"); await tick(); pressIn(".cn-row:nth-child(2)", "…"); await tick(); },

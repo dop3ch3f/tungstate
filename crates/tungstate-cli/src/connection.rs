@@ -31,6 +31,10 @@ pub struct KindFlags {
     /// --root backups` is the same as `--root media/backups`.
     #[arg(long)]
     share: Option<String>,
+    /// SFTP: sign in with this private key file instead of a password. The
+    /// secret asked for is then the key's passphrase, if it has one.
+    #[arg(long, value_name = "PATH")]
+    key: Option<String>,
 }
 
 impl KindFlags {
@@ -42,6 +46,7 @@ impl KindFlags {
             (option::BUCKET, &self.bucket),
             (option::REGION, &self.region),
             (option::ENDPOINT, &self.endpoint),
+            (option::KEY, &self.key),
         ] {
             if let Some(value) = value {
                 options.insert(key.to_string(), value.clone());
@@ -86,7 +91,7 @@ pub enum ConnectionAction {
         /// What this connection is called on the command line.
         name: String,
         /// Which protocol it speaks: fs (a folder this machine can reach),
-        /// smb, webdav, ftps, ftp or s3.
+        /// smb, sftp, webdav, ftps, ftp or s3.
         #[arg(long)]
         scheme: String,
         /// Hostname, for the schemes that have one.
@@ -167,6 +172,17 @@ pub enum ConnectionAction {
         /// The connection name.
         name: String,
     },
+    /// Trust an SFTP server: show its fingerprint and, once you agree, keep
+    /// its key with the connection. Needed the first time, and again if the
+    /// server's key ever changes.
+    Trust {
+        /// The connection name.
+        name: String,
+        /// Trust without asking, but only if the server's fingerprint is
+        /// this one (`SHA256:…`, as `ssh-keygen -lf` prints it). For scripts.
+        #[arg(long)]
+        fingerprint: Option<String>,
+    },
     /// Forget a connection. Refused while a link still points at it.
     Remove {
         /// The connection name.
@@ -229,6 +245,9 @@ pub fn run(action: ConnectionAction, journal: &Journal, secrets: &dyn SecretStor
         }
         ConnectionAction::List => list(journal),
         ConnectionAction::Test { name } => test(journal, secrets, &name),
+        ConnectionAction::Trust { name, fingerprint } => {
+            trust(journal, secrets, &name, fingerprint.as_deref())
+        }
         ConnectionAction::Remove { name } => remove(journal, secrets, &name),
     }
 }
@@ -285,8 +304,9 @@ fn add(journal: &Journal, secrets: &dyn SecretStore, args: &AddArgs) -> ExitCode
 
     // Read the password before writing the row. Storing a connection whose
     // password prompt was then cancelled would leave something half-made.
+    let keyed = settings.options.contains_key(option::KEY);
     let secret = if scheme.authenticates() {
-        match read_secret(&args.name, scheme, args.secret_stdin) {
+        match read_secret(&args.name, scheme, keyed, args.secret_stdin) {
             Ok(secret) => secret,
             Err(error) => {
                 eprintln!("error: could not read a password: {error}");
@@ -438,7 +458,8 @@ fn password(
         return ExitCode::from(2);
     }
 
-    let typed = match read_secret(name, connection.scheme, from_stdin) {
+    let keyed = connection.options.contains_key(option::KEY);
+    let typed = match read_secret(name, connection.scheme, keyed, from_stdin) {
         Ok(secret) => secret,
         Err(error) => {
             eprintln!("error: could not read a password: {error}");
@@ -640,8 +661,123 @@ fn check(
                 ),
             )
         }
-        Err(error) => (fail(&error), false, sentence(&error)),
+        Err(error) => {
+            let code = fail(&error);
+            if let tungstate_backend_opendal::OpenError::Backend(
+                tungstate_backend::BackendError::HostUnknown { .. }
+                | tungstate_backend::BackendError::HostKeyChanged { .. },
+            ) = &error
+            {
+                eprintln!(
+                    "  check the fingerprint on the server, then: tungstate connection trust {name}"
+                );
+            }
+            (code, false, sentence(&error))
+        }
     }
+}
+
+/// Learn an SFTP server's key and keep it with the connection, once the
+/// person agrees or `--fingerprint` matches.
+fn trust(
+    journal: &Journal,
+    secrets: &dyn SecretStore,
+    name: &str,
+    expected: Option<&str>,
+) -> ExitCode {
+    use tungstate_backend::BackendError;
+    use tungstate_backend_opendal::OpenError;
+
+    let connection = match journal.connection_by_name(name) {
+        Ok(connection) => connection,
+        Err(error) => return fail(&error),
+    };
+    if connection.scheme != Scheme::Sftp {
+        eprintln!(
+            "error: only SFTP servers are trusted this way; `{name}` is {}",
+            connection.scheme.as_str()
+        );
+        return ExitCode::from(2);
+    }
+    // With the key already kept, if any: a server that still matches it is
+    // trusted, and one that does not answers with what it shows now.
+    let (fingerprint, key) = match tungstate_backend_opendal::probe(&connection, secrets) {
+        Err(OpenError::Backend(
+            BackendError::HostUnknown {
+                fingerprint, key, ..
+            }
+            | BackendError::HostKeyChanged {
+                fingerprint, key, ..
+            },
+        )) => (fingerprint, key),
+        Ok(_) => {
+            println!("`{name}` is already trusted");
+            return ExitCode::SUCCESS;
+        }
+        Err(error) => return fail(&error),
+    };
+
+    let was = connection.options.contains_key(option::HOST_KEY);
+    let agreed = match expected {
+        Some(wanted) if wanted.trim() == fingerprint => true,
+        Some(wanted) => {
+            eprintln!(
+                "error: `{name}` shows {fingerprint}, not {}; nothing was trusted",
+                wanted.trim()
+            );
+            return ExitCode::FAILURE;
+        }
+        None => ask_to_trust(name, &connection, &fingerprint, was),
+    };
+    if !agreed {
+        println!("nothing was trusted");
+        return ExitCode::FAILURE;
+    }
+
+    let mut settings = ConnectionSettings::from(&connection);
+    settings.options.insert(option::HOST_KEY.to_string(), key);
+    if let Err(error) = journal.update_connection(name, &settings) {
+        return fail(&error);
+    }
+    println!("trusted `{name}` ({fingerprint})");
+    println!("check it with: tungstate connection test {name}");
+    ExitCode::SUCCESS
+}
+
+/// Show the fingerprint and ask. No terminal means no answer, so a script has
+/// to say which fingerprint it expects instead.
+fn ask_to_trust(
+    name: &str,
+    connection: &tungstate_journal::Connection,
+    fingerprint: &str,
+    replacing: bool,
+) -> bool {
+    use std::io::{IsTerminal, Write};
+
+    if !std::io::stdin().is_terminal() {
+        eprintln!(
+            "error: `{name}` shows {fingerprint}. Check that on the server, then re-run with\n  \
+             --fingerprint {fingerprint}"
+        );
+        return false;
+    }
+    let host = connection.host.as_deref().unwrap_or("the server");
+    if replacing {
+        println!("{host} has a different key from the one trusted before.");
+        println!("That happens when a server is reset or replaced, and also when something");
+        println!("is pretending to be it. Only trust it if you know which.");
+    } else {
+        println!("This is the first time `{name}` has reached {host}.");
+    }
+    println!("Its fingerprint is {fingerprint}");
+    println!("On the server, `ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub` shows its own.");
+    print!("Trust it? [y/N]: ");
+    let _ = std::io::stdout().flush();
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    matches!(answer.trim(), "y" | "Y" | "yes")
 }
 
 fn remove(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode {
@@ -746,7 +882,12 @@ fn store_password(
 ///
 /// An argument would land in shell history and be visible in `ps` to every
 /// other user on the machine, which is why there is no `--password` flag.
-fn read_secret(name: &str, scheme: Scheme, from_stdin: bool) -> std::io::Result<Option<String>> {
+fn read_secret(
+    name: &str,
+    scheme: Scheme,
+    keyed: bool,
+    from_stdin: bool,
+) -> std::io::Result<Option<String>> {
     if from_stdin {
         let mut line = String::new();
         std::io::BufRead::read_line(&mut std::io::stdin().lock(), &mut line)?;
@@ -755,6 +896,8 @@ fn read_secret(name: &str, scheme: Scheme, from_stdin: bool) -> std::io::Result<
     }
     let what = if scheme == Scheme::S3 {
         "secret key"
+    } else if keyed {
+        "the key's passphrase"
     } else {
         "password"
     };

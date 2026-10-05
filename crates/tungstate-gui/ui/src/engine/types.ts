@@ -487,6 +487,19 @@ export interface Probe {
    *  Listing and writing are different permissions and only the second is what
    *  a drain needs. */
   accepts_files: boolean | null;
+  /** An SFTP server nobody has trusted yet: nothing was listed, and the
+   *  person is asked whether this fingerprint is their server's. */
+  server: ServerKey | null;
+}
+
+/** A server's identity, for the person to agree to. */
+export interface ServerKey {
+  /** As in `SHA256:…`, to compare with what the server itself shows. */
+  fingerprint: string;
+  /** What is kept with the connection once trusted. */
+  key: string;
+  /** It is not the key trusted before. */
+  changed: boolean;
 }
 
 // --- storage -------------------------------------------------------------

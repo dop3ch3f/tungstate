@@ -46,7 +46,7 @@ const note = (check: { ok: boolean; note: string }) => {
 };
 
 const STEPS = [
-  { art: "connections", title: "Choose what kind", line: "A NAS share, an FTP server, an S3 bucket, or a drive this Mac has mounted." },
+  { art: "connections", title: "Choose what kind", line: "A NAS share, an SFTP or FTP server, an S3 bucket, or a drive this Mac has mounted." },
   { art: "in-step", title: "Check it works", line: "Before it is saved, so a wrong password is found now and not halfway through a transfer." },
   { art: "drain", title: "Use it anywhere", line: "Transfer, Sync and Duplicates all offer it wherever they ask for a place." },
 ] as const;
@@ -55,6 +55,31 @@ async function saved(name: string) {
   form.value = null;
   await c.load();
   // Checked again once saved: proving it works is why anyone opened the form.
+  await checkRow(name);
+}
+
+/** Check one, and if it stopped at an SFTP server nobody has trusted yet,
+ *  ask about it there and then rather than leaving a red row to decode. */
+async function checkRow(name: string) {
+  await c.check(name);
+  const server = c.found.value[name]?.server;
+  if (!server) return;
+  const host = c.all.value.find((item) => item.name === name)?.host ?? name;
+  const answer = await ask({
+    title: server.changed ? `${host} is not the server trusted before` : `Trust ${host}?`,
+    why: server.changed
+      ? "Its key has changed. That happens when a server is reset or replaced, and when something pretends to be it. Only trust it if you know which."
+      : "This is the first time Tungstate has reached it. If this fingerprint matches what the server shows, it is yours.",
+    detail: [server.fingerprint],
+    choices: [
+      { id: "no", label: "Not now" },
+      server.changed
+        ? { id: "yes", label: "Trust the new key", look: "danger" }
+        : { id: "yes", label: "Trust it", look: "primary" },
+    ],
+  });
+  if (answer.id !== "yes") return;
+  await doing.run(`trust:${name}`, () => connections.trust(name, server.key));
   await c.check(name);
 }
 
@@ -71,7 +96,7 @@ async function savePassword() {
     changing.value = null;
     newSecret.value = "";
   });
-  if (!changing.value) await c.check(target.name);
+  if (!changing.value) await checkRow(target.name);
 }
 
 /** Say what still uses it before anything is asked, and what Delete will
@@ -175,7 +200,7 @@ async function remove(target: Connection) {
             <span class="cn-warn" v-if="item.rootless">{{ item.rootless }}</span>
           </div>
           <div class="cn-do">
-            <Button look="link" :busy="c.checking(item.name)" @click="c.check(item.name)">Check</Button>
+            <Button look="link" :busy="c.checking(item.name)" @click="checkRow(item.name)">Check</Button>
             <Button look="link" @click="browse(item.name)">Browse</Button>
             <RowMenu
               :label="`More for ${item.name}`"

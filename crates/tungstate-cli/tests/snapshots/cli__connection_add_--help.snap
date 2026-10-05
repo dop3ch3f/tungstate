@@ -12,7 +12,7 @@ Arguments:
 
 Options:
       --scheme <SCHEME>
-          Which protocol it speaks: fs (a folder this machine can reach), smb, webdav, ftps, ftp or s3
+          Which protocol it speaks: fs (a folder this machine can reach), smb, sftp, webdav, ftps, ftp or s3
 
       --host <HOST>
           Hostname, for the schemes that have one
@@ -41,6 +41,9 @@ Options:
 
       --share <SHARE>
           SMB: the share, which the root then continues inside. `--share media --root backups` is the same as `--root media/backups`
+
+      --key <PATH>
+          SFTP: sign in with this private key file instead of a password. The secret asked for is then the key's passphrase, if it has one
 
       --option <KEY=VALUE>
           Per-scheme extra, as `key=value`. Repeatable. SMB reads `encryption=required`, to refuse a server that will not encrypt

@@ -48,12 +48,15 @@ pub enum Scheme {
     /// option because it may carry a path of its own, such as Nextcloud's
     /// `/remote.php/dav/files/<user>`; the root is a folder inside it.
     WebDav,
+    /// Files over SSH. The server is the host; the root is a folder on it,
+    /// absolute or relative to where the account lands.
+    Sftp,
 }
 
 // The same spellings serve the database and the CLI, so a stored value is
 // always a value the user could have typed. New values are new strings, so a
 // journal written before them reads exactly as it did.
-string_enum!(Scheme { Fs => "fs", Ftp => "ftp", Ftps => "ftps", S3 => "s3", Smb => "smb", WebDav => "webdav" });
+string_enum!(Scheme { Fs => "fs", Ftp => "ftp", Ftps => "ftps", S3 => "s3", Smb => "smb", WebDav => "webdav", Sftp => "sftp" });
 
 /// Keys in a connection's options that some scheme reads.
 pub mod option {
@@ -67,6 +70,12 @@ pub mod option {
     /// SMB: `required` to refuse a server that will not encrypt. Left to the
     /// server otherwise, which is what Finder and Windows do.
     pub const ENCRYPTION: &str = "encryption";
+    /// SFTP: the server's key once the person has trusted it, in the
+    /// one-line form `ssh` writes. A server that presents another is refused.
+    pub const HOST_KEY: &str = "host_key";
+    /// SFTP: a private key file to sign in with, instead of a password. Its
+    /// passphrase, if any, is kept where a password would be.
+    pub const KEY: &str = "key";
 }
 
 impl Scheme {
@@ -75,7 +84,7 @@ impl Scheme {
     pub fn authenticates(self) -> bool {
         match self {
             Self::Fs => false,
-            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav => true,
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav | Self::Sftp => true,
         }
     }
 
@@ -86,7 +95,7 @@ impl Scheme {
     pub fn is_encrypted(self) -> bool {
         match self {
             // Local, so nothing crosses a wire in the first place.
-            Self::Fs | Self::Ftps | Self::S3 | Self::WebDav => true,
+            Self::Fs | Self::Ftps | Self::S3 | Self::WebDav | Self::Sftp => true,
             // SMB leaves encrypting the contents to the server unless told
             // to insist, so it is not encrypted until a connection says so.
             Self::Ftp | Self::Smb => false,
@@ -103,8 +112,9 @@ impl Scheme {
     #[must_use]
     pub fn can_rename(self) -> bool {
         match self {
-            // WebDAV's `MOVE` replaces what is there when asked to.
-            Self::Fs | Self::Smb | Self::WebDav => true,
+            // WebDAV's `MOVE` replaces what is there when asked to, and so
+            // does OpenSSH's `posix-rename`, which nearly every NAS runs.
+            Self::Fs | Self::Smb | Self::WebDav | Self::Sftp => true,
             // An object store has no rename at all: a new name is a copy.
             Self::Ftp | Self::Ftps | Self::S3 => false,
         }
@@ -123,7 +133,7 @@ impl Scheme {
             // An S3 ETag is an MD5 only for single-part uploads, so it cannot
             // be trusted as a checksum of what landed.
             // A WebDAV `getetag` is whatever the server likes, often a time.
-            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav => false,
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav | Self::Sftp => false,
         }
     }
 
@@ -156,7 +166,7 @@ impl Scheme {
     pub fn is_networked(self) -> bool {
         match self {
             Self::Fs => false,
-            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav => true,
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav | Self::Sftp => true,
         }
     }
 
@@ -172,13 +182,15 @@ impl Scheme {
             // and servers that need it can be given `--port 990`.
             Self::Ftp | Self::Ftps => Some(21),
             Self::Smb => Some(445),
+            Self::Sftp => Some(22),
         }
     }
 
     /// Every scheme, in the order a person choosing one should see them.
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Fs,
         Self::Smb,
+        Self::Sftp,
         Self::WebDav,
         Self::Ftps,
         Self::Ftp,
@@ -323,8 +335,8 @@ pub enum SettingsProblem {
     /// `WebDAV` with no server to reach.
     #[error("WebDAV needs the server's address as the endpoint, as in https://nas.local:5006")]
     NeedsEndpoint,
-    /// SMB with nobody to sign in as.
-    #[error("SMB needs a user name; signing in as a guest is not supported")]
+    /// SMB or SFTP with nobody to sign in as.
+    #[error("this needs a user name; signing in as a guest is not supported")]
     NeedsUser,
     /// SMB with no share at the start of the root.
     #[error("the root has to start with the share's name, as in media/backups")]
@@ -366,10 +378,18 @@ impl ConnectionSettings {
 
         match self.scheme {
             Scheme::Fs if self.root.trim().is_empty() => found.push(SettingsProblem::NeedsRoot),
-            Scheme::Ftp | Scheme::Ftps | Scheme::Smb if !host => {
+            Scheme::Ftp | Scheme::Ftps | Scheme::Smb | Scheme::Sftp if !host => {
                 found.push(SettingsProblem::NeedsHost);
             }
             _ => {}
+        }
+        if self.scheme == Scheme::Sftp
+            && self
+                .username
+                .as_deref()
+                .is_none_or(|user| user.trim().is_empty())
+        {
+            found.push(SettingsProblem::NeedsUser);
         }
         if self.scheme == Scheme::Smb {
             // A guest session cannot be signed, so allowing one would mean
@@ -416,6 +436,7 @@ impl ConnectionSettings {
             option::BUCKET | option::REGION => self.scheme == Scheme::S3,
             option::ENDPOINT => matches!(self.scheme, Scheme::S3 | Scheme::WebDav),
             option::ENCRYPTION => self.scheme == Scheme::Smb,
+            option::HOST_KEY | option::KEY => self.scheme == Scheme::Sftp,
             _ => true,
         };
         for key in [
@@ -423,6 +444,8 @@ impl ConnectionSettings {
             option::REGION,
             option::ENDPOINT,
             option::ENCRYPTION,
+            option::HOST_KEY,
+            option::KEY,
         ] {
             if given(key).is_some() && !reads(key) {
                 found.push(SettingsProblem::UnusedOption(key));
@@ -445,7 +468,8 @@ impl ConnectionSettings {
                 .map(|value| value.trim().to_ascii_lowercase())
         };
         match self.scheme {
-            Scheme::Fs | Scheme::Ftps => None,
+            // SSH encrypts everything, the sign-in included.
+            Scheme::Fs | Scheme::Ftps | Scheme::Sftp => None,
             Scheme::Ftp => Some(
                 "sends your password and your files across the network unencrypted. \
                  If the server offers it, use ftps instead.",

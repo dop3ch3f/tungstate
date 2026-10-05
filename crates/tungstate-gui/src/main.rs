@@ -1186,7 +1186,9 @@ fn place_of(connection: &Connection) -> String {
                 .unwrap_or_default();
             format!("bucket {bucket}{at}{}", inside(&connection.root))
         }
-        Scheme::Smb | Scheme::Ftp | Scheme::Ftps => format!("{host}{}", inside(&connection.root)),
+        Scheme::Smb | Scheme::Ftp | Scheme::Ftps | Scheme::Sftp => {
+            format!("{host}{}", inside(&connection.root))
+        }
         // The URL without its scheme, as a person would say it.
         Scheme::WebDav => {
             let endpoint = connection
@@ -1268,6 +1270,20 @@ struct ProbeView {
     /// Whether the root will accept a file. `None` for a connection on this
     /// machine, where there is no far side to refuse one.
     accepts_files: Option<bool>,
+    /// An SFTP server waiting to be trusted, instead of anything found. The
+    /// window shows its fingerprint and asks; nothing was listed.
+    server: Option<ServerView>,
+}
+
+/// A server's identity, for the person to agree to.
+#[derive(Debug, Serialize)]
+struct ServerView {
+    /// As in `SHA256:…`, to compare with what the server itself shows.
+    fingerprint: String,
+    /// What is kept with the connection once trusted.
+    key: String,
+    /// It is not the key trusted before.
+    changed: bool,
 }
 
 #[tauri::command]
@@ -1383,6 +1399,17 @@ fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, Str
     // Written down whichever way it went, so the list can say when it was
     // last checked, and `connection list` agrees.
     let (ok, note) = match &found {
+        Ok(ProbeView {
+            server: Some(server),
+            ..
+        }) => (
+            false,
+            if server.changed {
+                "the server's key has changed since it was trusted".to_string()
+            } else {
+                "the server has not been trusted yet".to_string()
+            },
+        ),
         Ok(view) if view.accepts_files == Some(false) => {
             (false, format!("{} lists but refuses files", view.root))
         }
@@ -1439,7 +1466,22 @@ fn probe_view(connection: &Connection, store: &dyn SecretStore) -> Result<ProbeV
     } else {
         connection.root.clone()
     };
-    let found = tungstate_backend_opendal::probe(connection, store).map_err(describe)?;
+    let found = match tungstate_backend_opendal::probe(connection, store) {
+        Ok(found) => found,
+        // Not a failure to report but a question to ask, so it travels as
+        // data the window can put a Trust button on.
+        Err(tungstate_backend_opendal::OpenError::Backend(
+            tungstate_backend::BackendError::HostUnknown {
+                fingerprint, key, ..
+            },
+        )) => return Ok(waiting(root, fingerprint, key, false)),
+        Err(tungstate_backend_opendal::OpenError::Backend(
+            tungstate_backend::BackendError::HostKeyChanged {
+                fingerprint, key, ..
+            },
+        )) => return Ok(waiting(root, fingerprint, key, true)),
+        Err(error) => return Err(describe(error)),
+    };
     let names = found
         .iter()
         .take(12)
@@ -1468,7 +1510,38 @@ fn probe_view(connection: &Connection, store: &dyn SecretStore) -> Result<ProbeV
         root,
         names,
         accepts_files,
+        server: None,
     })
+}
+
+/// A check that stopped at a server nobody has trusted yet.
+fn waiting(root: String, fingerprint: String, key: String, changed: bool) -> ProbeView {
+    ProbeView {
+        entries: 0,
+        root,
+        names: Vec::new(),
+        accepts_files: None,
+        server: Some(ServerView {
+            fingerprint,
+            key,
+            changed,
+        }),
+    }
+}
+
+/// Keep a server's key with a saved connection, once the person has agreed
+/// it is theirs. The next check then goes in.
+#[tauri::command]
+fn trust_server(name: String, key: String, state: State<'_, App>) -> Result<(), String> {
+    let connection = state.journal.connection_by_name(&name).map_err(describe)?;
+    let mut settings = tungstate_journal::ConnectionSettings::from(&connection);
+    settings
+        .options
+        .insert(tungstate_journal::option::HOST_KEY.to_string(), key);
+    state
+        .journal
+        .update_connection(&name, &settings)
+        .map_err(describe)
 }
 
 /// What still uses a connection, so Delete can say before it is pressed.
@@ -2862,6 +2935,7 @@ fn main() {
             remove_from_queue,
             settings_problems,
             test_settings,
+            trust_server,
             connection_uses,
             governed,
             govern_folder,

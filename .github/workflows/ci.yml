@@ -220,6 +220,49 @@ jobs:
         if: always()
         run: docker logs tungstate-webdav
 
+  # SFTP against OpenSSH: trusting a server, password and key sign-in, the
+  # backend's own suite, and the drain and a sync through the binary.
+  sftp:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start an SFTP server
+        run: |
+          keys="${{ runner.temp }}/sftp-keys"
+          mkdir -p "$keys"
+          ssh-keygen -q -t ed25519 -N '' -f "$keys/id_ed25519"
+          ssh-keygen -q -t ed25519 -N 'open sesame' -f "$keys/id_locked"
+          cat "$keys"/*.pub > "$keys/authorized"
+          echo "TUNGSTATE_SFTP_KEYS=$keys" >> "$GITHUB_ENV"
+          docker run -d --name tungstate-sftp -p 2223:22 \
+            -v "$keys/authorized:/home/tungstate/.ssh/keys/authorized.pub:ro" \
+            atmoz/sftp@sha256:0960390462a4441dbb63698d7c185b76a41ffcee7b78ff4adf275f3e66f9c475 \
+            tungstate:s3cret:1000::media
+          for _ in $(seq 1 60); do
+            ssh-keyscan -p 2223 127.0.0.1 2>/dev/null | grep -q ssh-ed25519 \
+              && { echo "sftp server is ready"; exit 0; }
+            sleep 1
+          done
+          echo "sftp server never came up" >&2
+          exit 1
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --locked -p tungstate-backend-sftp --features sftp-integration
+        env:
+          TUNGSTATE_SFTP_HOST: 127.0.0.1
+          TUNGSTATE_SFTP_PORT: 2223
+      - run: cargo test --locked -p tungstate-cli --features sftp-integration --test sftp
+        env:
+          TUNGSTATE_SFTP_HOST: 127.0.0.1
+          TUNGSTATE_SFTP_PORT: 2223
+
+      - name: SFTP server log
+        if: always()
+        run: docker logs tungstate-sftp
+
   # SMB reached directly, with nothing mounted, against Samba: the backend's
   # own suite and the drain and a sync through the binary.
   smb:

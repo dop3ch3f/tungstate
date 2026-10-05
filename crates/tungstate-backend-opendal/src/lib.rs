@@ -166,6 +166,10 @@ pub fn open_connection(
     if connection.scheme == Scheme::WebDav {
         return webdav_backend(connection, link_end, secrets);
     }
+    #[cfg(feature = "sftp")]
+    if connection.scheme == Scheme::Sftp {
+        return sftp_backend(connection, link_end, secrets);
+    }
     let (operator, anchor) = operator_for(connection, secrets)?;
     let prefix = remote_key(link_end).map_err(|source| OpenError::EndPath {
         path: link_end.to_path_buf(),
@@ -319,7 +323,7 @@ fn operator_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
         // `open` builds these itself before asking for an operator: SMB is
         // not an OpenDAL service, and WebDAV needs its own uploads attached.
         // Arriving here means this build left them out.
-        Scheme::Smb | Scheme::WebDav => not_compiled(connection, secrets),
+        Scheme::Smb | Scheme::WebDav | Scheme::Sftp => not_compiled(connection, secrets),
     }
 }
 
@@ -348,6 +352,54 @@ fn smb_backend(
     };
     let backend =
         tungstate_backend_smb::SmbBackend::connect(&settings, link_end, &connection.name)?;
+    Ok(Box::new(backend))
+}
+
+/// An SFTP server, signed in to before this returns.
+///
+/// The first time a server is reached this fails with
+/// [`BackendError::HostUnknown`], carrying the key to show the person; once
+/// they trust it, it is kept as the connection's `host_key`.
+#[cfg(feature = "sftp")]
+fn sftp_backend(
+    connection: &Connection,
+    link_end: &std::path::Path,
+    secrets: &dyn SecretStore,
+) -> Result<Box<dyn Backend>> {
+    use tungstate_journal::option;
+
+    let Some(host) = connection.host.as_deref().filter(|h| !h.trim().is_empty()) else {
+        return Err(OpenError::MissingHost {
+            name: connection.name.clone(),
+        });
+    };
+    let setting = |key: &str| {
+        connection
+            .options
+            .get(key)
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    };
+    let secret = secret_for(connection, secrets)?;
+    // A key file when the connection names one, its passphrase kept where a
+    // password would be; a password otherwise.
+    let auth = match setting(option::KEY) {
+        Some(path) => tungstate_backend_sftp::Auth::Key {
+            path: path.into(),
+            passphrase: secret,
+        },
+        None => tungstate_backend_sftp::Auth::Password(secret.unwrap_or_default()),
+    };
+    let settings = tungstate_backend_sftp::Settings {
+        host: host.trim().to_string(),
+        port: connection.port,
+        root: connection.root.clone(),
+        username: connection.username.clone().unwrap_or_default(),
+        auth,
+        host_key: setting(option::HOST_KEY),
+    };
+    let backend =
+        tungstate_backend_sftp::SftpBackend::connect(&settings, link_end, &connection.name)?;
     Ok(Box::new(backend))
 }
 
@@ -573,7 +625,13 @@ fn ftp_operator(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
 /// `None` is not an error: an anonymous FTP server is a real thing, and a
 /// rejected login is something the server reports rather than something to
 /// guess at here.
-#[cfg(any(feature = "ftp", feature = "s3", feature = "smb", feature = "webdav"))]
+#[cfg(any(
+    feature = "ftp",
+    feature = "s3",
+    feature = "smb",
+    feature = "webdav",
+    feature = "sftp"
+))]
 fn secret_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<Option<String>> {
     secrets
         .get(&tungstate_secret::connection_key(&connection.name))

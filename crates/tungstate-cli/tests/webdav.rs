@@ -162,7 +162,7 @@ fn renaming_replaces_what_was_there() {
 fn an_upload_dropped_before_it_finishes_is_not_kept_whole() {
     let backend = own("dropped");
     let mut sink = backend.create_write(Path::new("half.mp4")).unwrap();
-    sink.write_all(&[7; 256 * 1024]).unwrap();
+    sink.write_all(&vec![7; 256 * 1024]).unwrap();
     drop(sink);
     // Aborted mid-body, so either nothing is there or the server kept what
     // it had; never a file that looks finished at full size.

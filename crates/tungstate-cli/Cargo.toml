@@ -21,6 +21,8 @@ s3-integration = []
 smb-integration = []
 # And for WebDAV, against rclone's server.
 webdav-integration = []
+# And for SFTP, against OpenSSH.
+sftp-integration = []
 
 [dependencies]
 tungstate-api = { path = "../tungstate-api" }

@@ -1,0 +1,37 @@
+[package]
+name = "tungstate-backend-sftp"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+# SFTP, hand-rolled on russh rather than OpenDAL's service, which is
+# Unix-only, refuses passwords and leaves host keys to the system `ssh`
+# (DESIGN.md §6).
+[features]
+# Opt-in: these tests need a real SSH server, so CI runs them on Linux
+# against an OpenSSH container.
+sftp-integration = []
+
+[dependencies]
+tungstate-backend = { path = "../tungstate-backend" }
+# `ring` rather than the default `aws-lc-rs`: ring is already in the build
+# through rustls, and needs no C toolchain or OpenSSL on any platform.
+# 0.55, not the newest: later russh pins release candidates of its crypto
+# crates (`rand_core`, `curve25519-dalek`, `p256`, ...) that clash with the
+# ones smb-rs's `sspi` pins, and Cargo cannot resolve both. 0.55 uses the
+# stable lines, which sit beside them. Move on when smb-rs moves to a newer
+# `sspi`. (0.56 resolves but its RSA support does not build beside them.)
+russh = { version = "=0.55.0", default-features = false, features = ["ring", "rsa", "flate2"] }
+russh-sftp = "3"
+tokio = { workspace = true, features = ["rt-multi-thread", "net", "time", "sync"] }
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+thiserror = { workspace = true }
+tracing = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

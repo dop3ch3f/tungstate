@@ -161,7 +161,7 @@ fn connection_update_refuses_a_name_and_a_scheme_it_does_not_know() {
         .assert()
         .code(2)
         .stderr(predicates::str::contains(
-            "must be fs, smb, webdav, ftps, ftp, s3",
+            "must be fs, smb, sftp, webdav, ftps, ftp, s3",
         ));
 }
 

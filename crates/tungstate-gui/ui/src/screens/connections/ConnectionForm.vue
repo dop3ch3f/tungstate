@@ -12,6 +12,7 @@ import Field from "../../ui/Field.vue";
 import Button from "../../ui/Button.vue";
 import ActionBar from "../../ui/ActionBar.vue";
 import Notice from "../../ui/Notice.vue";
+import Segmented from "../../ui/Segmented.vue";
 
 const props = defineProps<{ editing: Connection | null }>();
 const emit = defineEmits<{ dismiss: []; saved: [name: string] }>();
@@ -37,6 +38,14 @@ const service = ref<S3Service>(serviceOf(was?.options.endpoint));
 const endpoint = ref(was?.options.endpoint ?? "");
 const bucket = ref(was?.options.bucket ?? "");
 const region = ref(was?.options.region ?? "");
+// SFTP: a key file instead of a password, and the server's key once trusted.
+const signIn = ref<"password" | "key">(was?.options.key ? "key" : "password");
+const keyFile = ref(was?.options.key ?? "");
+const hostKey = ref(was?.options.host_key ?? "");
+const SIGN_INS = [
+  { id: "password", label: "Password" },
+  { id: "key", label: "Key file" },
+] as const;
 
 const problems = ref<string[]>([]);
 const trouble = ref<string | null>(null);
@@ -61,7 +70,13 @@ function form(): ConnectionForm {
   delete options.bucket;
   delete options.region;
   delete options.endpoint;
+  delete options.key;
+  delete options.host_key;
   if (k === "smb" && encrypt.value) options.encryption = "required";
+  if (k === "sftp") {
+    if (signIn.value === "key" && keyFile.value.trim()) options.key = keyFile.value.trim();
+    if (hostKey.value) options.host_key = hostKey.value;
+  }
   if (k === "s3") {
     options.bucket = bucket.value.trim();
     if (region.value.trim()) options.region = region.value.trim();
@@ -82,7 +97,7 @@ function form(): ConnectionForm {
 }
 
 // A changed field makes the last check's answer about something else.
-watch([kind, host, port, username, secret, root, share, inside, encrypt, service, endpoint, bucket, region], () => {
+watch([kind, host, port, username, secret, root, share, inside, encrypt, service, endpoint, bucket, region, signIn, keyFile], () => {
   probe.value = null;
   trouble.value = null;
 });
@@ -114,6 +129,15 @@ async function check() {
   }
 }
 
+/** The person has agreed this is their server: keep its key with the form,
+ *  saved with the connection, and check again, which now goes in. */
+async function trust() {
+  const server = probe.value?.server;
+  if (!server) return;
+  hostKey.value = server.key;
+  await check();
+}
+
 async function save() {
   saving.value = true;
   trouble.value = null;
@@ -140,7 +164,7 @@ async function chooseFolder() {
  *  sentence exists for. */
 const verdict = computed(() => {
   const got = probe.value;
-  if (!got) return null;
+  if (!got || got.server) return null;
   const seen = `${plural(got.entries, "thing")} in ${got.root}${got.names.length ? `: ${got.names.slice(0, 6).join(", ")}` : ""}`;
   if (got.accepts_files === false) return { ok: false, line: `Reached it and found ${seen}, but it refuses to take a file. Choose a folder this account can write to.` };
   return { ok: true, line: `Reached it: ${seen}.${got.accepts_files ? " It accepts files." : ""}` };
@@ -206,6 +230,25 @@ const verdict = computed(() => {
         </Field>
       </template>
 
+      <template v-if="kind === 'sftp'">
+        <div class="cf-grid">
+          <Field label="Server" note="Its name on the network, or its address.">
+            <input v-model="host" placeholder="nas.local" spellcheck="false" />
+          </Field>
+          <Field label="Port" note="Leave blank for the usual one."><input v-model="port" placeholder="22" spellcheck="false" /></Field>
+        </div>
+        <Field class="cf-gap" label="Folder to start from" note="Optional. A path on the server, like /volume1/media. Leave it blank to start where the account signs in.">
+          <input v-model="root" placeholder="/volume1/media" spellcheck="false" />
+        </Field>
+        <div class="cf-signin">
+          <span class="cf-signin-label">Sign in with</span>
+          <Segmented v-model="signIn" :options="SIGN_INS" label="Sign in with" />
+        </div>
+        <Field v-if="signIn === 'key'" class="cf-gap" label="Key file" note="A private key on this Mac, like the one ssh uses.">
+          <input v-model="keyFile" placeholder="~/.ssh/id_ed25519" spellcheck="false" />
+        </Field>
+      </template>
+
       <template v-if="kind === 'webdav'">
         <Field class="cf-gap" label="Address" note="The server's web address, with its port. On a Synology it is usually https://its-name:5006.">
           <input v-model="endpoint" placeholder="https://nas.local:5006" spellcheck="false" />
@@ -243,8 +286,8 @@ const verdict = computed(() => {
         </Field>
         <Field
           v-if="!was"
-          :label="kind === 's3' ? 'Secret key' : 'Password'"
-          note="Kept in this machine's keychain, never in Tungstate's own files."
+          :label="kind === 's3' ? 'Secret key' : kind === 'sftp' && signIn === 'key' ? 'Passphrase' : 'Password'"
+          :note="kind === 'sftp' && signIn === 'key' ? 'Only if the key has one. Kept in this machine\'s keychain.' : 'Kept in this machine\'s keychain, never in Tungstate\'s own files.'"
         >
           <input type="password" v-model="secret" autocomplete="off" />
         </Field>
@@ -275,6 +318,17 @@ const verdict = computed(() => {
           <Notice tone="bad" v-if="name.trim() && !nameOk">Use two or more letters, digits, dashes or underscores for the name.</Notice>
           <Notice tone="bad" v-if="problems.length">
             <template v-for="(p, i) in problems" :key="i">{{ p.charAt(0).toUpperCase() + p.slice(1) }}.<br v-if="i < problems.length - 1" /></template>
+          </Notice>
+          <Notice v-if="probe?.server && !probe.server.changed" tone="hold">
+            This is the first time Tungstate has reached {{ host.trim() || "this server" }}. Its fingerprint is
+            <code class="cf-print">{{ probe.server.fingerprint }}</code>. If it matches what the server shows, trust it.
+            <template #act><Button :busy="checking" @click="trust()">Trust it</Button></template>
+          </Notice>
+          <Notice v-if="probe?.server?.changed" tone="bad">
+            This is not the server trusted before: its key has changed, and its fingerprint is now
+            <code class="cf-print">{{ probe.server.fingerprint }}</code>. That happens when a server is reset, and when
+            something pretends to be it. Only trust it if you know which.
+            <template #act><Button look="danger" :busy="checking" @click="trust()">Trust the new key</Button></template>
           </Notice>
           <Notice v-if="verdict" :tone="verdict.ok ? 'plain' : 'bad'">{{ verdict.line }}</Notice>
           <Notice tone="bad" v-if="trouble">{{ trouble }}</Notice>
@@ -313,6 +367,9 @@ const verdict = computed(() => {
 .cf-inline { display: flex; gap: var(--s2); }
 .cf-tick { display: flex; gap: var(--s2); align-items: flex-start; font-size: var(--small); margin: var(--s2) 0 var(--s3); }
 .cf-tick em { display: block; font-style: normal; font-size: var(--fine); color: var(--text-faint); margin-top: 2px; line-height: 1.45; }
+.cf-signin { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
+.cf-signin-label { font-size: var(--small); font-weight: 600; }
+.cf-print { font-family: var(--font-mono); font-size: var(--fine); word-break: break-all; }
 .cf-tag {
   font-size: var(--fine);
   font-weight: 600;

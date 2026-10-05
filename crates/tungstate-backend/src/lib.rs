@@ -51,6 +51,39 @@ pub enum BackendError {
         endpoint: String,
     },
 
+    /// The server is not one this connection has trusted yet.
+    ///
+    /// Not a failure to retry: the person has to look at `fingerprint` and say
+    /// whether this is their server. Trusting it means keeping `key` with the
+    /// connection, after which the same server is let in silently.
+    #[error(
+        "`{endpoint}` is a server this connection has not trusted yet; its fingerprint is {fingerprint}"
+    )]
+    HostUnknown {
+        /// The connection, named as the user named it.
+        endpoint: String,
+        /// What to show the person, as in `SHA256:…`.
+        fingerprint: String,
+        /// The server's key, in the one-line form `ssh` writes, to keep.
+        key: String,
+    },
+
+    /// The server answered with a different key from the one trusted.
+    ///
+    /// Either the server was reinstalled or something is pretending to be it,
+    /// and only the person can tell which, so every connection to it stops.
+    #[error(
+        "`{endpoint}` is not the server that was trusted: its key has changed, and its fingerprint is now {fingerprint}. If the server was reset or replaced, check that fingerprint on it and trust it again; otherwise, do not connect"
+    )]
+    HostKeyChanged {
+        /// The connection, named as the user named it.
+        endpoint: String,
+        /// What the server presented this time.
+        fingerprint: String,
+        /// That key, in the one-line form `ssh` writes.
+        key: String,
+    },
+
     /// A remote operation failed for a protocol-specific reason.
     // Carries the endpoint as a string rather than a path: "io error at
     // `inbox/a.mp4`" is unactionable when three connections have an `inbox`.
