@@ -797,6 +797,7 @@ fn remove(journal: &Journal, secrets: &dyn SecretStore, name: &str) -> ExitCode 
             ("saved pairs", &uses.pairs),
             ("syncs", &uses.syncs),
             ("transfers that stopped part-way", &uses.unfinished),
+            ("organized folders", &uses.folders),
         ] {
             if !names.is_empty() {
                 eprintln!("  {what}: {}", names.join(", "));

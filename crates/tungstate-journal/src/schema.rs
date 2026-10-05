@@ -9,7 +9,7 @@ use rusqlite::Connection;
 use crate::{JournalError, Result};
 
 /// Migrations in order. The index plus one is the `user_version` each produces.
-const MIGRATIONS: &[&str] = &[
+pub(crate) const MIGRATIONS: &[&str] = &[
     // v1: the operations table.
     "CREATE TABLE ops (
          id          INTEGER PRIMARY KEY,
@@ -253,6 +253,28 @@ const MIGRATIONS: &[&str] = &[
      ALTER TABLE connections ADD COLUMN check_ok INTEGER;
      ALTER TABLE connections ADD COLUMN check_note TEXT;
      ALTER TABLE connections ADD COLUMN retired_at INTEGER;",
+    // v15: slice 13, tidying a folder on a NAS. A governed folder and a plan
+    // say which connection they are on, as `ops` already does; `NULL` is this
+    // machine, so every row written before reads as it always meant.
+    //
+    // `folders` is rebuilt rather than altered: its `UNIQUE (root)` becomes
+    // one folder per connection and path, and SQLite cannot drop a column
+    // constraint in place. `IFNULL` because a unique index treats every NULL
+    // as distinct, which would let the same local folder in twice; ids start
+    // at 1, so 0 cannot collide with a real connection.
+    "CREATE TABLE folders_v15 (
+         id         INTEGER PRIMARY KEY,
+         connection INTEGER REFERENCES connections (id),
+         root       TEXT    NOT NULL,
+         name       TEXT    NOT NULL,
+         added_at   INTEGER NOT NULL
+     );
+     INSERT INTO folders_v15 (id, connection, root, name, added_at)
+         SELECT id, NULL, root, name, added_at FROM folders;
+     DROP TABLE folders;
+     ALTER TABLE folders_v15 RENAME TO folders;
+     CREATE UNIQUE INDEX folders_place ON folders (IFNULL(connection, 0), root);
+     ALTER TABLE plans ADD COLUMN connection INTEGER REFERENCES connections (id);",
 ];
 
 /// Bring `conn` up to the current schema, creating it if the file is new.

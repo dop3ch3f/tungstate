@@ -71,6 +71,8 @@ const governed: T.FolderView[] = [
   { name: "messy-downloads", root: `${DEMO}/messy-downloads`, has_rules: true, broken: null },
   { name: "real-shape", root: `${DEMO}/real-shape-media`, has_rules: true, broken: null },
   { name: "broken-rules", root: `${DEMO}/broken-rules`, has_rules: true, broken: "line 3, column 9: expected `=`" },
+  // On a NAS: its rules are asked about when it is opened, not when listed.
+  { name: "media", root: "area51:media", has_rules: null, broken: null },
 ];
 
 const links: T.Link[] = [
@@ -184,6 +186,7 @@ mockIPC((cmd, args) => {
   if (sceneName === "links-busy" && cmd === "run_link") return new Promise(() => {});
   switch (cmd) {
     case "governed": return governed;
+    case "folder_has_rules": return true;
     case "learn_folder":
       return a.root.endsWith("real-shape")
         ? { levels: ["year", "name", "kind", "extension", "size"], explains: 192, of: 192, loose: 0, as_is: "", improved: null, suggestions: [] }
@@ -566,6 +569,13 @@ const scenes: Record<string, () => unknown> = {
     ];
   },
   "folder-start": async () => { nav.go("folder"); await f.listRegistered(); },
+  // Choose a folder: the shared picker, which offers the NAS too.
+  "folder-pick": async () => {
+    nav.go("folder"); await f.listRegistered();
+    f.pick();
+    await tick(); await tick();
+    await new Promise((done) => setTimeout(done, 600));
+  },
   "folder-read": async () => { nav.go("folder"); await f.look(DL); },
   "folder-read-real": async () => { nav.go("folder"); await f.look(`${DEMO}/real-shape`); },
   "folder-picked": async () => {

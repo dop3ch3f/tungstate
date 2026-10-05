@@ -2800,3 +2800,123 @@ fn an_sftp_connection_needs_a_server_and_a_user_and_is_never_in_the_clear() {
     assert_eq!(Scheme::Sftp.default_port(), Some(22));
     assert_eq!(Scheme::parse("sftp"), Some(Scheme::Sftp));
 }
+
+/// Two connections named `a` and `b`, for folders and plans on a NAS.
+fn two_connections(journal: &Journal) -> (ConnectionId, ConnectionId) {
+    let named = |name: &str| NewConnection {
+        name: name.to_string(),
+        ..a_connection()
+    };
+    (
+        journal.create_connection(&named("a")).unwrap(),
+        journal.create_connection(&named("b")).unwrap(),
+    )
+}
+
+#[test]
+fn the_same_path_on_two_connections_is_two_folders() {
+    let journal = Journal::open_in_memory().unwrap();
+    let (a, b) = two_connections(&journal);
+    journal
+        .add_folder_at(&Endpoint::remote(a, "media"), "media")
+        .unwrap();
+    journal
+        .add_folder_at(&Endpoint::remote(b, "media"), "media")
+        .unwrap();
+    journal.add_folder("media", "media").unwrap();
+    // But the same place twice is one folder, on a connection as locally.
+    assert!(matches!(
+        journal.add_folder_at(&Endpoint::remote(a, "media"), "again"),
+        Err(JournalError::DuplicateFolder(_))
+    ));
+    assert!(matches!(
+        journal.add_folder("media", "again"),
+        Err(JournalError::DuplicateFolder(_))
+    ));
+
+    assert_eq!(journal.folders().unwrap().len(), 3);
+    let on_b = journal.folder_at(&Endpoint::remote(b, "media")).unwrap();
+    assert_eq!(on_b.connection, Some(b));
+    assert_eq!(journal.folder_by_root("media").unwrap().connection, None);
+
+    journal
+        .remove_folder_at(&Endpoint::remote(a, "media"))
+        .unwrap();
+    assert!(journal.folder_at(&Endpoint::remote(b, "media")).is_ok());
+    assert!(journal.folder_by_root("media").is_ok());
+}
+
+#[test]
+fn a_plan_on_a_connection_is_found_by_its_connection() {
+    let journal = Journal::open_in_memory().unwrap();
+    let (a, b) = two_connections(&journal);
+    let on_a = journal
+        .begin_plan_at(&Endpoint::remote(a, "media"), "{}", None, true, None)
+        .unwrap();
+    journal
+        .begin_plan_at(&Endpoint::remote(b, "media"), "{}", None, true, None)
+        .unwrap();
+    let local = journal.begin_plan("media", "{}", None).unwrap();
+
+    let found = journal
+        .recent_plans_at(&Endpoint::remote(a, "media"), 10)
+        .unwrap();
+    assert_eq!(found.len(), 1);
+    assert_eq!(found[0].id, on_a);
+    assert_eq!(found[0].connection, Some(a));
+    let here = journal.recent_plans_for("media", 10).unwrap();
+    assert_eq!(here.len(), 1);
+    assert_eq!(here[0].id, local);
+    assert_eq!(journal.plan_by_id(local).unwrap().connection, None);
+}
+
+#[test]
+fn a_connection_with_an_organized_folder_is_not_deleted() {
+    let journal = Journal::open_in_memory().unwrap();
+    let (a, _) = two_connections(&journal);
+    journal
+        .add_folder_at(&Endpoint::remote(a, "media"), "media")
+        .unwrap();
+    let uses = journal.connection_uses(a).unwrap();
+    assert_eq!(uses.folders, ["media"]);
+    assert!(uses.blocks_removal());
+    assert!(matches!(
+        journal.remove_connection("a"),
+        Err(JournalError::ConnectionInUse(_))
+    ));
+}
+
+#[test]
+fn folders_and_plans_from_before_v15_read_as_this_machines() {
+    // A journal at v14, with a folder and a plan, opened by this build.
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("journal.db");
+    {
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        for sql in &crate::schema::MIGRATIONS[..14] {
+            conn.execute_batch(sql).unwrap();
+        }
+        conn.pragma_update(None, "user_version", 14).unwrap();
+        conn.execute(
+            "INSERT INTO folders (root, name, added_at) VALUES ('/Users/me/Downloads', 'Downloads', 1)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO plans (folder, snapshot, applied_at, reversible) VALUES ('/Users/me/Downloads', '{}', 1, 1)",
+            [],
+        )
+        .unwrap();
+    }
+    let journal = Journal::open(&path).unwrap();
+    let folder = journal.folder_by_root("/Users/me/Downloads").unwrap();
+    assert_eq!(
+        (folder.connection, folder.name.as_str()),
+        (None, "Downloads")
+    );
+    let plans = journal.recent_plans_for("/Users/me/Downloads", 5).unwrap();
+    assert_eq!(plans.len(), 1);
+    assert_eq!(plans[0].connection, None);
+    // And still one folder per local path.
+    assert!(journal.add_folder("/Users/me/Downloads", "again").is_err());
+}

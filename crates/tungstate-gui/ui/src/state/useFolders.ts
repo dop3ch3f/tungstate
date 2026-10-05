@@ -25,6 +25,8 @@ const tidied = shallowRef<TidyDone | null>(null);
 const putBackCount = ref<number | null>(null);
 const busy = ref<string | null>(null);
 const problem = ref<string | null>(null);
+/** Whether the place picker is open, so Home can ask Organize to open it. */
+const choosing = ref(false);
 
 
 /** Run an engine call, keeping the one error slot and the one busy slot
@@ -87,6 +89,16 @@ const opening = ref<string | null>(null);
 
 async function open(path: string) {
   if (busy.value) return;
+  // A folder without rules has nothing to preview: show its shape and the
+  // layouts instead. One on a connection is asked now, not when listed.
+  const known = registered.value.find((f) => f.root === path)?.has_rules;
+  if (known !== true) {
+    opening.value = path;
+    const has = known ?? (await run("Opening the folder", () => folders.hasRules(path)));
+    opening.value = null;
+    if (has === null) return;
+    if (!has) return look(path);
+  }
   opening.value = path;
   // The folder changes only once its own preview is in, so a second click
   // while one loads can never show one folder's plan under another's name.
@@ -159,9 +171,15 @@ async function forget(path: string) {
   }
 }
 
-async function pick() {
-  const chosen = await run("Waiting for you to choose a folder", () => folders.pick());
-  if (chosen) await look(chosen);
+/** Open the place picker, which offers connections as well as this Mac. */
+function pick() {
+  choosing.value = true;
+}
+
+/** A place was chosen in the picker. */
+async function picked(target: string) {
+  choosing.value = false;
+  await look(target);
 }
 
 /** The folder in hand, as the registry knows it. Null before it is governed. */
@@ -192,6 +210,8 @@ export function useFolders() {
     putBack,
     forget,
     pick,
+    picked,
+    choosing,
     back: () => {
       phase.value = "start";
       problem.value = null;

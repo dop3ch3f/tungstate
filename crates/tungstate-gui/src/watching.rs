@@ -153,6 +153,10 @@ pub fn folders(journal: &Journal) -> Result<Vec<Watched>, String> {
         .folders()
         .map_err(|error| error.to_string())?
         .into_iter()
+        // A folder on a connection is tidied when asked: no NAS sends this
+        // machine events, and sweeping one in the background is background
+        // work on someone else's storage.
+        .filter(|folder| folder.connection.is_none())
         .map(|folder| {
             let root = PathBuf::from(&folder.root);
             Watched {

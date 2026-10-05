@@ -36,7 +36,7 @@ pub fn validate(policy: Option<&Path>) -> ExitCode {
         loaded.policy.rules.len(),
         describe_tier(tier)
     );
-    print_warnings(&located, &text, &loaded.warnings);
+    print_warnings(&located.policy_name, &text, &loaded.warnings);
     ExitCode::SUCCESS
 }
 
@@ -210,7 +210,7 @@ fn report(
         "{}",
         render(&explanation, &located.policy_name, loaded, text)
     );
-    print_warnings(located, text, &loaded.warnings);
+    print_warnings(&located.policy_name, text, &loaded.warnings);
     ExitCode::SUCCESS
 }
 

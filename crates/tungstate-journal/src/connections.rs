@@ -249,6 +249,8 @@ pub struct Uses {
     pub syncs: Vec<String>,
     /// Transfers that stopped part-way and could still be picked up.
     pub unfinished: Vec<String>,
+    /// Organized folders on it, by their path there.
+    pub folders: Vec<String>,
     /// Past transfers History still names it in. These do not stop it going.
     pub history: usize,
 }
@@ -257,7 +259,10 @@ impl Uses {
     /// Whether anything would break if the connection went.
     #[must_use]
     pub fn blocks_removal(&self) -> bool {
-        !(self.pairs.is_empty() && self.syncs.is_empty() && self.unfinished.is_empty())
+        !(self.pairs.is_empty()
+            && self.syncs.is_empty()
+            && self.unfinished.is_empty()
+            && self.folders.is_empty())
     }
 }
 
@@ -766,6 +771,10 @@ impl Journal {
               ORDER BY links.name",
             "listing the unfinished transfers using a connection",
         )?;
+        let folders = names(
+            "SELECT root FROM folders WHERE connection = ?1 ORDER BY root",
+            "listing the organized folders on a connection",
+        )?;
         let history: i64 = conn
             .query_row(
                 "SELECT COUNT(*) FROM ops WHERE src_connection = ?1 OR dst_connection = ?1",
@@ -777,6 +786,7 @@ impl Journal {
             pairs,
             syncs,
             unfinished,
+            folders,
             history: usize::try_from(history).unwrap_or(usize::MAX),
         })
     }
@@ -789,8 +799,8 @@ impl Journal {
     /// a new connection, as a retired saved pair's is.
     ///
     /// # Errors
-    /// [`JournalError::ConnectionInUse`] while a saved pair, a sync or an
-    /// unfinished transfer uses it (ask [`Journal::connection_uses`] which),
+    /// [`JournalError::ConnectionInUse`] while a saved pair, a sync, an
+    /// organized folder or an unfinished transfer uses it (ask [`Journal::connection_uses`] which),
     /// [`JournalError::UnknownConnection`] if there is no such connection, or
     /// [`JournalError::Query`] if the rows cannot be written.
     pub fn remove_connection(&self, name: &str) -> Result<Removal> {

@@ -213,7 +213,7 @@ function scanAgain(path: string) {
                   <span class="r-fact" v-if="folder.broken">the rules file has a mistake</span>
                   <span class="r-fact" v-else-if="troubled.has(folder.name)">{{ troubled.get(folder.name) }}</span>
                   <span class="r-fact r-news" v-else-if="waiting.has(folder.name)">{{ files(noticed(waiting.get(folder.name)!)) }} new, waiting to be filed</span>
-                  <span class="r-fact" v-else-if="!folder.has_rules">no rules yet</span>
+                  <span class="r-fact" v-else-if="folder.has_rules === false">no rules yet</span>
                   <span class="r-fact" v-else-if="tidied.has(folder.root)">tidied {{ ago(tidied.get(folder.root)!.applied_at) }}</span>
                   <span class="r-fact" v-else>not tidied yet</span>
                 </button>

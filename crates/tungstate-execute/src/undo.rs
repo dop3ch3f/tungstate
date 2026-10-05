@@ -15,7 +15,9 @@ use std::path::Path;
 use tungstate_backend::Backend;
 use tungstate_core::plan::{Because, Op};
 use tungstate_journal::plans::PlanId;
-use tungstate_journal::{Journal, Location, NewOp, Op as JournalOp, OpKind, OpStatus, Outcome};
+use tungstate_journal::{
+    Endpoint, Journal, Location, NewOp, Op as JournalOp, OpKind, OpStatus, Outcome,
+};
 
 use crate::{ExecuteError, Result};
 
@@ -128,6 +130,20 @@ pub fn undo(
     journal: &Journal,
     root: &str,
 ) -> Result<Undone> {
+    undo_at(plan, fresh, backend, journal, &Endpoint::local(root))
+}
+
+/// [`undo`] in a folder on any connection.
+///
+/// # Errors
+/// As [`undo`].
+pub fn undo_at(
+    plan: PlanId,
+    fresh: &tungstate_core::Snapshot,
+    backend: &dyn Backend,
+    journal: &Journal,
+    at: &Endpoint,
+) -> Result<Undone> {
     let recorded = journal.plan_by_id(plan)?;
     if !recorded.reversible {
         return Err(ExecuteError::Journal(
@@ -141,6 +157,7 @@ pub fn undo(
     }
 
     let ops = invert(&journal.ops_for_plan(plan)?);
+    crate::refuse_without_rename(&ops, backend, &at.path.to_string_lossy())?;
 
     // Refused as a whole, before anything moves, by asking slice 6's paper
     // model whether this order is executable against the folder as it is now.
@@ -153,7 +170,13 @@ pub fn undo(
         what: error.to_string(),
     })?;
 
-    let id = journal.begin_plan(root, &format!("undo of plan {}", plan.0), Some(plan))?;
+    let id = journal.begin_plan_at(
+        at,
+        &format!("undo of plan {}", plan.0),
+        Some(plan),
+        true,
+        None,
+    )?;
     let mut done = 0;
     for op in &ops {
         let entry = journal.begin(&NewOp {
@@ -161,8 +184,8 @@ pub fn undo(
             source: op
                 .source()
                 .or_else(|| op.directory())
-                .map(|p| Location::new(root, p)),
-            destination: op.target().map(|p| Location::new(root, p)),
+                .map(|p| Location::within(at, p)),
+            destination: op.target().map(|p| Location::within(at, p)),
             size: None,
             link: None,
             link_id: None,

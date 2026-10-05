@@ -11,12 +11,10 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use serde::Serialize;
-use tungstate_backend::local::LocalBackend;
 use tungstate_core::plan::{Because, Blast, Op, Parked, Plan, Reason};
 use tungstate_core::{Loaded, Mode};
-use tungstate_journal::ends;
 
-use crate::folder::{describe_tier, load, locate, print_warnings};
+use crate::folder::{describe_tier, governed, print_warnings};
 
 /// What `--json` emits: the plan, plus what the command line knew around it.
 #[derive(Serialize)]
@@ -29,44 +27,23 @@ struct PlanJson<'a> {
 /// `tungstate plan [PATH] [--policy FILE] [--json]`.
 pub fn plan(target: Option<&str>, policy: Option<&Path>, json: bool) -> ExitCode {
     let target = target.unwrap_or(".");
-
-    // A connection prefix is refused rather than half-supported. `survey`
-    // takes a `&dyn Backend`, so the day a remote folder's policy can be
-    // located this works unchanged -- but walking a remote tree looking for
-    // `.tungstate/policy.toml` is a round trip per level, and governing a
-    // remote folder in place is a later slice.
-    if let Ok(journal) = crate::open_journal()
-        && let Ok(endpoint) = ends::parse_end(target, None, &journal)
-        && endpoint.connection.is_some()
-    {
-        eprintln!(
-            "error: `{target}` is on a connection, and planning a remote folder \
-             is not built yet\n  tungstate plan <a path on this machine>"
-        );
-        return ExitCode::from(2);
-    }
-
-    let located = match locate(Path::new(target), policy) {
-        Ok(located) => located,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::FAILURE;
-        }
+    let journal = match crate::open_journal() {
+        Ok(journal) => journal,
+        Err(error) => return crate::fail(&error),
     };
-    let Ok((text, loaded)) = load(&located) else {
+    let Ok(here) = governed(target, policy, &journal) else {
         return ExitCode::FAILURE;
     };
 
-    let backend = LocalBackend::new(located.root.clone());
-    let snapshot = match tungstate_attrs::survey(&backend, &loaded.policy) {
+    let snapshot = match tungstate_attrs::survey(here.backend.as_ref(), &here.loaded.policy) {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::fail(&error),
     };
-    let plan = loaded.policy.plan(&snapshot);
+    let plan = here.loaded.policy.plan(&snapshot);
 
     if json {
         let document = PlanJson {
-            policy: &located.policy_name,
+            policy: &here.policy_name,
             plan: &plan,
         };
         match serde_json::to_string_pretty(&document) {
@@ -76,10 +53,10 @@ pub fn plan(target: Option<&str>, policy: Option<&Path>, json: bool) -> ExitCode
     } else {
         print!(
             "{}",
-            render(&plan, &located.root, &located.policy_name, &loaded)
+            render(&plan, &here.shown, &here.policy_name, &here.loaded)
         );
     }
-    print_warnings(&located, &text, &loaded.warnings);
+    print_warnings(&here.policy_name, &here.text, &here.loaded.warnings);
     ExitCode::SUCCESS
 }
 
@@ -89,7 +66,7 @@ pub fn plan(target: Option<&str>, policy: Option<&Path>, json: bool) -> ExitCode
 /// lines saying so; the ops are what the reader came for.
 const UNTOUCHED_SHOWN: usize = 10;
 
-fn render(plan: &Plan, root: &Path, policy_name: &str, loaded: &Loaded) -> String {
+fn render(plan: &Plan, root: &str, policy_name: &str, loaded: &Loaded) -> String {
     use std::fmt::Write as _;
     let mut out = String::new();
 
@@ -97,7 +74,7 @@ fn render(plan: &Plan, root: &Path, policy_name: &str, loaded: &Loaded) -> Strin
         out,
         "folder \"{}\" at {}\n  policy {policy_name}, {} rule(s), {}\n\n",
         plan.folder,
-        root.display(),
+        root,
         loaded.policy.rules.len(),
         describe_tier(loaded.policy.required_tier()),
     );

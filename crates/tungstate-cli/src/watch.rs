@@ -70,6 +70,9 @@ pub fn watch(asked: &Asked) -> ExitCode {
         .collect();
     let folders: Vec<Watched> = known
         .into_iter()
+        // Only folders on this machine: one on a connection is tidied when
+        // asked, since no NAS sends this machine events.
+        .filter(|folder| folder.connection.is_none())
         .filter(|folder| {
             wanted.is_empty()
                 || wanted.contains(&tungstate_journal::resolve_for_lookup(Path::new(

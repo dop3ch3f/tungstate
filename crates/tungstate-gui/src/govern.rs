@@ -6,16 +6,63 @@
 //! and undoing is **putting it back**. The engine keeps the precise words; the
 //! window speaks to whoever is looking at it.
 
-use std::path::{Path, PathBuf};
+use std::io::{Read, Write};
+use std::path::Path;
 
 use serde::Serialize;
-use tungstate_backend::local::LocalBackend;
+use tungstate_backend::Backend;
 use tungstate_core::plan::{Op, Plan, Reason};
 use tungstate_core::{Policy, Snapshot};
-use tungstate_journal::Journal;
+use tungstate_journal::{Endpoint, Journal};
 
 /// Where a policy lives, relative to the folder it governs.
 pub const POLICY_RELATIVE: &str = ".tungstate/policy.toml";
+
+/// A folder, opened: on this machine or on a connection.
+///
+/// Every command here starts from a *target* as the window names it, a path
+/// or `connection:folder`, so a folder on the NAS is the same screens and the
+/// same code as one on this Mac. The rules file is read and written through
+/// the backend too, which is what keeps it in the folder wherever that is.
+pub struct Spot {
+    /// As the window names it, for messages and for the list.
+    pub target: String,
+    /// What the journal records against.
+    pub end: Endpoint,
+    /// The folder itself.
+    pub backend: Box<dyn Backend>,
+}
+
+/// Open the folder `target` names.
+///
+/// # Errors
+/// A sentence: an unknown connection, or a folder that cannot be reached.
+pub fn open(target: &str, journal: &Journal) -> Result<Spot, String> {
+    let end = tungstate_journal::ends::parse_end(target, None, journal)
+        .map_err(|error| error.to_string())?;
+    let backend = tungstate_backend_opendal::open(&end, journal, &crate::secrets())
+        .map_err(|error| error.to_string())?;
+    Ok(Spot {
+        target: target.to_string(),
+        end,
+        backend,
+    })
+}
+
+/// The target the window uses for a governed folder: its path, or
+/// `connection:path` for one on a connection.
+#[must_use]
+pub fn target_of(folder: &tungstate_journal::folders::Folder, journal: &Journal) -> String {
+    match folder.connection {
+        None => folder.root.clone(),
+        Some(id) => {
+            let name = journal
+                .connection_by_id(id)
+                .map_or_else(|_| format!("connection {}", id.0), |c| c.name);
+            format!("{name}:{}", folder.root)
+        }
+    }
+}
 
 /// A folder as the list shows it.
 #[derive(Debug, Clone, Serialize)]
@@ -25,8 +72,10 @@ pub struct FolderView {
     /// Where it is.
     pub root: String,
     /// Whether it has rules yet. Without them nothing happens to it at all,
-    /// which is not guessable from anywhere else on the screen.
-    pub has_rules: bool,
+    /// which is not guessable from anywhere else on the screen. `None` for a
+    /// folder on a connection, which is asked when it is opened: listing
+    /// every folder must not mean dialling every NAS, one of which is off.
+    pub has_rules: Option<bool>,
     /// Why its rules will not load, if they will not.
     pub broken: Option<String>,
 }
@@ -113,10 +162,8 @@ pub struct PreviewView {
 ///
 /// # Errors
 /// The diagnostic as a string, already drawn against the line it is about.
-pub fn rules_at(root: &Path) -> Result<Policy, String> {
-    let path = root.join(POLICY_RELATIVE);
-    let text = std::fs::read_to_string(&path)
-        .map_err(|e| format!("cannot read {}: {e}", path.display()))?;
+pub fn rules_at(spot: &Spot) -> Result<Policy, String> {
+    let text = rules_text(spot)?;
     Policy::parse(&text)
         .map(|loaded| loaded.policy)
         .map_err(|error| describe_policy_error(&text, &error))
@@ -137,10 +184,10 @@ fn describe_policy_error(text: &str, error: &tungstate_core::PolicyError) -> Str
 ///
 /// # Errors
 /// A sentence, ready to put on screen.
-pub fn preview(root: &Path, journal: &Journal) -> Result<PreviewView, String> {
-    let policy = rules_at(root)?;
-    let backend = LocalBackend::new(root.to_path_buf());
-    let before = tungstate_attrs::survey(&backend, &policy).map_err(|e| e.to_string())?;
+pub fn preview(spot: &Spot, journal: &Journal) -> Result<PreviewView, String> {
+    let policy = rules_at(spot)?;
+    let before =
+        tungstate_attrs::survey(spot.backend.as_ref(), &policy).map_err(|e| e.to_string())?;
     let plan = policy.plan(&before);
 
     // The "after" tree is the snapshot the planner already computed on paper
@@ -155,12 +202,12 @@ pub fn preview(root: &Path, journal: &Journal) -> Result<PreviewView, String> {
         plan.ops.iter().filter_map(Op::target).collect();
 
     let undoable = journal
-        .recent_plans(32)
+        .recent_plans_at(&spot.end, 32)
         .ok()
         .and_then(|plans| {
             plans
                 .into_iter()
-                .find(|p| p.folder == root.to_string_lossy() && p.is_undoable())
+                .find(tungstate_journal::AppliedPlan::is_undoable)
         })
         .map(|p| p.id.0);
 
@@ -278,36 +325,49 @@ fn plainly(reason: &Reason) -> String {
 ///
 /// # Errors
 /// A sentence saying why the file cannot be read.
-pub fn rules_text(root: &Path) -> Result<String, String> {
-    let path = root.join(POLICY_RELATIVE);
-    std::fs::read_to_string(&path).map_err(|e| format!("cannot read {}: {e}", path.display()))
+pub fn rules_text(spot: &Spot) -> Result<String, String> {
+    let cannot =
+        |e: &dyn std::fmt::Display| format!("cannot read the rules in {}: {e}", spot.target);
+    let mut text = String::new();
+    spot.backend
+        .open_read(Path::new(POLICY_RELATIVE))
+        .map_err(|e| cannot(&e))?
+        .read_to_string(&mut text)
+        .map_err(|e| cannot(&e))?;
+    Ok(text)
 }
 
 /// Whether this folder has rules yet.
 #[must_use]
-pub fn has_rules(root: &Path) -> bool {
-    root.join(POLICY_RELATIVE).is_file()
+pub fn has_rules(spot: &Spot) -> bool {
+    spot.backend
+        .stat(Path::new(POLICY_RELATIVE))
+        .is_ok_and(|meta| !meta.is_dir)
 }
 
 /// Write a starting layout into a folder.
 ///
 /// # Errors
 /// A sentence. Never overwrites rules that already exist.
-pub fn write_layout(root: &Path, layout: &str) -> Result<PathBuf, String> {
+pub fn write_layout(spot: &Spot, layout: &str) -> Result<(), String> {
     let Some(chosen) = tungstate_core::templates::template(layout) else {
         return Err(format!("there is no starting layout called “{layout}”"));
     };
-    let path = root.join(POLICY_RELATIVE);
-    if path.exists() {
+    if has_rules(spot) {
         return Err("this folder already has rules".to_string());
     }
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| format!("cannot make {}: {e}", parent.display()))?;
+    let cannot =
+        |e: &dyn std::fmt::Display| format!("cannot write the rules into {}: {e}", spot.target);
+    let policy = Path::new(POLICY_RELATIVE);
+    if let Some(parent) = policy.parent() {
+        spot.backend
+            .create_dir_all(parent)
+            .map_err(|e| cannot(&e))?;
     }
-    std::fs::write(&path, chosen.body)
-        .map_err(|e| format!("cannot write {}: {e}", path.display()))?;
-    Ok(path)
+    let mut sink = spot.backend.create_write(policy).map_err(|e| cannot(&e))?;
+    sink.write_all(chosen.body.as_bytes())
+        .map_err(|e| cannot(&e))?;
+    sink.finish().map_err(|e| cannot(&e))
 }
 
 /// Every starting layout, for the picker.
@@ -406,9 +466,9 @@ impl LearnedView {
 ///
 /// # Errors
 /// A sentence, if the folder cannot be walked.
-pub fn learn(root: &Path) -> Result<LearnedView, String> {
-    let snapshot = probe_survey(root)?;
-    let name = label_for(root);
+pub fn learn(spot: &Spot) -> Result<LearnedView, String> {
+    let snapshot = probe_survey(spot)?;
+    let name = label_for(&spot.target);
     Ok(LearnedView::of(&tungstate_core::learn::learn(
         &snapshot, &name,
     )))
@@ -418,24 +478,23 @@ pub fn learn(root: &Path) -> Result<LearnedView, String> {
 ///
 /// # Errors
 /// A sentence, if the folder cannot be walked.
-pub fn compare(root: &Path) -> Result<Vec<tungstate_core::compare::Outcome>, String> {
-    let snapshot = probe_survey(root)?;
+pub fn compare(spot: &Spot) -> Result<Vec<tungstate_core::compare::Outcome>, String> {
+    let snapshot = probe_survey(spot)?;
     // The folder's own rules first, so every other row reads as a change from
     // where it actually is rather than from nothing.
     let mut also = Vec::new();
-    if let Ok(text) = std::fs::read_to_string(root.join(POLICY_RELATIVE)) {
+    if let Ok(text) = rules_text(spot) {
         also.push(("(the rules you have)".to_string(), text));
     }
     Ok(tungstate_core::compare::against(&snapshot, &also))
 }
 
 /// Walk a folder that may have no rules of its own yet.
-fn probe_survey(root: &Path) -> Result<Snapshot, String> {
+fn probe_survey(spot: &Spot) -> Result<Snapshot, String> {
     let probe = tungstate_core::policy::Policy::parse(tungstate_core::learn::PROBE)
         .expect("the probe policy parses")
         .policy;
-    let backend = LocalBackend::new(root.to_path_buf());
-    tungstate_attrs::survey(&backend, &probe).map_err(|e| e.to_string())
+    tungstate_attrs::survey(spot.backend.as_ref(), &probe).map_err(|e| e.to_string())
 }
 
 /// How many files a finished tidy actually moved.
@@ -453,23 +512,32 @@ pub fn files_moved(plan: &Plan, skipped: usize, failed: usize) -> usize {
         .saturating_sub(failed)
 }
 
-/// A folder's name for the list: its own, or the directory's.
+/// A folder's name for the list: its last part, or for a connection's own
+/// root, the connection's name.
 #[must_use]
-pub fn label_for(root: &Path) -> String {
-    root.file_name().map_or_else(
-        || root.to_string_lossy().to_string(),
-        |n| n.to_string_lossy().to_string(),
-    )
+pub fn label_for(target: &str) -> String {
+    let last = target
+        .rsplit(['/', '\\'])
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or(target);
+    // `nas:` alone, or `nas:media` with no slash: the part after the colon,
+    // or the connection itself. One letter before a colon is a drive.
+    match last.split_once(':') {
+        Some((name, rest)) if name.len() > 1 => {
+            if rest.trim().is_empty() { name } else { rest }.to_string()
+        }
+        _ => last.to_string(),
+    }
 }
 
 /// The plan for a folder, for the commands that act on one.
 ///
 /// # Errors
 /// A sentence.
-pub fn plan_for(root: &Path) -> Result<(Policy, Snapshot, Plan), String> {
-    let policy = rules_at(root)?;
-    let backend = LocalBackend::new(root.to_path_buf());
-    let snapshot = tungstate_attrs::survey(&backend, &policy).map_err(|e| e.to_string())?;
+pub fn plan_for(spot: &Spot) -> Result<(Policy, Snapshot, Plan), String> {
+    let policy = rules_at(spot)?;
+    let snapshot =
+        tungstate_attrs::survey(spot.backend.as_ref(), &policy).map_err(|e| e.to_string())?;
     let plan = policy.plan(&snapshot);
     Ok((policy, snapshot, plan))
 }
@@ -500,12 +568,17 @@ mod tests {
         Journal::open_in_memory().expect("journal")
     }
 
+    /// A folder on this machine, opened the way every command opens one.
+    fn spot(dir: &Path) -> Spot {
+        open(dir.to_str().expect("utf-8"), &journal()).expect("opened")
+    }
+
     #[test]
     fn a_preview_carries_both_trees_and_marks_what_moves_in_each() {
         // The whole point of the screen: the eye follows one file from the
         // left to the right, so it has to be marked on both sides.
         let dir = messy();
-        let view = preview(dir.path(), &journal()).expect("preview");
+        let view = preview(&spot(dir.path()), &journal()).expect("preview");
 
         let before_moving: Vec<&str> = view
             .before
@@ -528,7 +601,7 @@ mod tests {
         // It is the planner's own paper model rather than a second guess, so
         // the screen cannot promise something the executor will not do.
         let dir = messy();
-        let view = preview(dir.path(), &journal()).expect("preview");
+        let view = preview(&spot(dir.path()), &journal()).expect("preview");
         let after: Vec<&str> = view.after.iter().map(|e| e.path.as_str()).collect();
         assert!(after.contains(&"Text/a.txt"), "{after:?}");
         assert!(after.contains(&"keep.bin"));
@@ -538,7 +611,7 @@ mod tests {
     #[test]
     fn a_preview_counts_what_would_move_and_what_there_is() {
         let dir = messy();
-        let view = preview(dir.path(), &journal()).expect("preview");
+        let view = preview(&spot(dir.path()), &journal()).expect("preview");
         assert_eq!(view.files, 1);
         assert_eq!(view.of, 3);
         assert!(!view.tidy);
@@ -557,7 +630,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
-        let view = preview(dir.path(), &journal()).expect("preview");
+        let view = preview(&spot(dir.path()), &journal()).expect("preview");
         assert!(view.tidy);
         assert_eq!(view.waiting, 0);
     }
@@ -574,7 +647,7 @@ mod tests {
         )
         .unwrap();
         std::fs::write(dir.path().join("a.txt"), b"x").unwrap();
-        let view = preview(dir.path(), &journal()).expect("preview");
+        let view = preview(&spot(dir.path()), &journal()).expect("preview");
         assert!(view.tidy, "nothing would move");
         assert_eq!(view.waiting, 1, "but only because it is too recent");
         assert!(view.longest_wait > 0);
@@ -583,7 +656,7 @@ mod tests {
     #[test]
     fn a_reason_is_given_in_words_somebody_would_use() {
         let dir = messy();
-        let view = preview(dir.path(), &journal()).expect("preview");
+        let view = preview(&spot(dir.path()), &journal()).expect("preview");
         let junk = view
             .left_alone
             .iter()
@@ -608,7 +681,7 @@ mod tests {
             "[folder]\nname = \"x\"\nmode = \"aggressive\"\n",
         )
         .unwrap();
-        let error = rules_at(dir.path()).expect_err("it should not load");
+        let error = rules_at(&spot(dir.path())).expect_err("it should not load");
         assert!(error.contains("line 3"), "{error}");
     }
 
@@ -625,11 +698,14 @@ mod tests {
     #[test]
     fn a_layout_is_written_once_and_never_over() {
         let dir = tempfile::tempdir().expect("temp dir");
-        write_layout(dir.path(), "downloads").expect("written");
-        assert!(has_rules(dir.path()));
+        write_layout(&spot(dir.path()), "downloads").expect("written");
+        assert!(has_rules(&spot(dir.path())));
         let before = std::fs::read_to_string(dir.path().join(POLICY_RELATIVE)).unwrap();
 
-        assert!(write_layout(dir.path(), "photos").is_err(), "never over");
+        assert!(
+            write_layout(&spot(dir.path()), "photos").is_err(),
+            "never over"
+        );
         assert_eq!(
             std::fs::read_to_string(dir.path().join(POLICY_RELATIVE)).unwrap(),
             before
@@ -639,7 +715,7 @@ mod tests {
     #[test]
     fn an_unknown_layout_is_refused_in_words() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let error = write_layout(dir.path(), "nonsense").expect_err("refused");
+        let error = write_layout(&spot(dir.path()), "nonsense").expect_err("refused");
         assert!(error.contains("nonsense"), "{error}");
     }
 
@@ -648,8 +724,8 @@ mod tests {
         // The list has to be able to say "none yet", which is a state rather
         // than a failure -- it is the one this whole screen exists to fix.
         let dir = tempfile::tempdir().expect("temp dir");
-        assert!(!has_rules(dir.path()));
-        assert!(rules_at(dir.path()).is_err());
+        assert!(!has_rules(&spot(dir.path())));
+        assert!(rules_at(&spot(dir.path())).is_err());
     }
 
     #[test]
@@ -658,7 +734,7 @@ mod tests {
         // operation count, which also counts every directory the plan makes
         // and every one its moves empty. The two numbers must not be swapped.
         let dir = messy();
-        let (_, _, plan) = plan_for(dir.path()).expect("plan");
+        let (_, _, plan) = plan_for(&spot(dir.path())).expect("plan");
 
         assert_eq!(plan.blast.files, 1, "only a.txt moves");
         assert!(
@@ -679,7 +755,7 @@ mod tests {
     #[test]
     fn a_file_left_behind_is_not_counted_as_moved() {
         let dir = messy();
-        let (_, _, plan) = plan_for(dir.path()).expect("plan");
+        let (_, _, plan) = plan_for(&spot(dir.path())).expect("plan");
         assert_eq!(files_moved(&plan, 1, 0), 0, "the one mover was skipped");
         assert_eq!(files_moved(&plan, 0, 1), 0, "or it failed");
         assert_eq!(files_moved(&plan, 9, 9), 0, "and it never goes negative");
@@ -698,7 +774,7 @@ mod tests {
 
         // No `.tungstate/policy.toml` anywhere: learning happens before there
         // are rules, which is the whole chicken-and-egg `PROBE` exists for.
-        let view = learn(dir.path()).expect("a folder with no rules can still be read");
+        let view = learn(&spot(dir.path())).expect("a folder with no rules can still be read");
         assert_eq!(view.of, 2);
         assert_eq!(view.loose, 1, "a.txt sits at the top");
         assert!(!view.as_is.is_empty(), "rules come back as text to show");
@@ -707,7 +783,7 @@ mod tests {
     #[test]
     fn the_window_can_ask_what_every_layout_would_do() {
         let dir = messy();
-        let outcomes = compare(dir.path()).expect("a folder can be compared");
+        let outcomes = compare(&spot(dir.path())).expect("a folder can be compared");
 
         // The folder's own rules first, then every built-in layout.
         assert_eq!(outcomes[0].name, "(the rules you have)");
@@ -747,6 +823,14 @@ mod tests {
 
     #[test]
     fn a_folder_takes_its_name_from_its_directory() {
-        assert_eq!(label_for(Path::new("/Users/me/Downloads")), "Downloads");
+        assert_eq!(label_for("/Users/me/Downloads"), "Downloads");
+        assert_eq!(label_for(r"C:\Users\me\Pictures"), "Pictures");
+    }
+
+    #[test]
+    fn a_folder_on_a_connection_is_named_by_its_last_part_or_the_connection() {
+        assert_eq!(label_for("nas:media"), "media");
+        assert_eq!(label_for("nas:media/2024"), "2024");
+        assert_eq!(label_for("nas:"), "nas");
     }
 }

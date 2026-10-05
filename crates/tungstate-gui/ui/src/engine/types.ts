@@ -14,7 +14,9 @@
 export interface FolderView {
   name: string;
   root: string;
-  has_rules: boolean;
+  /** Null for a folder on a connection, asked when it is opened: listing
+   *  every folder must not mean dialling every NAS. */
+  has_rules: boolean | null;
   /** The policy's parse error, with line and column, or null. Loaded for the
    *  list rather than on opening, so broken rules are visible before you
    *  click into them. */
@@ -476,6 +478,8 @@ export interface ConnectionUses {
   pairs: string[];
   syncs: string[];
   unfinished: string[];
+  /** Organized folders on it, by their path there. */
+  folders: string[];
   history: number;
 }
 

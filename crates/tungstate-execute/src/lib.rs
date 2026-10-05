@@ -30,10 +30,12 @@ use tungstate_backend::{Backend, BackendError, RootToken};
 use tungstate_core::plan::{Op, Plan};
 use tungstate_core::snapshot;
 use tungstate_journal::plans::PlanId;
-use tungstate_journal::{Journal, JournalError, Location, NewOp, OpKind, Outcome, Purpose};
+use tungstate_journal::{
+    Endpoint, Journal, JournalError, Location, NewOp, OpKind, Outcome, Purpose,
+};
 
 pub use recover::{Resolution, resolve_interrupted, resolve_interrupted_on};
-pub use undo::{Irreversible, Reversal, Undone, invert, invert_sync, undo};
+pub use undo::{Irreversible, Reversal, Undone, invert, invert_sync, undo, undo_at};
 
 /// Anything that stops a plan being carried out.
 #[derive(Debug, thiserror::Error)]
@@ -67,6 +69,17 @@ pub enum ExecuteError {
     /// put 572 MB on the wrong disk and deleted the originals.
     #[error("`{root}` is not the volume this plan was made against")]
     RootChanged {
+        /// The folder.
+        root: String,
+    },
+
+    /// The storage cannot rename, and every move in a tidy is a rename. Found
+    /// before anything was attempted, so nothing has changed.
+    #[error(
+        "`{root}` cannot rename files where they are, so tidying it in place is not possible yet. \
+         FTP and S3 storage cannot rename; move the files with a transfer instead"
+    )]
+    CannotRename {
         /// The folder.
         root: String,
     },
@@ -172,6 +185,31 @@ pub fn apply_for(
     journal: &Journal,
     root: &str,
 ) -> Result<Applied> {
+    apply_at(
+        purpose,
+        plan,
+        fresh,
+        backend,
+        journal,
+        &Endpoint::local(root),
+    )
+}
+
+/// [`apply_for`] on a folder on any connection, which every operation then
+/// records, so History and Put it back know where each file is.
+///
+/// # Errors
+/// As [`apply`].
+pub fn apply_at(
+    purpose: Purpose,
+    plan: &Plan,
+    fresh: &tungstate_core::Snapshot,
+    backend: &dyn Backend,
+    journal: &Journal,
+    at: &Endpoint,
+) -> Result<Applied> {
+    let root = &at.path.to_string_lossy().into_owned();
+    refuse_without_rename(&plan.ops, backend, root)?;
     let planned = tungstate_core::plan::fingerprint(fresh);
     if planned != plan.snapshot {
         return Err(ExecuteError::Stale {
@@ -193,7 +231,7 @@ pub fn apply_for(
     // back, and the flag has to be written before the first op: a crash
     // half-way through must not leave a record that claims to be reversible.
     let reversible = !plan.ops.iter().any(|op| matches!(op, Op::Trash { .. }));
-    let id = journal.begin_plan_for(root, &plan.snapshot, None, reversible, Some(purpose))?;
+    let id = journal.begin_plan_at(at, &plan.snapshot, None, reversible, Some(purpose))?;
     let mut applied = Applied {
         plan: id,
         done: 0,
@@ -212,7 +250,7 @@ pub fn apply_for(
             });
         }
 
-        match step(op, fresh, backend, journal, root, id) {
+        match step(op, fresh, backend, journal, at, id) {
             Ok(Step::Done) => applied.done += 1,
             Ok(Step::Skipped(skipped)) => applied.skipped.push(skipped),
             Ok(Step::Failed(failed)) => applied.failed.push(failed),
@@ -233,6 +271,21 @@ pub fn apply_for(
     }
 
     Ok(applied)
+}
+
+/// Refused as a whole, before anything moves, where the storage cannot
+/// rename: every move and set-aside would fail one by one, after the plan was
+/// already recorded as begun.
+fn refuse_without_rename(ops: &[Op], backend: &dyn Backend, root: &str) -> Result<()> {
+    let moves = ops
+        .iter()
+        .any(|op| matches!(op, Op::Move { .. } | Op::Quarantine { .. }));
+    if moves && !backend.capabilities().atomic_rename {
+        return Err(ExecuteError::CannotRename {
+            root: root.to_string(),
+        });
+    }
+    Ok(())
 }
 
 /// An error's whole chain, as one sentence.
@@ -260,7 +313,7 @@ fn step(
     planned: &tungstate_core::Snapshot,
     backend: &dyn Backend,
     journal: &Journal,
-    root: &str,
+    at: &Endpoint,
     plan: PlanId,
 ) -> Result<Step> {
     // The second staleness check, and the narrower one. Someone may be editing
@@ -280,8 +333,8 @@ fn step(
         source: op
             .source()
             .or_else(|| op.directory())
-            .map(|p| Location::new(root, p)),
-        destination: op.target().map(|p| Location::new(root, p)),
+            .map(|p| Location::within(at, p)),
+        destination: op.target().map(|p| Location::within(at, p)),
         size: op.source().and_then(|p| size_of(p, planned)),
         link: None,
         link_id: None,

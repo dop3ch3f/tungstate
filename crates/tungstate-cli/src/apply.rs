@@ -8,40 +8,31 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use tungstate_backend::local::LocalBackend;
+use tungstate_backend::Backend;
 use tungstate_core::plan::{Blast, Plan};
-use tungstate_execute::{Applied, Resolution, resolve_interrupted};
-use tungstate_journal::Journal;
+use tungstate_execute::{Applied, Resolution, resolve_interrupted_on};
 use tungstate_journal::plans::PlanId;
+use tungstate_journal::{Endpoint, Journal, Purpose};
 
-use crate::folder::{load, locate};
+use crate::folder::governed;
 
 /// `tungstate apply [PATH] [--yes] [--plan FILE]`.
 pub fn apply(target: Option<&str>, saved: Option<&Path>, yes: bool) -> ExitCode {
     let target = target.unwrap_or(".");
-    let located = match locate(Path::new(target), None) {
-        Ok(located) => located,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let Ok((_, loaded)) = load(&located) else {
-        return ExitCode::FAILURE;
-    };
-
     let journal = match crate::open_journal() {
         Ok(journal) => journal,
         Err(error) => return crate::fail(&error),
     };
-    let backend = LocalBackend::new(located.root.clone());
-    let root = located.root.to_string_lossy().to_string();
+    let Ok(here) = governed(target, None, &journal) else {
+        return ExitCode::FAILURE;
+    };
+    let (backend, loaded) = (here.backend.as_ref(), &here.loaded);
 
-    if let Err(code) = settle_the_books(&backend, &journal, &root) {
+    if let Err(code) = settle_the_books(backend, &journal, &here.end) {
         return code;
     }
 
-    let fresh = match tungstate_attrs::survey(&backend, &loaded.policy) {
+    let fresh = match tungstate_attrs::survey(backend, &loaded.policy) {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::fail(&error),
     };
@@ -88,7 +79,14 @@ pub fn apply(target: Option<&str>, saved: Option<&Path>, yes: bool) -> ExitCode 
         return ExitCode::FAILURE;
     }
 
-    let applied = match tungstate_execute::apply(&plan, &fresh, &backend, &journal, &root) {
+    let applied = match tungstate_execute::apply_at(
+        Purpose::Tidy,
+        &plan,
+        &fresh,
+        backend,
+        &journal,
+        &here.end,
+    ) {
         Ok(applied) => applied,
         Err(error) => return stopped(&error),
     };
@@ -129,8 +127,12 @@ fn breaker(plan: &Plan, yes: bool) -> Option<String> {
 }
 
 /// Close the books on anything left in flight by a process that died.
-fn settle_the_books(backend: &LocalBackend, journal: &Journal, root: &str) -> Result<(), ExitCode> {
-    match resolve_interrupted(backend, journal, root) {
+fn settle_the_books(
+    backend: &dyn Backend,
+    journal: &Journal,
+    at: &Endpoint,
+) -> Result<(), ExitCode> {
+    match resolve_interrupted_on(backend, journal, at.connection, &at.path.to_string_lossy()) {
         Ok(resolved) if resolved.is_empty() => Ok(()),
         Ok(resolved) => {
             println!(
@@ -212,28 +214,20 @@ fn stopped(error: &tungstate_execute::ExecuteError) -> ExitCode {
 /// `tungstate undo [--last N | --plan ID] [PATH]`.
 pub fn undo(target: Option<&str>, last: Option<usize>, plan: Option<i64>) -> ExitCode {
     let target = target.unwrap_or(".");
-    let located = match locate(Path::new(target), None) {
-        Ok(located) => located,
-        Err(message) => {
-            eprintln!("error: {message}");
-            return ExitCode::FAILURE;
-        }
-    };
-    let Ok((_, loaded)) = load(&located) else {
-        return ExitCode::FAILURE;
-    };
     let journal = match crate::open_journal() {
         Ok(journal) => journal,
         Err(error) => return crate::fail(&error),
     };
-    let backend = LocalBackend::new(located.root.clone());
-    let root = located.root.to_string_lossy().to_string();
+    let Ok(here) = governed(target, None, &journal) else {
+        return ExitCode::FAILURE;
+    };
+    let (backend, loaded, root) = (here.backend.as_ref(), &here.loaded, &here.shown);
 
-    if let Err(code) = settle_the_books(&backend, &journal, &root) {
+    if let Err(code) = settle_the_books(backend, &journal, &here.end) {
         return code;
     }
 
-    let wanted = match choose(&journal, &root, last, plan) {
+    let wanted = match choose(&journal, &here.end, last, plan) {
         Ok(wanted) => wanted,
         Err(message) => {
             eprintln!("error: {message}");
@@ -245,9 +239,9 @@ pub fn undo(target: Option<&str>, last: Option<usize>, plan: Option<i64>) -> Exi
         // different sentences, and saying the first when the second is true
         // is how somebody concludes their files are gone.
         let newest = journal
-            .recent_plans(16)
+            .recent_plans_at(&here.end, 1)
             .ok()
-            .and_then(|plans| plans.into_iter().find(|p| p.folder == root));
+            .and_then(|plans| plans.into_iter().next());
         match newest {
             Some(plan) if !plan.reversible => {
                 println!(
@@ -261,11 +255,11 @@ pub fn undo(target: Option<&str>, last: Option<usize>, plan: Option<i64>) -> Exi
     }
 
     for id in wanted {
-        let fresh = match tungstate_attrs::survey(&backend, &loaded.policy) {
+        let fresh = match tungstate_attrs::survey(backend, &loaded.policy) {
             Ok(snapshot) => snapshot,
             Err(error) => return crate::fail(&error),
         };
-        match tungstate_execute::undo(id, &fresh, &backend, &journal, &root) {
+        match tungstate_execute::undo_at(id, &fresh, backend, &journal, &here.end) {
             Ok(undone) => println!("undid plan {}: {} operation(s)", id.0, undone.done),
             Err(error) => {
                 eprintln!("error: plan {} could not be undone: {error}", id.0);
@@ -280,7 +274,7 @@ pub fn undo(target: Option<&str>, last: Option<usize>, plan: Option<i64>) -> Exi
 /// Which reorganisations to reverse, newest first.
 fn choose(
     journal: &Journal,
-    root: &str,
+    at: &Endpoint,
     last: Option<usize>,
     plan: Option<i64>,
 ) -> Result<Vec<PlanId>, String> {
@@ -290,14 +284,14 @@ fn choose(
         (last, None) => {
             let want = last.unwrap_or(1);
             let recent = journal
-                .recent_plans(want.saturating_mul(4).max(16))
+                .recent_plans_at(at, want.saturating_mul(4).max(16))
                 .map_err(|e| e.to_string())?;
             // This folder's, and still standing. `is_undoable` also skips
             // plans that are themselves undos -- without that, "undo the last
             // thing" undoes the undo and quietly redoes the work.
             Ok(recent
                 .into_iter()
-                .filter(|p| p.folder == root && p.is_undoable())
+                .filter(tungstate_journal::plans::AppliedPlan::is_undoable)
                 .take(want)
                 .map(|p| p.id)
                 .collect())

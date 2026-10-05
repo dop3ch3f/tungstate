@@ -475,37 +475,59 @@ fn governed(state: State<'_, App>) -> Result<Vec<govern::FolderView>, String> {
     Ok(folders
         .into_iter()
         .map(|folder| {
-            let root = PathBuf::from(&folder.root);
-            let has_rules = govern::has_rules(&root);
+            let root = govern::target_of(&folder, &state.journal);
+            // A folder on this machine is read now, so a broken policy shows
+            // in the list rather than only after clicking into it. One on a
+            // connection is asked when opened: a list must not dial a NAS.
+            let (has_rules, broken) = if folder.connection.is_some() {
+                (None, None)
+            } else {
+                match govern::open(&root, &state.journal) {
+                    Ok(spot) if govern::has_rules(&spot) => {
+                        (Some(true), govern::rules_at(&spot).err())
+                    }
+                    _ => (Some(false), None),
+                }
+            };
             govern::FolderView {
-                // Loaded here rather than when the folder is opened, so a
-                // broken policy is visible in the list rather than only after
-                // clicking into it.
-                broken: has_rules.then(|| govern::rules_at(&root).err()).flatten(),
+                broken,
                 name: folder.name,
-                root: folder.root,
+                root,
                 has_rules,
             }
         })
         .collect())
 }
 
-#[tauri::command]
+/// Whether a folder has rules yet, asked when one on a connection is opened.
+#[tauri::command(async)]
+fn folder_has_rules(root: String, state: State<'_, App>) -> Result<bool, String> {
+    let spot = govern::open(&root, &state.journal)?;
+    Ok(govern::has_rules(&spot))
+}
+
+#[tauri::command(async)]
 fn govern_folder(root: String, state: State<'_, App>) -> Result<(), String> {
-    let path = PathBuf::from(&root);
-    if !path.is_dir() {
+    let spot = govern::open(&root, &state.journal)?;
+    if !spot
+        .backend
+        .stat(Path::new(""))
+        .is_ok_and(|meta| meta.is_dir)
+    {
         return Err(format!("{root} is not a folder"));
     }
     state
         .journal
-        .add_folder(&root, &govern::label_for(&path))
+        .add_folder_at(&spot.end, &govern::label_for(&root))
         .map(|_| ())
         .map_err(describe)
 }
 
 #[tauri::command]
 fn forget_folder(root: String, state: State<'_, App>) -> Result<(), String> {
-    state.journal.remove_folder(&root).map_err(describe)
+    let end = tungstate_journal::ends::parse_end(&root, None, &state.journal)
+        .map_err(|error| error.to_string())?;
+    state.journal.remove_folder_at(&end).map_err(describe)
 }
 
 #[tauri::command]
@@ -513,9 +535,9 @@ fn layouts() -> Vec<govern::LayoutView> {
     govern::layouts()
 }
 
-#[tauri::command]
-fn give_rules(root: String, layout: String) -> Result<(), String> {
-    govern::write_layout(&PathBuf::from(root), &layout).map(|_| ())
+#[tauri::command(async)]
+fn give_rules(root: String, layout: String, state: State<'_, App>) -> Result<(), String> {
+    govern::write_layout(&govern::open(&root, &state.journal)?, &layout)
 }
 
 /// Read the shape a folder already has, without changing anything.
@@ -523,38 +545,45 @@ fn give_rules(root: String, layout: String) -> Result<(), String> {
 /// `async` here and on the four commands below: a plain command runs on the
 /// main thread on macOS, and these walk the whole folder, so the window froze.
 #[tauri::command(async)]
-fn learn_folder(root: String) -> Result<govern::LearnedView, String> {
-    govern::learn(Path::new(&root))
+fn learn_folder(root: String, state: State<'_, App>) -> Result<govern::LearnedView, String> {
+    govern::learn(&govern::open(&root, &state.journal)?)
 }
 
 /// What every starting layout would do to this folder, side by side.
 #[tauri::command(async)]
-fn compare_folder(root: String) -> Result<Vec<tungstate_core::compare::Outcome>, String> {
-    govern::compare(Path::new(&root))
+fn compare_folder(
+    root: String,
+    state: State<'_, App>,
+) -> Result<Vec<tungstate_core::compare::Outcome>, String> {
+    govern::compare(&govern::open(&root, &state.journal)?)
 }
 
-#[tauri::command]
-fn rules_text(root: String) -> Result<String, String> {
-    govern::rules_text(&PathBuf::from(root))
+#[tauri::command(async)]
+fn rules_text(root: String, state: State<'_, App>) -> Result<String, String> {
+    govern::rules_text(&govern::open(&root, &state.journal)?)
 }
 
 #[tauri::command(async)]
 fn folder_preview(root: String, state: State<'_, App>) -> Result<govern::PreviewView, String> {
-    govern::preview(&PathBuf::from(root), &state.journal)
+    govern::preview(&govern::open(&root, &state.journal)?, &state.journal)
 }
 
 #[tauri::command(async)]
 fn tidy_folder(root: String, state: State<'_, App>) -> Result<govern::TidyDone, String> {
-    let path = PathBuf::from(&root);
-    let backend = tungstate_backend::local::LocalBackend::new(path.clone());
+    let spot = govern::open(&root, &state.journal)?;
 
     // Close the books on anything a dead process left in flight, before
     // planning against a journal that still describes a world that stopped
     // being true.
-    tungstate_execute::resolve_interrupted(&backend, &state.journal, &root)
-        .map_err(|e| e.to_string())?;
+    tungstate_execute::resolve_interrupted_on(
+        spot.backend.as_ref(),
+        &state.journal,
+        spot.end.connection,
+        &spot.end.path.to_string_lossy(),
+    )
+    .map_err(|e| e.to_string())?;
 
-    let (_, snapshot, plan) = govern::plan_for(&path)?;
+    let (_, snapshot, plan) = govern::plan_for(&spot)?;
     if plan.ops.is_empty() {
         return Ok(govern::TidyDone {
             moved: 0,
@@ -574,8 +603,15 @@ fn tidy_folder(root: String, state: State<'_, App>) -> Result<govern::TidyDone, 
         ));
     }
 
-    let applied = tungstate_execute::apply(&plan, &snapshot, &backend, &state.journal, &root)
-        .map_err(|e| e.to_string())?;
+    let applied = tungstate_execute::apply_at(
+        tungstate_journal::Purpose::Tidy,
+        &plan,
+        &snapshot,
+        spot.backend.as_ref(),
+        &state.journal,
+        &spot.end,
+    )
+    .map_err(|e| e.to_string())?;
 
     Ok(govern::TidyDone {
         moved: govern::files_moved(&plan, applied.skipped.len(), applied.failed.len()),
@@ -702,27 +738,36 @@ fn past_for(journal: &Journal, purpose: Purpose) -> Result<Vec<PastView>, String
         .folders()
         .map_err(|error| error.to_string())?
         .into_iter()
-        .map(|folder| (folder.root, folder.name))
+        .map(|folder| (govern::target_of(&folder, journal), folder.name))
         .collect();
     let past = journal
         .past_plans(purpose, PAST_SHOWN)
         .map_err(|error| error.to_string())?;
     Ok(past
         .into_iter()
-        .map(|one| PastView {
-            plan: one.plan.id.0,
-            name: names.get(&one.plan.folder).cloned().unwrap_or_else(|| {
-                Path::new(&one.plan.folder).file_name().map_or_else(
-                    || one.plan.folder.clone(),
-                    |n| n.to_string_lossy().to_string(),
-                )
-            }),
-            undoable: one.plan.is_undoable(),
-            undone: one.plan.is_undone(),
-            root: one.plan.folder,
-            applied_at: one.plan.applied_at,
-            files: one.files,
-            bytes: one.bytes,
+        .map(|one| {
+            // The target Put it back opens: `nas:media` for a folder on a
+            // connection, so the row reaches the same place it was tidied.
+            let root = match one.plan.connection {
+                None => one.plan.folder.clone(),
+                Some(id) => journal.connection_by_id(id).map_or_else(
+                    |_| one.plan.folder.clone(),
+                    |c| format!("{}:{}", c.name, one.plan.folder),
+                ),
+            };
+            PastView {
+                plan: one.plan.id.0,
+                name: names
+                    .get(&root)
+                    .cloned()
+                    .unwrap_or_else(|| govern::label_for(&root)),
+                undoable: one.plan.is_undoable(),
+                undone: one.plan.is_undone(),
+                root,
+                applied_at: one.plan.applied_at,
+                files: one.files,
+                bytes: one.bytes,
+            }
         })
         .collect())
 }
@@ -986,16 +1031,16 @@ fn set_duplicate_action(action: String, state: State<'_, App>) -> Result<(), Str
 
 #[tauri::command(async)]
 fn put_back(root: String, plan: i64, state: State<'_, App>) -> Result<govern::PutBackDone, String> {
-    let path = PathBuf::from(&root);
-    let backend = tungstate_backend::local::LocalBackend::new(path.clone());
-    let policy = govern::rules_at(&path)?;
-    let fresh = tungstate_attrs::survey(&backend, &policy).map_err(|e| e.to_string())?;
-    let undone = tungstate_execute::undo(
+    let spot = govern::open(&root, &state.journal)?;
+    let policy = govern::rules_at(&spot)?;
+    let fresh =
+        tungstate_attrs::survey(spot.backend.as_ref(), &policy).map_err(|e| e.to_string())?;
+    let undone = tungstate_execute::undo_at(
         tungstate_journal::plans::PlanId(plan),
         &fresh,
-        &backend,
+        spot.backend.as_ref(),
         &state.journal,
-        &root,
+        &spot.end,
     )
     .map_err(|e| e.to_string())?;
     // Same trap as `tidy_folder`: `undone.done` counts operations, and undoing
@@ -1550,6 +1595,8 @@ struct UsesView {
     pairs: Vec<String>,
     syncs: Vec<String>,
     unfinished: Vec<String>,
+    /// Organized folders on it, by their path there.
+    folders: Vec<String>,
     /// Past operations that name it; they do not stop it going.
     history: usize,
 }
@@ -1565,6 +1612,7 @@ fn connection_uses(name: String, state: State<'_, App>) -> Result<UsesView, Stri
         pairs: uses.pairs,
         syncs: uses.syncs,
         unfinished: uses.unfinished,
+        folders: uses.folders,
         history: uses.history,
     })
 }
@@ -2942,6 +2990,7 @@ fn main() {
             forget_folder,
             layouts,
             give_rules,
+            folder_has_rules,
             learn_folder,
             compare_folder,
             rules_text,

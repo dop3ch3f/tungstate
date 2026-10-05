@@ -1444,28 +1444,97 @@ fn plan_refuses_a_folder_with_no_policy_and_says_what_to_do() {
 }
 
 #[test]
-fn plan_refuses_a_connection_rather_than_half_supporting_one() {
+fn a_folder_on_a_connection_is_planned_tidied_and_put_back_in_place() {
+    // An `fs` connection goes through the same connection factory, and the
+    // same backend trait, as a NAS does, so this is the whole remote path
+    // with no server.
     let home = sandbox();
-    let mut command = sandboxed(&home);
-    command
-        .arg("connection")
-        .arg("add")
-        .arg("nas")
-        .arg("--scheme")
-        .arg("fs")
-        .arg("--root")
-        .arg(home.path().to_str().expect("utf-8 path"));
-    command.assert().success();
+    let inbox = home.path().join("share/inbox");
+    std::fs::create_dir_all(inbox.join(".tungstate")).unwrap();
+    std::fs::write(inbox.join("a.txt"), b"one").unwrap();
+    std::fs::write(inbox.join("b.jpg"), b"two").unwrap();
+    std::fs::write(
+        inbox.join(".tungstate/policy.toml"),
+        "[folder]\nname = \"inbox\"\n[defaults]\ncooldown = \"0s\"\n\n\
+         [[rule]]\nname = \"text\"\npath = \"Text\"\nmatch = { ext = \"txt\" }\n",
+    )
+    .unwrap();
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "fs", "--root"])
+        .arg(home.path().join("share"))
+        .assert()
+        .success();
 
-    let mut command = sandboxed(&home);
-    let output = command.arg("plan").arg("nas:inbox").output().expect("runs");
-    assert_eq!(
-        output.status.code(),
-        Some(2),
-        "not-built-yet is exit code 2"
+    sandboxed(&home)
+        .args(["folder", "add", "nas:inbox"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("already has rules"));
+    sandboxed(&home)
+        .args(["folder", "list"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("nas:inbox"));
+    sandboxed(&home)
+        .args(["plan", "nas:inbox"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Text/a.txt"));
+
+    sandboxed(&home)
+        .args(["apply", "nas:inbox", "--yes"])
+        .assert()
+        .success();
+    assert!(
+        inbox.join("Text/a.txt").is_file(),
+        "moved on the connection"
     );
-    let stderr = String::from_utf8(output.stderr).expect("utf-8");
-    assert!(stderr.contains("not built yet"), "{stderr}");
+    assert!(!inbox.join("a.txt").exists());
+
+    sandboxed(&home)
+        .args(["undo", "nas:inbox"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("undid plan"));
+    assert!(inbox.join("a.txt").is_file(), "put back where it was");
+    assert!(
+        !inbox.join("Text").exists(),
+        "and the folder it made is gone"
+    );
+
+    // The connection now has a folder on it, so it cannot simply go.
+    sandboxed(&home)
+        .args(["connection", "remove", "nas"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("organized folders: inbox"));
+}
+
+#[test]
+fn a_folder_on_a_connection_with_no_rules_says_how_to_give_it_some() {
+    let home = sandbox();
+    std::fs::create_dir_all(home.path().join("share/bare")).unwrap();
+    std::fs::write(home.path().join("share/bare/a.txt"), b"one").unwrap();
+    sandboxed(&home)
+        .args(["connection", "add", "nas", "--scheme", "fs", "--root"])
+        .arg(home.path().join("share"))
+        .assert()
+        .success();
+    sandboxed(&home)
+        .args(["plan", "nas:bare"])
+        .assert()
+        .failure()
+        .stderr(predicates::str::contains("tungstate init nas:bare"));
+    sandboxed(&home)
+        .args(["init", "--template", "downloads", "nas:bare"])
+        .assert()
+        .success();
+    assert!(
+        home.path()
+            .join("share/bare/.tungstate/policy.toml")
+            .is_file(),
+        "the rules are written into the folder, through the connection"
+    );
 }
 
 // --- `tungstate apply` and `tungstate undo` -------------------------------

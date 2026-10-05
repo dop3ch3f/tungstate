@@ -217,3 +217,58 @@ fn a_sync_with_a_share_sets_a_changed_version_aside_rather_than_losing_it() {
         .success()
         .stdout(predicates::str::contains("nothing to do"));
 }
+
+#[test]
+fn a_folder_on_the_share_is_learnt_tidied_and_put_back_in_place() {
+    // Slice 13: Organize on a NAS folder, with nothing downloaded to be filed.
+    let (root, raw) = own("tidy");
+    let home = tempfile::tempdir().unwrap();
+    connect(&home, &password(), &root);
+    raw.create_dir_all(Path::new("inbox")).unwrap();
+    put(&raw, "inbox/notes.txt", b"words");
+    put(&raw, "inbox/clip.mp4", b"frames");
+
+    cli(&home)
+        .args(["folder", "add", "nas:inbox"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("no rules yet"));
+    // Rules written into the folder on the share, through the connection.
+    let mut sink = raw
+        .create_write(Path::new("inbox/.tungstate/policy.toml"))
+        .or_else(|_| {
+            raw.create_dir_all(Path::new("inbox/.tungstate"))?;
+            raw.create_write(Path::new("inbox/.tungstate/policy.toml"))
+        })
+        .unwrap();
+    sink.write_all(
+        b"[folder]\nname = \"inbox\"\n[defaults]\ncooldown = \"0s\"\n\n\
+          [[rule]]\nname = \"text\"\npath = \"Text\"\nmatch = { ext = \"txt\" }\n",
+    )
+    .unwrap();
+    sink.finish().unwrap();
+
+    cli(&home)
+        .args(["plan", "nas:inbox"])
+        .assert()
+        .success()
+        .stdout(predicates::str::contains("Text/notes.txt"));
+    cli(&home)
+        .args(["apply", "nas:inbox", "--yes"])
+        .assert()
+        .success();
+    assert_eq!(
+        fetch(&raw, "inbox/Text/notes.txt"),
+        b"words",
+        "moved on the share"
+    );
+    assert!(raw.stat(Path::new("inbox/notes.txt")).is_err());
+
+    cli(&home).args(["undo", "nas:inbox"]).assert().success();
+    assert_eq!(
+        fetch(&raw, "inbox/notes.txt"),
+        b"words",
+        "put back on the share"
+    );
+    assert!(raw.stat(Path::new("inbox/Text")).is_err());
+}

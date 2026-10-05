@@ -124,6 +124,7 @@ async function remove(target: Connection) {
     ...uses.pairs.map((p) => `Saved pair: ${p}`),
     ...uses.syncs.map((s) => `Sync: ${s}`),
     ...uses.unfinished.map((u) => `Stopped part-way: ${u}`),
+    ...uses.folders.map((f) => `Organized folder: ${f}`),
   ];
   if (blocking.length) {
     await ask({

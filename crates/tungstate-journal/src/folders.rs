@@ -8,7 +8,7 @@
 //! The root is the identity. Adding the same folder twice is one folder, which
 //! is why the root is `UNIQUE` and the name is not — a name is for reading.
 
-use crate::{Journal, JournalError, Result, now_millis, query};
+use crate::{ConnectionId, Endpoint, Journal, JournalError, Result, now_millis, query};
 
 /// Identifies one governed folder.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -19,7 +19,10 @@ pub struct FolderId(pub i64);
 pub struct Folder {
     /// Identifier.
     pub id: FolderId,
-    /// The absolute path, which is the folder's identity.
+    /// Which connection it is on. `None` is this machine.
+    pub connection: Option<ConnectionId>,
+    /// The path: absolute on this machine, or inside the connection. With
+    /// the connection, the folder's identity.
     pub root: String,
     /// What to call it on screen. Defaults to the last path segment.
     pub name: String,
@@ -34,10 +37,19 @@ impl Journal {
     /// [`JournalError::DuplicateFolder`] if that root is already governed, or
     /// [`JournalError::Query`] if the row cannot be written.
     pub fn add_folder(&self, root: &str, name: &str) -> Result<FolderId> {
+        self.add_folder_at(&Endpoint::local(root), name)
+    }
+
+    /// Start looking after a folder on any connection.
+    ///
+    /// # Errors
+    /// As [`Journal::add_folder`].
+    pub fn add_folder_at(&self, at: &Endpoint, name: &str) -> Result<FolderId> {
+        let root = at.path.to_string_lossy();
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO folders (root, name, added_at) VALUES (?1, ?2, ?3)",
-            rusqlite::params![root, name, now_millis()],
+            "INSERT INTO folders (connection, root, name, added_at) VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![at.connection.map(|c| c.0), root, name, now_millis()],
         )
         .map_err(|error| match error {
             rusqlite::Error::SqliteFailure(e, _)
@@ -60,7 +72,7 @@ impl Journal {
     pub fn folders(&self) -> Result<Vec<Folder>> {
         let conn = self.lock();
         let mut statement = conn
-            .prepare("SELECT id, root, name, added_at FROM folders ORDER BY id")
+            .prepare("SELECT id, connection, root, name, added_at FROM folders ORDER BY id")
             .map_err(query("listing folders"))?;
         let rows = statement
             .query_map([], row_to_folder)
@@ -74,10 +86,20 @@ impl Journal {
     /// # Errors
     /// [`JournalError::UnknownFolder`] if that root is not governed.
     pub fn folder_by_root(&self, root: &str) -> Result<Folder> {
+        self.folder_at(&Endpoint::local(root))
+    }
+
+    /// One governed folder on any connection.
+    ///
+    /// # Errors
+    /// [`JournalError::UnknownFolder`] if that folder is not governed.
+    pub fn folder_at(&self, at: &Endpoint) -> Result<Folder> {
+        let root = at.path.to_string_lossy();
         let conn = self.lock();
         conn.query_row(
-            "SELECT id, root, name, added_at FROM folders WHERE root = ?1",
-            rusqlite::params![root],
+            "SELECT id, connection, root, name, added_at FROM folders
+             WHERE root = ?1 AND IFNULL(connection, 0) = ?2",
+            rusqlite::params![root, at.connection.map_or(0, |c| c.0)],
             row_to_folder,
         )
         .map_err(|error| match error {
@@ -99,11 +121,20 @@ impl Journal {
     /// # Errors
     /// [`JournalError::UnknownFolder`] if that root is not governed.
     pub fn remove_folder(&self, root: &str) -> Result<()> {
+        self.remove_folder_at(&Endpoint::local(root))
+    }
+
+    /// Stop looking after a folder on any connection.
+    ///
+    /// # Errors
+    /// As [`Journal::remove_folder`].
+    pub fn remove_folder_at(&self, at: &Endpoint) -> Result<()> {
+        let root = at.path.to_string_lossy();
         let conn = self.lock();
         let removed = conn
             .execute(
-                "DELETE FROM folders WHERE root = ?1",
-                rusqlite::params![root],
+                "DELETE FROM folders WHERE root = ?1 AND IFNULL(connection, 0) = ?2",
+                rusqlite::params![root, at.connection.map_or(0, |c| c.0)],
             )
             .map_err(query("forgetting a folder"))?;
         if removed == 0 {
@@ -116,6 +147,7 @@ impl Journal {
 fn row_to_folder(row: &rusqlite::Row<'_>) -> rusqlite::Result<Folder> {
     Ok(Folder {
         id: FolderId(row.get("id")?),
+        connection: row.get::<_, Option<i64>>("connection")?.map(ConnectionId),
         root: row.get("root")?,
         name: row.get("name")?,
         added_at: row.get("added_at")?,

@@ -105,7 +105,7 @@ const STEPS = [
           <span class="known-name">{{ folder.name }}</span>
           <span class="path known-path" :title="folder.root">{{ shortPath(folder.root) }}</span>
           <span class="known-state" v-if="folder.broken">the rules file has a mistake</span>
-          <span class="known-state dim" v-else-if="!folder.has_rules">no rules yet</span>
+          <span class="known-state dim" v-else-if="folder.has_rules === false">no rules yet</span>
           <span class="known-state dim" v-else-if="lastTidy.has(folder.root)">tidied {{ ago(lastTidy.get(folder.root)!) }}</span>
           <span class="known-state dim" v-else>not tidied yet</span>
         </button>

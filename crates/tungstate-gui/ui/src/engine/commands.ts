@@ -24,6 +24,8 @@ export const folders = {
   learn: (root: string) => invoke<T.Learned>("learn_folder", { root }),
   compare: (root: string) => invoke<T.Outcome[]>("compare_folder", { root }),
   preview: (root: string) => invoke<T.PreviewView>("folder_preview", { root }),
+  /** Whether a folder has rules yet; asked when one on a connection opens. */
+  hasRules: (root: string) => invoke<boolean>("folder_has_rules", { root }),
   tidy: (root: string) => invoke<T.TidyDone>("tidy_folder", { root }),
   /** Takes any plan id: `PreviewView.undoable` for the latest, `past()` for
    *  older ones. See `docs/SEAM.md`, safety property 2. */

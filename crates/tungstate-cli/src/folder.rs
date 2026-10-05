@@ -159,24 +159,122 @@ pub(crate) fn load(located: &Located) -> Result<(String, Loaded), ExitCode> {
             return Err(ExitCode::FAILURE);
         }
     };
+    compile(&located.policy_name, text)
+}
+
+/// A folder with rules, on this machine or on a connection, opened and ready
+/// to plan, apply or undo against.
+pub(crate) struct Governed {
+    /// The folder itself.
+    pub(crate) backend: Box<dyn tungstate_backend::Backend>,
+    /// What the journal records against.
+    pub(crate) end: tungstate_journal::Endpoint,
+    /// The folder as output names it: a path, or `nas:media`.
+    pub(crate) shown: String,
+    /// The policy as a diagnostic names it.
+    pub(crate) policy_name: String,
+    /// The policy's text, for warnings drawn against it.
+    pub(crate) text: String,
+    /// The policy, compiled.
+    pub(crate) loaded: Loaded,
+}
+
+/// Open the folder `target` names, with its rules.
+///
+/// On this machine, `target` may be anywhere inside the folder: the nearest
+/// `.tungstate/policy.toml` above it decides, as it always has. On a
+/// connection (`nas:media`) it is the folder itself, because walking up a
+/// remote tree to look for rules is a round trip per level.
+pub(crate) fn governed(
+    target: &str,
+    explicit: Option<&Path>,
+    journal: &tungstate_journal::Journal,
+) -> Result<Governed, ExitCode> {
+    if let Ok(end) = tungstate_journal::ends::parse_end(target, None, journal)
+        && end.connection.is_some()
+    {
+        return remote(target, end, explicit, journal);
+    }
+    let located = locate(Path::new(target), explicit).map_err(|message| {
+        eprintln!("error: {message}");
+        ExitCode::FAILURE
+    })?;
+    let (text, loaded) = load(&located)?;
+    Ok(Governed {
+        backend: Box::new(tungstate_backend::local::LocalBackend::new(
+            located.root.clone(),
+        )),
+        end: tungstate_journal::Endpoint::local(located.root.clone()),
+        shown: located.root.display().to_string(),
+        policy_name: located.policy_name,
+        text,
+        loaded,
+    })
+}
+
+fn remote(
+    target: &str,
+    end: tungstate_journal::Endpoint,
+    explicit: Option<&Path>,
+    journal: &tungstate_journal::Journal,
+) -> Result<Governed, ExitCode> {
+    use std::io::Read as _;
+
+    let backend = tungstate_backend_opendal::open(&end, journal, crate::secret_store().as_ref())
+        .map_err(|error| crate::fail(&error))?;
+    let (policy_name, text) = if let Some(explicit) = explicit {
+        let text = std::fs::read_to_string(explicit).map_err(|error| {
+            eprintln!("error: cannot read `{}`: {error}", explicit.display());
+            ExitCode::FAILURE
+        })?;
+        (explicit.display().to_string(), text)
+    } else {
+        let mut text = String::new();
+        backend
+            .open_read(Path::new(POLICY_RELATIVE))
+            .and_then(|mut reader| {
+                reader.read_to_string(&mut text).map_err(|source| {
+                    tungstate_backend::BackendError::Io {
+                        path: POLICY_RELATIVE.into(),
+                        source,
+                    }
+                })
+            })
+            .map_err(|_| {
+                eprintln!(
+                    "error: `{target}` has no `{POLICY_RELATIVE}`; give it rules with \
+                     `tungstate init {target}` or `tungstate folder learn {target}`"
+                );
+                ExitCode::FAILURE
+            })?;
+        (format!("{target}/{POLICY_RELATIVE}"), text)
+    };
+    let (text, loaded) = compile(&policy_name, text)?;
+    Ok(Governed {
+        backend,
+        end,
+        shown: target.to_string(),
+        policy_name,
+        text,
+        loaded,
+    })
+}
+
+/// Compile a policy, drawing the diagnostic if it will not.
+fn compile(name: &str, text: String) -> Result<(String, Loaded), ExitCode> {
     match Policy::parse(&text) {
         Ok(loaded) => Ok((text, loaded)),
         Err(error) => {
-            let report =
-                miette::Report::new(PolicyDiagnostic::error(&located.policy_name, &text, &error));
+            let report = miette::Report::new(PolicyDiagnostic::error(name, &text, &error));
             eprintln!("{report:?}");
             Err(ExitCode::FAILURE)
         }
     }
 }
 
-pub(crate) fn print_warnings(located: &Located, text: &str, warnings: &[Warning]) {
+pub(crate) fn print_warnings(policy_name: &str, text: &str, warnings: &[Warning]) {
     for warning in warnings {
-        let report = miette::Report::new(PolicyDiagnostic::warning(
-            &located.policy_name,
-            text,
-            warning,
-        ));
+        let report = miette::Report::new(PolicyDiagnostic::warning(policy_name, text, warning));
         eprintln!("{report:?}");
     }
 }

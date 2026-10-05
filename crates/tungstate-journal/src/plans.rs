@@ -5,7 +5,7 @@
 //! has since been reversed — and `undo --last 3` needs all three. So a plan is
 //! a row, and an operation points at it.
 
-use crate::{Journal, JournalError, OpId, Result, now_millis, query};
+use crate::{ConnectionId, Endpoint, Journal, JournalError, OpId, Result, now_millis, query};
 
 /// Identifies one applied reorganisation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -58,7 +58,9 @@ pub struct PastPlan {
 pub struct AppliedPlan {
     /// Identifier, which is what `undo --plan` takes.
     pub id: PlanId,
-    /// The folder root it was applied to.
+    /// Which connection the folder is on. `None` is this machine.
+    pub connection: Option<ConnectionId>,
+    /// The folder root it was applied to: inside the connection, if any.
     pub folder: String,
     /// The snapshot fingerprint the plan was built from.
     pub snapshot: String,
@@ -162,17 +164,39 @@ impl Journal {
         reversible: bool,
         purpose: Option<Purpose>,
     ) -> Result<PlanId> {
+        self.begin_plan_at(
+            &Endpoint::local(folder),
+            snapshot,
+            undoes,
+            reversible,
+            purpose,
+        )
+    }
+
+    /// Record a reorganisation of a folder on any connection.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the row cannot be written.
+    pub fn begin_plan_at(
+        &self,
+        folder: &Endpoint,
+        snapshot: &str,
+        undoes: Option<PlanId>,
+        reversible: bool,
+        purpose: Option<Purpose>,
+    ) -> Result<PlanId> {
         let conn = self.lock();
         conn.execute(
-            "INSERT INTO plans (folder, snapshot, applied_at, undoes, reversible, purpose)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            "INSERT INTO plans (connection, folder, snapshot, applied_at, undoes, reversible, purpose)
+             VALUES (?7, ?1, ?2, ?3, ?4, ?5, ?6)",
             rusqlite::params![
-                folder,
+                folder.path.to_string_lossy(),
                 snapshot,
                 now_millis(),
                 undoes.map(|p| p.0),
                 i64::from(reversible),
-                purpose.map(Purpose::as_str)
+                purpose.map(Purpose::as_str),
+                folder.connection.map(|c| c.0)
             ],
         )
         .map_err(query("recording a plan"))?;
@@ -210,7 +234,7 @@ impl Journal {
     pub fn plan_by_id(&self, id: PlanId) -> Result<AppliedPlan> {
         let conn = self.lock();
         conn.query_row(
-            "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
+            "SELECT id, connection, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
              FROM plans WHERE id = ?1",
             rusqlite::params![id.0],
             row_to_plan,
@@ -236,7 +260,7 @@ impl Journal {
         let conn = self.lock();
         let mut statement = conn
             .prepare(
-                "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
+                "SELECT id, connection, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
                  FROM plans ORDER BY id DESC LIMIT ?1",
             )
             .map_err(query("listing recent plans"))?;
@@ -255,16 +279,29 @@ impl Journal {
     /// # Errors
     /// [`JournalError::Query`] if the rows cannot be read.
     pub fn recent_plans_for(&self, folder: &str, limit: usize) -> Result<Vec<AppliedPlan>> {
+        self.recent_plans_at(&Endpoint::local(folder), limit)
+    }
+
+    /// The most recent plans for one folder on any connection, newest first.
+    ///
+    /// # Errors
+    /// [`JournalError::Query`] if the rows cannot be read.
+    pub fn recent_plans_at(&self, folder: &Endpoint, limit: usize) -> Result<Vec<AppliedPlan>> {
         let conn = self.lock();
         let mut statement = conn
             .prepare(
-                "SELECT id, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
-                 FROM plans WHERE folder = ?1 ORDER BY id DESC LIMIT ?2",
+                "SELECT id, connection, folder, snapshot, applied_at, undone_at, undoes, reversible, purpose
+                 FROM plans WHERE folder = ?1 AND IFNULL(connection, 0) = ?3
+                 ORDER BY id DESC LIMIT ?2",
             )
             .map_err(query("listing a folder's plans"))?;
         let rows = statement
             .query_map(
-                rusqlite::params![folder, i64::try_from(limit).unwrap_or(i64::MAX)],
+                rusqlite::params![
+                    folder.path.to_string_lossy(),
+                    i64::try_from(limit).unwrap_or(i64::MAX),
+                    folder.connection.map_or(0, |c| c.0)
+                ],
                 row_to_plan,
             )
             .map_err(query("listing a folder's plans"))?;
@@ -287,7 +324,7 @@ impl Journal {
         let conn = self.lock();
         let mut statement = conn
             .prepare(
-                "SELECT p.id, p.folder, p.snapshot, p.applied_at, p.undone_at, p.undoes,
+                "SELECT p.id, p.connection, p.folder, p.snapshot, p.applied_at, p.undone_at, p.undoes,
                         p.reversible, p.purpose,
                         COUNT(o.id) AS files,
                         COALESCE(SUM(o.size), 0) AS bytes,
@@ -330,7 +367,7 @@ impl Journal {
         let conn = self.lock();
         let mut statement = conn
             .prepare(
-                "SELECT p.id, p.folder, p.snapshot, p.applied_at, p.undone_at, p.undoes,
+                "SELECT p.id, p.connection, p.folder, p.snapshot, p.applied_at, p.undone_at, p.undoes,
                         p.reversible, p.purpose,
                         COALESCE(SUM(o.kind = 'copy'
                                      AND instr(o.dst_path, '.tungstate-quarantine') = 0), 0)
@@ -418,6 +455,7 @@ impl Journal {
 fn row_to_plan(row: &rusqlite::Row<'_>) -> rusqlite::Result<AppliedPlan> {
     Ok(AppliedPlan {
         id: PlanId(row.get("id")?),
+        connection: row.get::<_, Option<i64>>("connection")?.map(ConnectionId),
         folder: row.get("folder")?,
         snapshot: row.get("snapshot")?,
         applied_at: row.get("applied_at")?,

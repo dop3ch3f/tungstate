@@ -253,7 +253,12 @@ impl Scan {
 /// Everything a pass needs, opened once and handed round.
 struct Place {
     backend: Box<dyn Backend>,
+    /// What the person pointed at, as they wrote it: for showing, and for
+    /// keying the digest cache and the recent list.
     root: String,
+    /// The same, as a connection and a path, which is what the journal
+    /// records each operation against.
+    end: tungstate_journal::Endpoint,
     networked: bool,
 }
 
@@ -267,6 +272,7 @@ fn place(target: &str, journal: &Journal) -> Result<Place, String> {
     Ok(Place {
         backend,
         root: target.to_string(),
+        end,
         networked,
     })
 }
@@ -686,13 +692,13 @@ pub fn clear(
     let bytes = bytes_in(&dealings, &snapshot);
     let name = label_for(&place.root);
     let plan = dupes::plan_dealings(&snapshot, &dealings, extras, &name, Mode::Observe);
-    let applied = tungstate_execute::apply_for(
+    let applied = tungstate_execute::apply_at(
         tungstate_journal::Purpose::Duplicates,
         &plan,
         &snapshot,
         place.backend.as_ref(),
         journal,
-        &place.root,
+        &place.end,
     )
     .map_err(|error| error.to_string())?;
 
@@ -767,12 +773,12 @@ fn under<'a>(
 pub fn put_back(target: &str, plan: i64, journal: &Journal) -> Result<usize, String> {
     let place = place(target, journal)?;
     let snapshot = look(place.backend.as_ref(), false)?;
-    let undone = tungstate_execute::undo(
+    let undone = tungstate_execute::undo_at(
         tungstate_journal::plans::PlanId(plan),
         &snapshot,
         place.backend.as_ref(),
         journal,
-        &place.root,
+        &place.end,
     )
     .map_err(|error| error.to_string())?;
     // The same trap as everywhere else: undoing a plan also recreates the

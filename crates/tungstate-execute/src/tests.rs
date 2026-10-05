@@ -1264,3 +1264,142 @@ fn a_scan_asked_to_stop_stops() {
     assert_eq!(stopped, Err(tungstate_core::dupes::Trouble::Stopped));
     assert_eq!(digest.reads(), 0, "and finished nothing it had not started");
 }
+
+#[test]
+fn a_tidy_and_its_undo_on_a_connection_record_that_connection() {
+    // A local folder standing in for a share: what matters is that every
+    // operation says which connection it happened on, so History and Put it
+    // back can find the files again.
+    let fixture = Fixture::new(BY_EXT, &[("a.txt", "one"), ("c.mp4", "two")]);
+    let nas = fixture
+        .journal
+        .create_connection(&tungstate_journal::NewConnection {
+            name: "nas".to_string(),
+            scheme: tungstate_journal::Scheme::Smb,
+            host: Some("nas.local".to_string()),
+            port: None,
+            username: Some("me".to_string()),
+            root: "media".to_string(),
+            options: std::collections::BTreeMap::new(),
+        })
+        .unwrap();
+    let at = Endpoint::remote(nas, "inbox");
+    let before = fixture.shape();
+
+    let applied = apply_at(
+        Purpose::Tidy,
+        &fixture.plan(),
+        &fixture.survey(),
+        &fixture.backend(),
+        &fixture.journal,
+        &at,
+    )
+    .expect("apply succeeds");
+    let plan = fixture.journal.plan_by_id(applied.plan).unwrap();
+    assert_eq!(
+        (plan.connection, plan.folder.as_str()),
+        (Some(nas), "inbox")
+    );
+    let ops = fixture.journal.ops_for_plan(applied.plan).unwrap();
+    assert!(!ops.is_empty());
+    for op in &ops {
+        for end in op.source.iter().chain(op.destination.iter()) {
+            assert_eq!(end.connection, Some(nas), "{op:?}");
+            assert_eq!(end.root, Path::new("inbox"));
+        }
+    }
+
+    let undone = undo_at(
+        applied.plan,
+        &fixture.survey(),
+        &fixture.backend(),
+        &fixture.journal,
+        &at,
+    )
+    .expect("undo succeeds");
+    assert_eq!(fixture.shape(), before);
+    let reversal = fixture
+        .journal
+        .recent_plans_at(&at, 5)
+        .unwrap()
+        .into_iter()
+        .find(|p| p.undoes == Some(applied.plan))
+        .expect("the undo is recorded on the same folder");
+    assert_eq!(reversal.connection, Some(nas));
+    assert!(
+        fixture
+            .journal
+            .ops_for_plan(reversal.id)
+            .unwrap()
+            .iter()
+            .all(|op| op.source.as_ref().is_none_or(|s| s.connection == Some(nas))),
+        "the undo's operations are on the connection too ({} undone)",
+        undone.done
+    );
+}
+
+/// Local storage that says it cannot rename, as FTP and S3 do.
+struct NoRename(LocalBackend);
+
+impl tungstate_backend::Backend for NoRename {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        tungstate_backend::Capabilities {
+            atomic_rename: false,
+            ..self.0.capabilities()
+        }
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        self.0.root_token()
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.0.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.0.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.0.open_read(path)
+    }
+    fn create_write(
+        &self,
+        path: &Path,
+    ) -> tungstate_backend::Result<Box<dyn tungstate_backend::WriteFinish>> {
+        self.0.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.0.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.0.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_tidy_on_storage_that_cannot_rename_is_refused_before_anything_happens() {
+    let fixture = Fixture::new(BY_EXT, &[("a.txt", "one")]);
+    let before = fixture.shape();
+    let refused = apply_at(
+        Purpose::Tidy,
+        &fixture.plan(),
+        &fixture.survey(),
+        &NoRename(fixture.backend()),
+        &fixture.journal,
+        &Endpoint::local(fixture.root()),
+    );
+    assert!(
+        matches!(refused, Err(ExecuteError::CannotRename { .. })),
+        "{refused:?}"
+    );
+    assert_eq!(fixture.shape(), before, "nothing moved");
+    assert_eq!(
+        fixture.journal.recent_plans(5).unwrap().len(),
+        0,
+        "and nothing was recorded as begun"
+    );
+}

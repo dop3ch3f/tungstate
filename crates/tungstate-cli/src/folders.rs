@@ -6,44 +6,144 @@
 //! be able to do less than the window, or the two disagree about what a folder
 //! is.
 
+use std::io::{Read, Write};
 use std::path::Path;
 use std::process::ExitCode;
 
+use tungstate_backend::Backend;
 use tungstate_core::learn::Level;
 use tungstate_core::templates::{TEMPLATES, template};
+use tungstate_journal::{Endpoint, Journal};
 
 /// Where a policy lives, relative to the folder it governs.
 const POLICY_RELATIVE: &str = ".tungstate/policy.toml";
 
-/// `tungstate folder add <PATH> [--name NAME]`.
-pub fn add(path: &str, name: Option<&str>) -> ExitCode {
+/// A folder named on the command line: a path here, or `connection:folder`.
+struct Place {
+    backend: Box<dyn Backend>,
+    end: Endpoint,
+    /// As output names it.
+    shown: String,
+    /// Its last part, for a name.
+    label: String,
+}
+
+/// Open the folder `path` names. A path on this machine has to exist and be
+/// a directory; one on a connection has to be reachable.
+fn place(path: &str, journal: &Journal) -> Result<Place, ExitCode> {
+    if let Ok(end) = tungstate_journal::ends::parse_end(path, None, journal)
+        && end.connection.is_some()
+    {
+        let backend =
+            tungstate_backend_opendal::open(&end, journal, crate::secret_store().as_ref())
+                .map_err(|error| crate::fail(&error))?;
+        if !backend.stat(Path::new("")).is_ok_and(|meta| meta.is_dir) {
+            eprintln!("error: `{path}` is not a folder on that connection");
+            return Err(ExitCode::FAILURE);
+        }
+        return Ok(Place {
+            backend,
+            end,
+            shown: path.to_string(),
+            label: label_of(path),
+        });
+    }
     let Ok(root) = Path::new(path).canonicalize() else {
         eprintln!("error: cannot read `{path}`");
-        return ExitCode::FAILURE;
+        return Err(ExitCode::FAILURE);
     };
     if !root.is_dir() {
         eprintln!("error: `{path}` is not a directory");
-        return ExitCode::FAILURE;
+        return Err(ExitCode::FAILURE);
     }
-    let journal = match crate::open_journal() {
-        Ok(journal) => journal,
-        Err(error) => return crate::fail(&error),
-    };
+    let shown = root.to_string_lossy().to_string();
+    Ok(Place {
+        backend: Box::new(tungstate_backend::local::LocalBackend::new(root.clone())),
+        end: Endpoint::local(root),
+        label: label_of(&shown),
+        shown,
+    })
+}
 
-    let display = root.to_string_lossy().to_string();
-    let label = name.map_or_else(
-        || {
-            root.file_name()
-                .map_or_else(|| display.clone(), |n| n.to_string_lossy().to_string())
-        },
-        ToString::to_string,
-    );
-    if let Err(error) = journal.add_folder(&display, &label) {
+/// A folder's last part, or a connection's own name for its root.
+fn label_of(target: &str) -> String {
+    let last = target
+        .rsplit(['/', '\\'])
+        .find(|part| !part.trim().is_empty())
+        .unwrap_or(target);
+    match last.split_once(':') {
+        Some((name, rest)) if name.len() > 1 => {
+            if rest.trim().is_empty() { name } else { rest }.to_string()
+        }
+        _ => last.to_string(),
+    }
+}
+
+impl Place {
+    fn has_rules(&self) -> bool {
+        self.backend
+            .stat(Path::new(POLICY_RELATIVE))
+            .is_ok_and(|meta| !meta.is_dir)
+    }
+
+    fn read_rules(&self) -> Result<String, tungstate_backend::BackendError> {
+        let mut text = String::new();
+        self.backend
+            .open_read(Path::new(POLICY_RELATIVE))?
+            .read_to_string(&mut text)
+            .map_err(|source| tungstate_backend::BackendError::Io {
+                path: POLICY_RELATIVE.into(),
+                source,
+            })?;
+        Ok(text)
+    }
+
+    /// Write rules into the folder, wherever it is. Never over existing ones:
+    /// a policy is somebody's work.
+    fn write_rules(&self, text: &str) -> Result<(), ExitCode> {
+        if self.has_rules() {
+            eprintln!("error: `{}` already has rules", self.shown);
+            eprintln!("edit its `{POLICY_RELATIVE}`, or move it aside first");
+            return Err(ExitCode::FAILURE);
+        }
+        let policy = Path::new(POLICY_RELATIVE);
+        let written = policy
+            .parent()
+            .map_or(Ok(()), |parent| self.backend.create_dir_all(parent))
+            .and_then(|()| self.backend.create_write(policy))
+            .and_then(|mut sink| {
+                sink.write_all(text.as_bytes()).map_err(|source| {
+                    tungstate_backend::BackendError::Io {
+                        path: policy.into(),
+                        source,
+                    }
+                })?;
+                sink.finish()
+            });
+        written.map_err(|error| crate::fail(&error))
+    }
+}
+
+fn journal() -> Result<Journal, ExitCode> {
+    crate::open_journal().map_err(|error| crate::fail(&error))
+}
+
+/// `tungstate folder add <PATH> [--name NAME]`, where PATH may be
+/// `connection:folder`.
+pub fn add(path: &str, name: Option<&str>) -> ExitCode {
+    let Ok(journal) = journal() else {
+        return ExitCode::FAILURE;
+    };
+    let Ok(here) = place(path, &journal) else {
+        return ExitCode::FAILURE;
+    };
+    let label = name.map_or_else(|| here.label.clone(), ToString::to_string);
+    if let Err(error) = journal.add_folder_at(&here.end, &label) {
         return crate::fail(&error);
     }
 
-    println!("governing `{display}` as \"{label}\"");
-    if root.join(POLICY_RELATIVE).is_file() {
+    println!("governing `{}` as \"{label}\"", here.shown);
+    if here.has_rules() {
         println!("it already has rules; `tungstate plan {path}` says what they would do");
     } else {
         // Named rather than left to be discovered: a governed folder with no
@@ -71,12 +171,20 @@ pub fn list() -> ExitCode {
         }
         Ok(folders) => {
             for folder in &folders {
-                let rules = if Path::new(&folder.root).join(POLICY_RELATIVE).is_file() {
-                    ""
-                } else {
-                    "  (no rules yet)"
+                // A folder on a connection is listed without dialling it.
+                let (shown, rules) = match folder.connection {
+                    Some(id) => {
+                        let connection = journal
+                            .connection_by_id(id)
+                            .map_or_else(|_| format!("connection {}", id.0), |c| c.name);
+                        (format!("{connection}:{}", folder.root), "")
+                    }
+                    None if Path::new(&folder.root).join(POLICY_RELATIVE).is_file() => {
+                        (folder.root.clone(), "")
+                    }
+                    None => (folder.root.clone(), "  (no rules yet)"),
                 };
-                println!("{:<20} {}{rules}", folder.name, folder.root);
+                println!("{:<20} {shown}{rules}", folder.name);
             }
             ExitCode::SUCCESS
         }
@@ -90,6 +198,20 @@ pub fn remove(path: &str) -> ExitCode {
         Ok(journal) => journal,
         Err(error) => return crate::fail(&error),
     };
+    // On a connection the folder is forgotten without dialling it: one that
+    // has gone, or a NAS that is off, must still be forgettable.
+    if let Ok(end) = tungstate_journal::ends::parse_end(path, None, &journal)
+        && end.connection.is_some()
+    {
+        return match journal.remove_folder_at(&end) {
+            Ok(()) => {
+                println!("no longer governing `{path}`");
+                println!("its rules and its history are untouched");
+                ExitCode::SUCCESS
+            }
+            Err(error) => crate::fail(&error),
+        };
+    }
     // Canonicalised if it can be, so `.` and a trailing slash find the row --
     // but a folder that has since been deleted must still be forgettable, so a
     // path that cannot be resolved is tried as it was typed.
@@ -109,10 +231,6 @@ pub fn remove(path: &str) -> ExitCode {
 /// `tungstate init [--template NAME] [PATH]`.
 pub fn init(path: Option<&str>, name: Option<&str>) -> ExitCode {
     let path = path.unwrap_or(".");
-    let Ok(root) = Path::new(path).canonicalize() else {
-        eprintln!("error: cannot read `{path}`");
-        return ExitCode::FAILURE;
-    };
 
     let Some(name) = name else {
         println!("give a folder some rules by choosing a starting layout:");
@@ -132,26 +250,19 @@ pub fn init(path: Option<&str>, name: Option<&str>) -> ExitCode {
         return ExitCode::FAILURE;
     };
 
-    let policy = root.join(POLICY_RELATIVE);
-    if policy.exists() {
-        // Never overwritten. A policy is somebody's work, and this command
-        // exists to get them started rather than to start them over.
-        eprintln!("error: `{}` already has rules", root.display());
-        eprintln!("edit `{}`, or move it aside first", policy.display());
+    let Ok(journal) = journal() else {
         return ExitCode::FAILURE;
-    }
-    if let Some(parent) = policy.parent()
-        && let Err(error) = std::fs::create_dir_all(parent)
-    {
-        eprintln!("error: cannot make `{}`: {error}", parent.display());
+    };
+    let Ok(here) = place(path, &journal) else {
         return ExitCode::FAILURE;
-    }
-    if let Err(error) = std::fs::write(&policy, chosen.body) {
-        eprintln!("error: cannot write `{}`: {error}", policy.display());
+    };
+    // Never overwritten. A policy is somebody's work, and this command exists
+    // to get them started rather than to start them over.
+    if here.write_rules(chosen.body).is_err() {
         return ExitCode::FAILURE;
     }
 
-    println!("wrote {}", policy.display());
+    println!("wrote {}/{POLICY_RELATIVE}", here.shown);
     println!("{}", chosen.detail);
     println!("\nnothing has moved. See what it would do:\n  tungstate plan {path}");
     ExitCode::SUCCESS
@@ -164,8 +275,10 @@ pub fn init(path: Option<&str>, name: Option<&str>) -> ExitCode {
 /// already organised a folder by hand should not have to describe it again in
 /// a language they have just met.
 pub fn learn(path: &str, write: bool, improved: bool) -> ExitCode {
-    let Ok(root) = Path::new(path).canonicalize() else {
-        eprintln!("error: cannot read `{path}`");
+    let Ok(journal) = journal() else {
+        return ExitCode::FAILURE;
+    };
+    let Ok(here) = place(path, &journal) else {
         return ExitCode::FAILURE;
     };
 
@@ -174,18 +287,15 @@ pub fn learn(path: &str, write: bool, improved: bool) -> ExitCode {
     let probe = tungstate_core::policy::Policy::parse(tungstate_core::learn::PROBE)
         .expect("the probe policy parses")
         .policy;
-    let backend = tungstate_backend::local::LocalBackend::new(root.clone());
-    let snapshot = match tungstate_attrs::survey(&backend, &probe) {
+    let snapshot = match tungstate_attrs::survey(here.backend.as_ref(), &probe) {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::fail(&error),
     };
 
-    let name = root
-        .file_name()
-        .map_or_else(|| "folder".to_string(), |n| n.to_string_lossy().to_string());
-    let learned = tungstate_core::learn::learn(&snapshot, &name);
+    let name = &here.label;
+    let learned = tungstate_core::learn::learn(&snapshot, name);
 
-    println!("folder \"{name}\" at {}", root.display());
+    println!("folder \"{name}\" at {}", here.shown);
     if learned.found_a_shape() {
         let words: Vec<&str> = learned.levels.iter().map(Level::word).collect();
         println!(
@@ -238,23 +348,12 @@ pub fn learn(path: &str, write: bool, improved: bool) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    let policy = root.join(POLICY_RELATIVE);
-    if policy.exists() {
-        // Same refusal `init` makes, for the same reason: a policy is
-        // somebody's work, and this command starts them off rather than over.
-        eprintln!("error: `{}` already has rules", root.display());
-        eprintln!("edit `{}`, or move it aside first", policy.display());
+    // Same refusal `init` makes, for the same reason: a policy is somebody's
+    // work, and this command starts them off rather than over.
+    if here.write_rules(chosen).is_err() {
         return ExitCode::FAILURE;
     }
-    if let Some(parent) = policy.parent()
-        && let Err(error) = std::fs::create_dir_all(parent)
-    {
-        return crate::fail(&error);
-    }
-    if let Err(error) = std::fs::write(&policy, chosen) {
-        return crate::fail(&error);
-    }
-    println!("\nwrote {}", policy.display());
+    println!("\nwrote {}/{POLICY_RELATIVE}", here.shown);
     println!("nothing has moved. `tungstate plan {path}` says what these rules would do.");
     ExitCode::SUCCESS
 }
@@ -268,16 +367,17 @@ pub fn learn(path: &str, write: bool, improved: bool) -> ExitCode {
 /// the same question and gets the same answer, rather than each surface
 /// computing its own and drifting.
 pub fn compare(path: &str) -> ExitCode {
-    let Ok(root) = Path::new(path).canonicalize() else {
-        eprintln!("error: cannot read `{path}`");
+    let Ok(journal) = journal() else {
+        return ExitCode::FAILURE;
+    };
+    let Ok(here) = place(path, &journal) else {
         return ExitCode::FAILURE;
     };
 
     let probe = tungstate_core::policy::Policy::parse(tungstate_core::learn::PROBE)
         .expect("the probe policy parses")
         .policy;
-    let backend = tungstate_backend::local::LocalBackend::new(root.clone());
-    let snapshot = match tungstate_attrs::survey(&backend, &probe) {
+    let snapshot = match tungstate_attrs::survey(here.backend.as_ref(), &probe) {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::fail(&error),
     };
@@ -285,17 +385,16 @@ pub fn compare(path: &str) -> ExitCode {
     // The folder's own rules first, so every other row reads as a change from
     // where it actually is rather than from nothing.
     let mut also = Vec::new();
-    let existing = root.join(POLICY_RELATIVE);
-    if existing.is_file() {
-        match std::fs::read_to_string(&existing) {
+    if here.has_rules() {
+        match here.read_rules() {
             Ok(text) => also.push(("(the rules you have)".to_string(), text)),
-            Err(error) => eprintln!("warning: cannot read {}: {error}", existing.display()),
+            Err(error) => eprintln!("warning: cannot read its rules: {error}"),
         }
     }
 
     let outcomes = tungstate_core::compare::against(&snapshot, &also);
     let files = outcomes.first().map_or(0, |o| o.of);
-    println!("folder at {}", root.display());
+    println!("folder at {}", here.shown);
     println!("  {files} file(s), walked once and shown against each layout\n");
 
     for outcome in &outcomes {

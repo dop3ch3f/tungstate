@@ -7,6 +7,7 @@ import FolderStart from "./FolderStart.vue";
 import FolderRead from "./FolderRead.vue";
 import FolderPreview from "./FolderPreview.vue";
 import Working from "../../ui/Working.vue";
+import PlacePicker from "../../ui/PlacePicker.vue";
 
 const f = useFolders();
 const chosen = ref<string | null>(null);
@@ -27,6 +28,17 @@ watch(() => f.root.value, () => (chosen.value = null));
     <FolderStart v-else-if="f.phase.value === 'start'" />
     <FolderRead v-else-if="f.phase.value === 'choosing'" v-model:chosen="chosen" />
     <FolderPreview v-else />
+
+    <!-- Here, over every screen, because "Point at another folder" asks for
+         it from the reading screen as well as the start. -->
+    <PlacePicker
+      v-if="f.choosing.value"
+      of="folder"
+      title="Choose a folder to organize"
+      choose="Organize this folder"
+      @dismiss="f.choosing.value = false"
+      @chosen="f.picked"
+    />
 
   </div>
 </template>
