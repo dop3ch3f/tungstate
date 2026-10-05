@@ -27,6 +27,7 @@ const username = ref(was?.username ?? "");
 // button on the row instead.
 const secret = ref("");
 // fs, ftp and ftps: the folder to start from. S3: the folder in the bucket.
+// WebDAV: the folder inside the server's address.
 const root = ref(was?.root ?? "");
 // SMB keeps its root as two fields: the share, then the folder inside it.
 const share = ref(splitShare(was?.root ?? "").share);
@@ -66,7 +67,9 @@ function form(): ConnectionForm {
     if (region.value.trim()) options.region = region.value.trim();
     if (service.value !== "aws" && endpoint.value.trim()) options.endpoint = endpoint.value.trim();
   }
-  const networked = k !== "fs" && k !== "s3";
+  if (k === "webdav" && endpoint.value.trim()) options.endpoint = endpoint.value.trim();
+  // WebDAV's server is its endpoint, a URL with its own port.
+  const networked = k !== "fs" && k !== "s3" && k !== "webdav";
   return {
     name: name.value.trim(),
     scheme: k,
@@ -203,6 +206,15 @@ const verdict = computed(() => {
         </Field>
       </template>
 
+      <template v-if="kind === 'webdav'">
+        <Field class="cf-gap" label="Address" note="The server's web address, with its port. On a Synology it is usually https://its-name:5006.">
+          <input v-model="endpoint" placeholder="https://nas.local:5006" spellcheck="false" />
+        </Field>
+        <Field class="cf-gap" label="Folder to start from" note="Optional. A folder at that address; everything is kept inside it.">
+          <input v-model="root" placeholder="media" spellcheck="false" />
+        </Field>
+      </template>
+
       <template v-if="kind === 's3'">
         <div class="cf-grid">
           <Field label="Service">
@@ -248,6 +260,9 @@ const verdict = computed(() => {
       <Notice tone="hold" v-if="kind === 'ftp'">
         FTP sends your password and your files across the network unencrypted. If the server offers
         it, choose FTP over TLS.
+      </Notice>
+      <Notice tone="hold" v-if="kind === 'webdav' && endpoint.trim().toLowerCase().startsWith('http://')">
+        This address is plain http, so your password and your files cross the network unencrypted. Use https if the server offers it.
       </Notice>
       <Notice tone="hold" v-if="kind === 's3' && endpoint.trim().toLowerCase().startsWith('http://')">
         This endpoint is plain http, so your files cross the network unencrypted. Your secret key never does.

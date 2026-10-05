@@ -3941,6 +3941,7 @@ dependencies = [
  "opendal-service-fs",
  "opendal-service-ftp",
  "opendal-service-s3",
+ "opendal-service-webdav",
 ]
 
 [[package]]
@@ -4033,6 +4034,22 @@ dependencies = [
  "reqsign-file-read-tokio",
  "serde",
  "url",
+]
+
+[[package]]
+name = "opendal-service-webdav"
+version = "0.59.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e6a72cfd7a09084d043119f21d92f72dd44bc852571999cfe45bf9ba2015237"
+dependencies = [
+ "anyhow",
+ "asyncband 0.6.7",
+ "bytes",
+ "http",
+ "log",
+ "opendal-core",
+ "quick-xml 0.41.0",
+ "serde",
 ]
 
 [[package]]

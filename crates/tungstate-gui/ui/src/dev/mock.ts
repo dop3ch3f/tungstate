@@ -498,6 +498,8 @@ const savedConnections: T.Connection[] = (() => {
       last_check: { at: now - 2 * 3_600_000, ok: false, note: "`offsite` refused the credentials it was given" } },
     { ...base, name: "photos-b2", scheme: "s3", host: null, username: "0045a1b2c3", root: "2026", place: "bucket family-photos at s3.us-west-004.backblazeb2.com › 2026",
       options: { bucket: "family-photos", endpoint: "https://s3.us-west-004.backblazeb2.com", region: "us-west-004" }, last_check: null },
+    { ...base, name: "dav", scheme: "webdav", host: null, username: "me", root: "media", place: "nas.local:5006 › media",
+      options: { endpoint: "https://nas.local:5006" }, last_check: { at: now - 20 * 60_000, ok: true, note: "14 things in media" } },
     { ...base, name: "usb-drive", scheme: "fs", host: null, username: null, root: "/Volumes/Samsung T7", place: "/Volumes/Samsung T7", networked: false,
       last_check: { at: now - 5 * day, ok: true, note: "31 things in /Volumes/Samsung T7" } },
   ];
@@ -650,6 +652,8 @@ const scenes: Record<string, () => unknown> = {
   },
   connections: async () => { nav.go("connections"); await tick(); },
   "connections-add": async () => { nav.go("connections"); await tick(); press("Add a connection"); await tick(); },
+  // The kind picker, settled: the sheet's own fade-in is over before the shot.
+  "connections-kinds": async () => { await scenes["connections-add"]!(); await new Promise((done) => setTimeout(done, 600)); },
   "connections-add-smb": async () => {
     await scenes["connections-add"]!();
     press("SMB");
@@ -676,6 +680,23 @@ const scenes: Record<string, () => unknown> = {
     if (service) { service.value = "b2"; service.dispatchEvent(new Event("change")); }
     await tick();
     fill(["photos-b2", "family-photos", "https://s3.us-west-004.backblazeb2.com", "us-west-004", "2026", "0045a1b2c3", "secret"]);
+    await tick();
+  },
+  "connections-add-webdav": async () => {
+    await scenes["connections-add"]!();
+    press("WebDAV");
+    await tick();
+    fill(["dav", "https://nas.local:5006", "media", "me", "hunter2"]);
+    await tick();
+    press("Check", true);
+    await tick(); await tick();
+  },
+  // A plain-http address, which says what crosses the network unencrypted.
+  "connections-add-webdav-http": async () => {
+    await scenes["connections-add"]!();
+    press("WebDAV");
+    await tick();
+    fill(["dav", "http://nas.local:5005", "media", "me", "hunter2"]);
     await tick();
   },
   // A row's "…" menu, open.

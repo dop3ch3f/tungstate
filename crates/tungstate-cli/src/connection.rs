@@ -22,6 +22,9 @@ pub struct KindFlags {
     region: Option<String>,
     /// S3: the service's address, for anything that is not AWS itself, as in
     /// `https://s3.eu-central-003.backblazeb2.com` or `http://nas.local:9000`.
+    /// WebDAV: the server's address, required, as in `https://nas.local:5006`.
+    // This comment is the `--help` text, where backticks would show.
+    #[allow(clippy::doc_markdown)]
     #[arg(long)]
     endpoint: Option<String>,
     /// SMB: the share, which the root then continues inside. `--share media
@@ -83,7 +86,7 @@ pub enum ConnectionAction {
         /// What this connection is called on the command line.
         name: String,
         /// Which protocol it speaks: fs (a folder this machine can reach),
-        /// smb, ftps, ftp or s3.
+        /// smb, webdav, ftps, ftp or s3.
         #[arg(long)]
         scheme: String,
         /// Hostname, for the schemes that have one.
@@ -472,6 +475,11 @@ fn list(journal: &Journal) -> ExitCode {
                             None => format!("bucket {bucket}"),
                         }
                     }
+                    _ if connection.scheme == Scheme::WebDav => connection
+                        .options
+                        .get(option::ENDPOINT)
+                        .cloned()
+                        .unwrap_or_else(|| "no endpoint".to_string()),
                     (Some(host), Some(port), _) => format!("{host}:{port}"),
                     (Some(host), None, _) => host.clone(),
                     _ => "this machine".to_string(),

@@ -44,12 +44,16 @@ pub enum Scheme {
     /// The server is the host, and the root is the share followed by the
     /// folder inside it.
     Smb,
+    /// Web folders over HTTP. The server is a URL, kept as the `endpoint`
+    /// option because it may carry a path of its own, such as Nextcloud's
+    /// `/remote.php/dav/files/<user>`; the root is a folder inside it.
+    WebDav,
 }
 
 // The same spellings serve the database and the CLI, so a stored value is
 // always a value the user could have typed. New values are new strings, so a
 // journal written before them reads exactly as it did.
-string_enum!(Scheme { Fs => "fs", Ftp => "ftp", Ftps => "ftps", S3 => "s3", Smb => "smb" });
+string_enum!(Scheme { Fs => "fs", Ftp => "ftp", Ftps => "ftps", S3 => "s3", Smb => "smb", WebDav => "webdav" });
 
 /// Keys in a connection's options that some scheme reads.
 pub mod option {
@@ -58,6 +62,7 @@ pub mod option {
     /// S3: the bucket's region. Found by asking AWS when not given.
     pub const REGION: &str = "region";
     /// S3: where the service is, for anything that is not AWS itself.
+    /// `WebDAV`: the server's URL. Required.
     pub const ENDPOINT: &str = "endpoint";
     /// SMB: `required` to refuse a server that will not encrypt. Left to the
     /// server otherwise, which is what Finder and Windows do.
@@ -70,7 +75,7 @@ impl Scheme {
     pub fn authenticates(self) -> bool {
         match self {
             Self::Fs => false,
-            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb => true,
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav => true,
         }
     }
 
@@ -81,7 +86,7 @@ impl Scheme {
     pub fn is_encrypted(self) -> bool {
         match self {
             // Local, so nothing crosses a wire in the first place.
-            Self::Fs | Self::Ftps | Self::S3 => true,
+            Self::Fs | Self::Ftps | Self::S3 | Self::WebDav => true,
             // SMB leaves encrypting the contents to the server unless told
             // to insist, so it is not encrypted until a connection says so.
             Self::Ftp | Self::Smb => false,
@@ -98,7 +103,8 @@ impl Scheme {
     #[must_use]
     pub fn can_rename(self) -> bool {
         match self {
-            Self::Fs | Self::Smb => true,
+            // WebDAV's `MOVE` replaces what is there when asked to.
+            Self::Fs | Self::Smb | Self::WebDav => true,
             // An object store has no rename at all: a new name is a copy.
             Self::Ftp | Self::Ftps | Self::S3 => false,
         }
@@ -116,7 +122,8 @@ impl Scheme {
             Self::Fs => true,
             // An S3 ETag is an MD5 only for single-part uploads, so it cannot
             // be trusted as a checksum of what landed.
-            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb => false,
+            // A WebDAV `getetag` is whatever the server likes, often a time.
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav => false,
         }
     }
 
@@ -149,7 +156,7 @@ impl Scheme {
     pub fn is_networked(self) -> bool {
         match self {
             Self::Fs => false,
-            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb => true,
+            Self::Ftp | Self::Ftps | Self::S3 | Self::Smb | Self::WebDav => true,
         }
     }
 
@@ -157,9 +164,9 @@ impl Scheme {
     #[must_use]
     pub fn default_port(self) -> Option<u16> {
         match self {
-            // A folder has no port, and an S3 endpoint is a URL that carries
-            // its own.
-            Self::Fs | Self::S3 => None,
+            // A folder has no port, and an S3 or WebDAV endpoint is a URL
+            // that carries its own.
+            Self::Fs | Self::S3 | Self::WebDav => None,
             // Explicit FTPS (`AUTH TLS`) upgrades an ordinary control
             // connection, so it uses 21 too. Implicit FTPS on 990 is legacy
             // and servers that need it can be given `--port 990`.
@@ -169,7 +176,14 @@ impl Scheme {
     }
 
     /// Every scheme, in the order a person choosing one should see them.
-    pub const ALL: [Self; 5] = [Self::Fs, Self::Smb, Self::Ftps, Self::Ftp, Self::S3];
+    pub const ALL: [Self; 6] = [
+        Self::Fs,
+        Self::Smb,
+        Self::WebDav,
+        Self::Ftps,
+        Self::Ftp,
+        Self::S3,
+    ];
 }
 
 /// A scheme spelling this build does not know, which means a newer tungstate
@@ -306,13 +320,16 @@ pub enum SettingsProblem {
     /// S3 with no bucket.
     #[error("S3 needs a bucket")]
     NeedsBucket,
+    /// `WebDAV` with no server to reach.
+    #[error("WebDAV needs the server's address as the endpoint, as in https://nas.local:5006")]
+    NeedsEndpoint,
     /// SMB with nobody to sign in as.
     #[error("SMB needs a user name; signing in as a guest is not supported")]
     NeedsUser,
     /// SMB with no share at the start of the root.
     #[error("the root has to start with the share's name, as in media/backups")]
     NeedsShare,
-    /// An S3 endpoint that is not a web address.
+    /// An S3 or `WebDAV` endpoint that is not a web address.
     #[error("the endpoint has to start with https:// or http://, and `{0}` does not")]
     BadEndpoint(String),
     /// A value outside the ones an option accepts.
@@ -368,15 +385,18 @@ impl ConnectionSettings {
                 found.push(SettingsProblem::NeedsShare);
             }
         }
-        if self.scheme == Scheme::S3 {
-            if given(option::BUCKET).is_none() {
-                found.push(SettingsProblem::NeedsBucket);
-            }
-            if let Some(endpoint) = given(option::ENDPOINT) {
-                let lower = endpoint.to_ascii_lowercase();
-                if !(lower.starts_with("https://") || lower.starts_with("http://")) {
-                    found.push(SettingsProblem::BadEndpoint(endpoint.to_string()));
-                }
+        if self.scheme == Scheme::S3 && given(option::BUCKET).is_none() {
+            found.push(SettingsProblem::NeedsBucket);
+        }
+        if self.scheme == Scheme::WebDav && given(option::ENDPOINT).is_none() {
+            found.push(SettingsProblem::NeedsEndpoint);
+        }
+        if matches!(self.scheme, Scheme::S3 | Scheme::WebDav)
+            && let Some(endpoint) = given(option::ENDPOINT)
+        {
+            let lower = endpoint.to_ascii_lowercase();
+            if !(lower.starts_with("https://") || lower.starts_with("http://")) {
+                found.push(SettingsProblem::BadEndpoint(endpoint.to_string()));
             }
         }
         if let Some(value) = given(option::ENCRYPTION)
@@ -393,7 +413,8 @@ impl ConnectionSettings {
         // Only the keys some scheme reads. An unknown key may be a newer
         // build's, and refusing it would stop an older one saving anything.
         let reads = |key: &str| match key {
-            option::BUCKET | option::REGION | option::ENDPOINT => self.scheme == Scheme::S3,
+            option::BUCKET | option::REGION => self.scheme == Scheme::S3,
+            option::ENDPOINT => matches!(self.scheme, Scheme::S3 | Scheme::WebDav),
             option::ENCRYPTION => self.scheme == Scheme::Smb,
             _ => true,
         };
@@ -413,7 +434,7 @@ impl ConnectionSettings {
     /// What crosses the network unencrypted with these settings, as advice,
     /// or `None` when nothing does.
     ///
-    /// The scheme alone cannot say: S3 is encrypted unless its endpoint is
+    /// The scheme alone cannot say: S3 and `WebDAV` are encrypted unless their endpoint is
     /// plain `http://`, and SMB only when the server or the connection
     /// insists.
     #[must_use]
@@ -435,6 +456,13 @@ impl ConnectionSettings {
                     "the endpoint is plain http, so your files cross the network \
                      unencrypted. Your secret key never does. Use an https:// endpoint \
                      if the service has one.",
+                ),
+            Scheme::WebDav => option(option::ENDPOINT)
+                .is_some_and(|endpoint| endpoint.starts_with("http://"))
+                .then_some(
+                    "the endpoint is plain http, so your password and your files cross \
+                     the network unencrypted. Use an https:// endpoint if the server \
+                     has one.",
                 ),
             Scheme::Smb => (option(option::ENCRYPTION).as_deref() != Some("required")).then_some(
                 "files cross the network unencrypted unless the server turns on SMB \

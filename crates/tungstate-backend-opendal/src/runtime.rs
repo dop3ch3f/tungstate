@@ -55,6 +55,19 @@ where
         .expect("the OpenDAL adapter's runtime dropped a task without answering")
 }
 
+/// Start `future` on this crate's runtime and return at once.
+///
+/// For work that has to run while the caller carries on: an upload's request
+/// is sent while its body is still being written.
+#[cfg(feature = "webdav")]
+pub(crate) fn spawn<F>(future: F) -> tokio::task::JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    RUNTIME.handle().spawn(future)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

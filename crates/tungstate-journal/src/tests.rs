@@ -2722,3 +2722,47 @@ mod connection_lifecycle {
         assert_eq!(journal.connection_by_id(id).unwrap().scheme, Scheme::Smb);
     }
 }
+
+#[test]
+fn a_webdav_connection_is_a_url_and_says_when_it_is_in_the_clear() {
+    use crate::SettingsProblem as P;
+    assert_eq!(
+        settings(Scheme::WebDav, None, "", &[]).problems(),
+        [P::NeedsEndpoint]
+    );
+    assert_eq!(
+        settings(Scheme::WebDav, None, "", &[("endpoint", "nas.local:5006")]).problems(),
+        [P::BadEndpoint("nas.local:5006".into())]
+    );
+    // No host and no root needed: the endpoint is the place, and its root is
+    // the folder the URL names.
+    let https = settings(
+        Scheme::WebDav,
+        None,
+        "",
+        &[("endpoint", "https://nas.local:5006/remote.php/dav")],
+    );
+    assert_eq!(https.problems(), [] as [connections::SettingsProblem; 0]);
+    assert!(https.in_the_clear().is_none());
+
+    let http = settings(
+        Scheme::WebDav,
+        None,
+        "media",
+        &[("endpoint", "http://nas.local:5005")],
+    );
+    assert!(
+        http.in_the_clear()
+            .is_some_and(|note| note.contains("your password and your files"))
+    );
+    // A bucket means nothing here; an endpoint does.
+    let stray = settings(
+        Scheme::WebDav,
+        None,
+        "",
+        &[("endpoint", "https://nas"), ("bucket", "b")],
+    );
+    assert_eq!(stray.problems(), [P::UnusedOption("bucket")]);
+    assert_eq!(Scheme::WebDav.as_str(), "webdav");
+    assert!(Scheme::WebDav.can_rename());
+}

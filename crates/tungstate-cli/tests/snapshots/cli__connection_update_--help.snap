@@ -35,7 +35,7 @@ Options:
           S3: the bucket's region. Needed for AWS unless the bucket is in us-east-1; other services are asked, and most accept any
 
       --endpoint <ENDPOINT>
-          S3: the service's address, for anything that is not AWS itself, as in `https://s3.eu-central-003.backblazeb2.com` or `http://nas.local:9000`
+          S3: the service's address, for anything that is not AWS itself, as in `https://s3.eu-central-003.backblazeb2.com` or `http://nas.local:9000`. WebDAV: the server's address, required, as in `https://nas.local:5006`
 
       --share <SHARE>
           SMB: the share, which the root then continues inside. `--share media --root backups` is the same as `--root media/backups`

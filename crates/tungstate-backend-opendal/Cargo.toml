@@ -7,7 +7,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [features]
-default = ["ftp", "s3", "smb"]
+default = ["ftp", "s3", "smb", "webdav"]
 # FTP is on by default because a release binary has to be able to reach a NAS.
 # It stays a feature so a smaller build is possible, and so `SchemeNotCompiled`
 # means something rather than being a placeholder. S3 is the same bargain.
@@ -15,7 +15,12 @@ ftp = ["opendal/services-ftp"]
 # SMB is not an OpenDAL service; it has a crate of its own, and this factory
 # is still the one place that turns a connection into a backend.
 smb = ["dep:tungstate-backend-smb"]
-s3 = ["opendal/services-s3", "dep:opendal-http-transport-reqwest", "dep:reqwest", "dep:rustls"]
+s3 = ["opendal/services-s3", "https"]
+# WebDAV uploads are our own streamed `PUT` (see `dav`), hence `reqwest/stream`.
+webdav = ["opendal/services-webdav", "https", "reqwest/stream"]
+# The HTTPS client S3 and WebDAV share, rustls on `ring`. Not a choice of its
+# own: the services above turn it on.
+https = ["dep:opendal-http-transport-reqwest", "dep:reqwest", "dep:rustls"]
 
 [dependencies]
 tungstate-backend = { path = "../tungstate-backend" }

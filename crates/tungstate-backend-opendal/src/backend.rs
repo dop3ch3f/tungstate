@@ -55,6 +55,9 @@ pub struct OpendalBackend {
     /// Whether a listing says all a `stat` would. See
     /// [`OpendalBackend::with_complete_listing`].
     complete_listing: bool,
+    /// Where uploads go when `OpenDAL`'s own writer cannot stream them.
+    #[cfg(feature = "webdav")]
+    uploads: Option<std::sync::Arc<crate::dav::Uploads>>,
 }
 
 /// How a backend answers "is the connection still there?".
@@ -99,7 +102,17 @@ impl OpendalBackend {
             endpoint,
             networked,
             complete_listing: false,
+            #[cfg(feature = "webdav")]
+            uploads: None,
         }
+    }
+
+    /// Send uploads through `uploads` rather than `OpenDAL`'s writer.
+    #[cfg(feature = "webdav")]
+    #[must_use]
+    pub(crate) fn with_uploads(mut self, uploads: crate::dav::Uploads) -> Self {
+        self.uploads = Some(std::sync::Arc::new(uploads));
+        self
     }
 
     /// Mark this service's listing as saying all a `stat` would, so a walk
@@ -362,6 +375,17 @@ impl Backend for OpendalBackend {
     fn create_write(&self, path: &Path) -> Result<Box<dyn WriteFinish>> {
         let operator = self.operator.clone();
         let owned = self.key(path)?;
+        #[cfg(feature = "webdav")]
+        if let Some(uploads) = &self.uploads {
+            // A `PUT` into a folder that is not there fails, and `OpenDAL`'s
+            // writer made it first, so this does too.
+            if let Some((parent, _)) = owned.rsplit_once('/') {
+                let folder = format!("{parent}/");
+                dispatch(async move { operator.create_dir(&folder).await })
+                    .map_err(|error| self.failure("create_dir", path, error))?;
+            }
+            return Ok(Box::new(uploads.put(&owned, path)));
+        }
         // Plain, despite `OpenDAL`'s FTP writer doing a temp-and-rename of its
         // own underneath: it streams to `build_tmp_path_of(path)` and renames
         // on close, and that helper is `get_basename(path)` plus a random

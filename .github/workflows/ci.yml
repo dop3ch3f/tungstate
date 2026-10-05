@@ -186,6 +186,40 @@ jobs:
         if: always()
         run: docker logs tungstate-s3
 
+  # WebDAV against rclone's server: uploads are our own streamed PUT and the
+  # rest is OpenDAL, so this proves the two agree on where a file lives.
+  webdav:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start a WebDAV server
+        run: |
+          docker run -d --name tungstate-webdav -p 8088:8080 \
+            rclone/rclone@sha256:3103526c506266a9ecdf064efe99bf3677d92ef6407af124d8c56b4f49cbaa51 \
+            serve webdav /data --addr :8080 --user tungstate --pass s3cret
+          for _ in $(seq 1 60); do
+            answered=$(curl -s -o /dev/null -w '%{http_code}' -u tungstate:s3cret \
+              -X PROPFIND -H 'Depth: 0' http://127.0.0.1:8088/ 2>&1) || true
+            [ "$answered" = "207" ] && { echo "webdav server is ready"; exit 0; }
+            sleep 1
+          done
+          echo "webdav server never came up; last answer: $answered" >&2
+          exit 1
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - run: cargo test --locked -p tungstate-cli --features webdav-integration --test webdav
+        env:
+          TUNGSTATE_WEBDAV_ENDPOINT: http://127.0.0.1:8088
+          TUNGSTATE_WEBDAV_USER: tungstate
+          TUNGSTATE_WEBDAV_PASSWORD: s3cret
+
+      - name: WebDAV server log
+        if: always()
+        run: docker logs tungstate-webdav
+
   # SMB reached directly, with nothing mounted, against Samba: the backend's
   # own suite and the drain and a sync through the binary.
   smb:

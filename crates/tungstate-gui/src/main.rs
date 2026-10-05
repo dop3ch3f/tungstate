@@ -1157,7 +1157,8 @@ impl From<Connection> for ConnectionView {
 }
 
 /// Where a connection points, in the words its kind uses: a bucket for S3, a
-/// share on a server for SMB, a folder on a server for FTP.
+/// share on a server for SMB, a folder on a server for FTP, a web address
+/// for `WebDAV`.
 fn place_of(connection: &Connection) -> String {
     let inside = |root: &str| {
         let root = root.trim().trim_matches(['/', '\\']);
@@ -1186,6 +1187,15 @@ fn place_of(connection: &Connection) -> String {
             format!("bucket {bucket}{at}{}", inside(&connection.root))
         }
         Scheme::Smb | Scheme::Ftp | Scheme::Ftps => format!("{host}{}", inside(&connection.root)),
+        // The URL without its scheme, as a person would say it.
+        Scheme::WebDav => {
+            let endpoint = connection
+                .options
+                .get(tungstate_journal::option::ENDPOINT)
+                .map_or("", String::as_str);
+            let bare = endpoint.split("://").nth(1).unwrap_or(endpoint);
+            format!("{}{}", bare.trim_end_matches('/'), inside(&connection.root))
+        }
     }
 }
 

@@ -1,8 +1,8 @@
 // The kinds of place a connection can be, in the order a person choosing one
 // should see them, with the words each is described by. The engine's
-// `Scheme::ALL` is the same five.
+// `Scheme::ALL` is the same six.
 
-export type Kind = "fs" | "smb" | "ftps" | "ftp" | "s3";
+export type Kind = "fs" | "smb" | "webdav" | "ftps" | "ftp" | "s3";
 
 export interface KindInfo {
   id: Kind;
@@ -16,6 +16,7 @@ export interface KindInfo {
 
 export const KINDS: KindInfo[] = [
   { id: "smb", label: "A shared folder", tag: "SMB", line: "Windows file sharing. Most NAS boxes and other computers offer it, and nothing needs mounting." },
+  { id: "webdav", label: "Web folders", tag: "WebDAV", line: "Files over the web. Most NAS boxes offer it, as do Nextcloud and many hosting services." },
   { id: "fs", label: "A folder this Mac can reach", tag: "Folder", line: "A drive or a share that is already mounted, reached like any folder." },
   { id: "s3", label: "S3 storage", tag: "S3", line: "A bucket on AWS, Backblaze B2, Cloudflare R2, MinIO, or a NAS's own object store." },
   { id: "ftps", label: "FTP over TLS", tag: "FTPS", line: "FTP with the password and the files encrypted." },

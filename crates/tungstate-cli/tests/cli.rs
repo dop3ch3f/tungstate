@@ -160,7 +160,9 @@ fn connection_update_refuses_a_name_and_a_scheme_it_does_not_know() {
         .args(["connection", "update", "nas", "--scheme", "telepathy"])
         .assert()
         .code(2)
-        .stderr(predicates::str::contains("must be fs, smb, ftps, ftp, s3"));
+        .stderr(predicates::str::contains(
+            "must be fs, smb, webdav, ftps, ftp, s3",
+        ));
 }
 
 #[test]

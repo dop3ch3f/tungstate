@@ -22,6 +22,8 @@
 //! because this remains the one place that turns a connection into a backend.
 
 mod backend;
+#[cfg(feature = "webdav")]
+mod dav;
 mod keys;
 mod runtime;
 
@@ -103,6 +105,13 @@ pub enum OpenError {
         name: String,
     },
 
+    /// A `WebDAV` connection was recorded without a server to reach.
+    #[error("connection `{name}` has no endpoint; set one with --endpoint")]
+    MissingEndpoint {
+        /// The connection that is missing one.
+        name: String,
+    },
+
     /// The connection names a scheme this build has no service for.
     #[error("connection `{name}` speaks `{scheme}`, which this build cannot open")]
     SchemeNotCompiled {
@@ -152,6 +161,10 @@ pub fn open_connection(
     #[cfg(feature = "smb")]
     if connection.scheme == Scheme::Smb {
         return smb_backend(connection, link_end, secrets);
+    }
+    #[cfg(feature = "webdav")]
+    if connection.scheme == Scheme::WebDav {
+        return webdav_backend(connection, link_end, secrets);
     }
     let (operator, anchor) = operator_for(connection, secrets)?;
     let prefix = remote_key(link_end).map_err(|source| OpenError::EndPath {
@@ -274,6 +287,8 @@ fn classify(connection: &Connection, error: tungstate_backend::BackendError) -> 
 
     let refused = match connection.scheme {
         Scheme::S3 => S3_BAD_KEY.iter().any(|code| rendered.contains(code)),
+        // HTTP's own "who are you?"; 403 is about permission, not the login.
+        Scheme::WebDav => rendered.contains("status: 401"),
         _ => rendered.contains(FTP_NOT_LOGGED_IN),
     };
     if refused {
@@ -301,9 +316,10 @@ fn operator_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
         #[cfg(not(feature = "s3"))]
         Scheme::S3 => not_compiled(connection, secrets),
 
-        // Not an OpenDAL service: `open` hands SMB to its own crate before
-        // asking for an operator, so arriving here is a caller's mistake.
-        Scheme::Smb => not_compiled(connection, secrets),
+        // `open` builds these itself before asking for an operator: SMB is
+        // not an OpenDAL service, and WebDAV needs its own uploads attached.
+        // Arriving here means this build left them out.
+        Scheme::Smb | Scheme::WebDav => not_compiled(connection, secrets),
     }
 }
 
@@ -344,25 +360,113 @@ fn not_compiled(connection: &Connection, _secrets: &dyn SecretStore) -> Result<(
     })
 }
 
-/// Give `OpenDAL` an HTTPS client, once per process.
+/// Give `OpenDAL` an HTTPS client, once per process, and keep it for the
+/// requests that are ours rather than `OpenDAL`'s.
 ///
 /// Its own before-`main` hook for this is behind default features the
 /// workspace turns off, and would bring a second cryptography library. Both
 /// installs are first-wins, so later calls, and a provider some other part of
-/// the app installed first, are fine.
-#[cfg(feature = "s3")]
-fn install_https() {
-    static ONCE: std::sync::Once = std::sync::Once::new();
-    ONCE.call_once(|| {
-        let _ = rustls::crypto::ring::default_provider().install_default();
-        match reqwest::Client::builder().build() {
-            Ok(client) => opendal::HttpTransporter::install_default(
-                opendal_http_transport_reqwest::ReqwestTransport::new(client),
-            ),
-            // Left uninstalled, the first request says so in its own error.
-            Err(error) => tracing::warn!(%error, "could not build an HTTPS client"),
-        }
-    });
+/// the app installed first, are fine. `None` if no client could be built, in
+/// which case the first request says so in its own error.
+#[cfg(feature = "https")]
+fn https_client() -> Option<&'static reqwest::Client> {
+    static CLIENT: std::sync::OnceLock<Option<reqwest::Client>> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            let _ = rustls::crypto::ring::default_provider().install_default();
+            match reqwest::Client::builder().build() {
+                Ok(client) => {
+                    // A clone shares one connection pool: `Client` is an `Arc`.
+                    opendal::HttpTransporter::install_default(
+                        opendal_http_transport_reqwest::ReqwestTransport::new(client.clone()),
+                    );
+                    Some(client)
+                }
+                Err(error) => {
+                    tracing::warn!(%error, "could not build an HTTPS client");
+                    None
+                }
+            }
+        })
+        .as_ref()
+}
+
+/// A `WebDAV` server, with uploads streamed by [`dav`] and everything else
+/// through `OpenDAL`.
+#[cfg(feature = "webdav")]
+fn webdav_backend(
+    connection: &Connection,
+    link_end: &std::path::Path,
+    secrets: &dyn SecretStore,
+) -> Result<Box<dyn Backend>> {
+    let Some(endpoint) = connection
+        .options
+        .get(tungstate_journal::option::ENDPOINT)
+        .map(|value| value.trim().trim_end_matches('/'))
+        .filter(|value| !value.is_empty())
+    else {
+        return Err(OpenError::MissingEndpoint {
+            name: connection.name.clone(),
+        });
+    };
+    let Some(client) = https_client() else {
+        return Err(OpenError::SchemeNotCompiled {
+            name: connection.name.clone(),
+            scheme: connection.scheme.as_str(),
+        });
+    };
+    let password = secret_for(connection, secrets)?;
+
+    // Rooted at the server's `/`, with the connection's folder carried in
+    // every key instead. A `PUT` into a folder that is not there fails, so an
+    // upload makes its parent first, and with the folder in the key that
+    // includes the connection's own folder the first time it is used.
+    let mut builder = opendal::services::Webdav::default()
+        .endpoint(endpoint)
+        .root("/");
+    if let Some(user) = connection.username.as_deref() {
+        builder = builder.username(user);
+    }
+    if let Some(secret) = &password {
+        builder = builder.password(secret);
+    }
+    let operator = Operator::new(builder).map_err(|source| OpenError::Opendal {
+        name: connection.name.clone(),
+        source,
+    })?;
+    let inside = remote_key(link_end).map_err(|source| OpenError::EndPath {
+        path: link_end.to_path_buf(),
+        source,
+    })?;
+    let prefix = connection
+        .root
+        .split(['/', '\\'])
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .chain((!inside.is_empty()).then_some(inside.as_str()))
+        .collect::<Vec<_>>()
+        .join("/");
+    let uploads = dav::Uploads::new(
+        client.clone(),
+        endpoint,
+        "/",
+        connection.username.clone(),
+        password,
+        connection.name.clone(),
+    );
+    // Its listing and its `stat` are the same `PROPFIND`, parsed by the same
+    // function, so a listing says all a `stat` would.
+    Ok(Box::new(
+        OpendalBackend::new(
+            operator,
+            prefix,
+            Anchor::Store,
+            connection.name.clone(),
+            true,
+        )
+        .with_complete_listing(true)
+        .with_uploads(uploads),
+    ))
 }
 
 /// An operator over an S3 bucket, or anything that speaks S3.
@@ -375,7 +479,7 @@ fn install_https() {
 fn s3_operator(connection: &Connection, secrets: &dyn SecretStore) -> Result<(Operator, Anchor)> {
     use tungstate_journal::option;
 
-    install_https();
+    let _ = https_client();
 
     let setting = |key: &str| {
         connection
@@ -469,7 +573,7 @@ fn ftp_operator(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
 /// `None` is not an error: an anonymous FTP server is a real thing, and a
 /// rejected login is something the server reports rather than something to
 /// guess at here.
-#[cfg(any(feature = "ftp", feature = "s3", feature = "smb"))]
+#[cfg(any(feature = "ftp", feature = "s3", feature = "smb", feature = "webdav"))]
 fn secret_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<Option<String>> {
     secrets
         .get(&tungstate_secret::connection_key(&connection.name))
