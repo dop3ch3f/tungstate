@@ -69,7 +69,10 @@ mod tests {
     fn ordinary_paths_become_their_parts() {
         assert_eq!(parts(Path::new("a/b.mp4")).unwrap(), ["a", "b.mp4"]);
         assert_eq!(parts(Path::new("./a")).unwrap(), ["a"]);
-        assert!(parts(Path::new("")).unwrap().is_empty());
+        assert_eq!(
+            parts(Path::new("")).unwrap(),
+            [] as [std::string::String; 0]
+        );
         assert_eq!(
             join(&parts(Path::new("2024/trip/a.jpg")).unwrap()),
             r"2024\trip\a.jpg"

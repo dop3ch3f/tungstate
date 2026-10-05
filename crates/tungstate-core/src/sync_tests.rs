@@ -262,7 +262,7 @@ fn push_leaves_a_non_anchor_file_alone_and_says_why() {
 
     let plan = world.run(&push);
 
-    assert!(copies(&plan).is_empty());
+    assert_eq!(copies(&plan), [] as [(i64, i64, std::string::String); 0]);
     assert!(
         plan.left_alone
             .iter()
@@ -281,7 +281,7 @@ fn a_copy_that_matches_the_anchor_is_remembered_not_reported() {
     let plan = world.run(&mode(Direction::Push, Some(1)));
 
     assert!(plan.left_alone.is_empty(), "{:#?}", plan.left_alone);
-    assert!(copies(&plan).is_empty());
+    assert_eq!(copies(&plan), [] as [(i64, i64, std::string::String); 0]);
 }
 
 #[test]
@@ -470,7 +470,7 @@ fn a_file_still_being_written_is_left_until_it_settles() {
 
     let plan = world.run(&all);
 
-    assert!(plan.ops.is_empty());
+    assert_eq!(plan.ops, [] as [crate::sync::SyncOp; 0]);
     assert!(matches!(
         plan.left_alone[0].why,
         Why::TooRecent { member: 1 }
@@ -571,7 +571,10 @@ fn without_exact_a_hand_deletion_is_copied_back() {
     let plan = world.run(&all);
 
     assert_eq!(copies(&plan), [(2, 1, "a.mp4".into())]);
-    assert!(removals(&plan).is_empty());
+    assert_eq!(
+        removals(&plan),
+        [] as [(i64, std::string::String, crate::sync::Removed); 0]
+    );
 }
 
 #[test]
@@ -583,7 +586,10 @@ fn under_exact_an_edit_still_beats_a_deletion() {
     let plan = world.run(&all);
 
     assert_eq!(copies(&plan), [(2, 1, "a.mp4".into())]);
-    assert!(removals(&plan).is_empty());
+    assert_eq!(
+        removals(&plan),
+        [] as [(i64, std::string::String, crate::sync::Removed); 0]
+    );
 }
 
 #[test]
@@ -898,7 +904,7 @@ fn a_forget_that_cannot_set_aside_everywhere_does_nothing() {
 
     let plan = world.run_asked(&all, &asked);
 
-    assert!(plan.ops.is_empty());
+    assert_eq!(plan.ops, [] as [crate::sync::SyncOp; 0]);
     assert!(
         plan.left_alone
             .iter()
@@ -928,7 +934,10 @@ fn a_tidy_is_carried_as_a_rename_and_nothing_is_copied() {
         let plan = world.run(&mode);
 
         assert!(copies(&plan).is_empty(), "{plan:#?}");
-        assert!(removals(&plan).is_empty());
+        assert_eq!(
+            removals(&plan),
+            [] as [(i64, std::string::String, crate::sync::Removed); 0]
+        );
         assert_eq!(world.holds(2, "2026/a.mp4"), Some(0));
         assert_eq!(world.holds(2, "a.mp4"), None);
         assert_eq!(plan.blast[&2].renaming, 1);

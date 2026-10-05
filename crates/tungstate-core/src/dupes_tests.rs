@@ -241,7 +241,7 @@ fn files_only_skips_the_folder_grouping() {
 
     let found = dupes::find(&snapshot, &mut digest, &wants).expect("the pass runs");
 
-    assert!(found.folders.is_empty());
+    assert_eq!(found.folders, [] as [crate::dupes::FolderGroup; 0]);
     assert_eq!(found.groups.len(), 1);
 }
 
@@ -606,7 +606,7 @@ fn a_group_nobody_ticked_produces_nothing() {
 
     let dealings = dupes::decide(&bundles, &BTreeSet::new()).expect("allowed");
 
-    assert!(dealings.is_empty());
+    assert_eq!(dealings, [] as [crate::dupes::Dealing; 0]);
 }
 
 #[test]

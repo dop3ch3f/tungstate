@@ -372,7 +372,10 @@ fn inverting_ignores_what_never_happened() {
         )
         .expect("finish");
 
-    assert!(invert(&journal.ops_for_plan(plan).expect("ops")).is_empty());
+    assert_eq!(
+        invert(&journal.ops_for_plan(plan).expect("ops")),
+        [] as [tungstate_core::Op; 0]
+    );
 }
 
 /// Record one committed op under `plan`.
@@ -1055,7 +1058,10 @@ fn recovery_on_a_connection_leaves_another_places_work_alone() {
     let resolved =
         resolve_interrupted_on(&fixture.backend(), &fixture.journal, None, &root).expect("ok");
 
-    assert!(resolved.is_empty());
+    assert_eq!(
+        resolved,
+        [] as [(std::string::String, recover::Resolution); 0]
+    );
     assert_eq!(fixture.journal.incomplete().unwrap().len(), 1);
 }
 
@@ -1146,7 +1152,7 @@ impl tungstate_backend::Backend for Busy {
         use std::sync::atomic::Ordering;
         let refuse = self
             .refusals
-            .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
+            .try_update(Ordering::Relaxed, Ordering::Relaxed, |left| {
                 left.checked_sub(1)
             })
             .is_ok();

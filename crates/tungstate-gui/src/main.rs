@@ -3266,7 +3266,7 @@ mod tests {
     #[test]
     fn one_direction_has_nothing_to_overlap_with() {
         let r = request(vec![leg("/tmp/left", "/tmp/right")]);
-        assert!(overlapping_names(&r.legs).is_empty());
+        assert_eq!(overlapping_names(&r.legs), [] as [std::string::String; 0]);
     }
 
     // ---------------------------------------------------------------------

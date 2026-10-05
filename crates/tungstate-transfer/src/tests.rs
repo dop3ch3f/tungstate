@@ -2658,7 +2658,10 @@ fn a_destination_with_nothing_set_aside_reports_nothing() {
     rig.write_source("holiday.mp4", b"mine");
     rig.run().unwrap();
 
-    assert!(crate::quarantined(&rig.destination).unwrap().is_empty());
+    assert_eq!(
+        crate::quarantined(&rig.destination).unwrap(),
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 #[test]

@@ -122,7 +122,7 @@ mod tests {
     #[test]
     fn a_two_node_cycle_is_reported_whole() {
         let sorted = graph(2, &[(0, 1), (1, 0)]).sort();
-        assert!(sorted.order.is_empty());
+        assert_eq!(sorted.order, [] as [usize; 0]);
         assert_eq!(sorted.cyclic, BTreeSet::from([0, 1]));
     }
 

@@ -905,11 +905,11 @@ mod tests {
             .expect("past");
         assert_eq!(past.len(), 1, "{past:?}");
         assert_eq!(past[0].files, 1);
-        assert!(
+        assert_eq!(
             journal
                 .past_plans(tungstate_journal::Purpose::Tidy, 10)
-                .expect("past")
-                .is_empty()
+                .expect("past"),
+            [] as [tungstate_journal::PastPlan; 0]
         );
     }
 

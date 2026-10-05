@@ -515,7 +515,7 @@ fn a_from_chain_falls_through_absent_sources() {
     let date = vars.iter().find(|v| v.name == "date").unwrap();
     assert_eq!(date.source.as_deref(), Some("exif.DateTimeOriginal"));
     assert_eq!(date.tier, Some(Tier::Meta));
-    assert!(date.skipped.is_empty());
+    assert_eq!(date.skipped, [] as [std::string::String; 0]);
     assert!(destination.starts_with("2023/12/"), "{destination}");
 
     let mut without = with_exif.clone();

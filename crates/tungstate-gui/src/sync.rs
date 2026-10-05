@@ -1045,7 +1045,7 @@ mod tests {
             serde_json::to_value(&refused).unwrap()["kind"],
             "delete_needs_exact"
         );
-        assert!(journal.syncs().unwrap().is_empty());
+        assert_eq!(journal.syncs().unwrap(), [] as [tungstate_journal::Sync; 0]);
     }
 
     #[test]

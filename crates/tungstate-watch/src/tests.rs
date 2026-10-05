@@ -77,7 +77,10 @@ fn a_folder_whose_moment_has_come_is_handed_over_once() {
     schedule.stirred("/two", start, Duration::from_secs(10));
 
     assert_eq!(schedule.ready(start + Duration::from_secs(2)), ["/one"]);
-    assert!(schedule.ready(start + Duration::from_secs(2)).is_empty());
+    assert_eq!(
+        schedule.ready(start + Duration::from_secs(2)),
+        [] as [std::string::String; 0]
+    );
     assert!(!schedule.is_empty(), "the other one is still waiting");
 }
 

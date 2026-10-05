@@ -459,7 +459,10 @@ fn a_v3_journal_upgrades_to_v4_with_every_row_intact() {
     assert_eq!(found.len(), 1);
 
     // Connections are now available on the upgraded file.
-    assert!(journal.connections().unwrap().is_empty());
+    assert_eq!(
+        journal.connections().unwrap(),
+        [] as [connections::Connection; 0]
+    );
 }
 
 #[test]
@@ -692,7 +695,10 @@ fn the_links_blocking_a_delete_can_be_named() {
 fn an_unused_connection_has_no_links_to_name() {
     let journal = Journal::open_in_memory().unwrap();
     let id = journal.create_connection(&a_connection()).unwrap();
-    assert!(journal.links_using(id).unwrap().is_empty());
+    assert_eq!(
+        journal.links_using(id).unwrap(),
+        [] as [std::string::String; 0]
+    );
 }
 
 #[test]
@@ -701,7 +707,10 @@ fn an_unreferenced_connection_can_be_deleted() {
     journal.create_connection(&a_connection()).unwrap();
 
     journal.delete_connection("nas").unwrap();
-    assert!(journal.connections().unwrap().is_empty());
+    assert_eq!(
+        journal.connections().unwrap(),
+        [] as [connections::Connection; 0]
+    );
 }
 
 #[test]
@@ -836,7 +845,10 @@ fn a_selection_round_trips_and_replaces_rather_than_accumulates() {
     assert_eq!(journal.files_for(id).unwrap(), vec![PathBuf::from("d.mp4")]);
 
     journal.set_files(id, &[]).unwrap();
-    assert!(journal.files_for(id).unwrap().is_empty());
+    assert_eq!(
+        journal.files_for(id).unwrap(),
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 #[test]
@@ -854,7 +866,10 @@ fn a_selection_belongs_to_its_own_link() {
         .set_files(mine, &[PathBuf::from("mine.mp4")])
         .unwrap();
     assert_eq!(journal.files_for(mine).unwrap().len(), 1);
-    assert!(journal.files_for(theirs).unwrap().is_empty());
+    assert_eq!(
+        journal.files_for(theirs).unwrap(),
+        [] as [std::path::PathBuf; 0]
+    );
 }
 
 #[test]
@@ -962,26 +977,22 @@ fn each_kind_of_connection_says_what_it_is_missing() {
     assert_eq!(guest.problems(), [P::NeedsUser]);
 
     // Complete ones are worth saving.
-    assert!(
-        settings(Scheme::Fs, None, "/Volumes/nas", &[])
-            .problems()
-            .is_empty()
+    assert_eq!(
+        settings(Scheme::Fs, None, "/Volumes/nas", &[]).problems(),
+        [] as [connections::SettingsProblem; 0]
     );
-    assert!(
-        settings(Scheme::Smb, Some("nas"), "media/backups", &[])
-            .problems()
-            .is_empty()
+    assert_eq!(
+        settings(Scheme::Smb, Some("nas"), "media/backups", &[]).problems(),
+        [] as [connections::SettingsProblem; 0]
     );
-    assert!(
-        settings(Scheme::Smb, Some("nas"), "media\\backups", &[])
-            .problems()
-            .is_empty()
+    assert_eq!(
+        settings(Scheme::Smb, Some("nas"), "media\\backups", &[]).problems(),
+        [] as [connections::SettingsProblem; 0]
     );
     // S3 needs no host and no root: the bucket is the place.
-    assert!(
-        settings(Scheme::S3, None, "", &[("bucket", "photos")])
-            .problems()
-            .is_empty()
+    assert_eq!(
+        settings(Scheme::S3, None, "", &[("bucket", "photos")]).problems(),
+        [] as [connections::SettingsProblem; 0]
     );
 }
 
@@ -1019,7 +1030,7 @@ fn settings_that_would_be_ignored_or_misread_are_refused() {
 
     // A key nothing here reads may be a newer build's, and is left alone.
     let unknown = settings(Scheme::Ftp, Some("nas"), "/v", &[("passive", "true")]);
-    assert!(unknown.problems().is_empty());
+    assert_eq!(unknown.problems(), [] as [connections::SettingsProblem; 0]);
 }
 
 #[test]
@@ -1509,7 +1520,10 @@ fn a_reset_archives_first_and_the_archive_comes_back() {
 
     let name = journal.reset().unwrap();
     assert!(journal.links().unwrap().is_empty(), "the slate is clean");
-    assert!(journal.connections().unwrap().is_empty());
+    assert_eq!(
+        journal.connections().unwrap(),
+        [] as [connections::Connection; 0]
+    );
 
     let archives = journal.archives().unwrap();
     assert_eq!(archives.len(), 1);
@@ -1586,7 +1600,7 @@ fn an_archive_can_be_forgotten_for_good() {
     let name = journal.reset().unwrap();
 
     journal.forget_archive(&name).unwrap();
-    assert!(journal.archives().unwrap().is_empty());
+    assert_eq!(journal.archives().unwrap(), [] as [storage::Archive; 0]);
     assert!(journal.forget_archive(&name).is_err(), "and it is gone");
 }
 
@@ -1860,7 +1874,7 @@ fn forgetting_a_folder_keeps_what_was_done_to_it() {
     let plan = with_plan(&journal);
 
     journal.remove_folder("/a/Downloads").expect("forget");
-    assert!(journal.folders().expect("list").is_empty());
+    assert_eq!(journal.folders().expect("list"), [] as [folders::Folder; 0]);
     assert_eq!(journal.ops_for_plan(plan).expect("ops").len(), 2);
     assert!(journal.plan_by_id(plan).is_ok());
 }
@@ -2378,11 +2392,11 @@ fn a_sync_made_again_under_the_same_name_does_not_inherit_its_runs() {
 
     let new = a_sync(&journal, None);
 
-    assert!(
+    assert_eq!(
         journal
             .sync_runs(&journal.sync_by_id(new).unwrap(), 10)
-            .unwrap()
-            .is_empty()
+            .unwrap(),
+        [] as [plans::AppliedPlan; 0]
     );
 }
 
@@ -2629,7 +2643,10 @@ mod connection_lifecycle {
         let journal = Journal::open_in_memory().unwrap();
         nas(&journal, "nas");
         assert_eq!(journal.remove_connection("nas").unwrap(), Removal::Deleted);
-        assert!(journal.connections().unwrap().is_empty());
+        assert_eq!(
+            journal.connections().unwrap(),
+            [] as [connections::Connection; 0]
+        );
     }
 
     #[test]
@@ -2694,7 +2711,10 @@ mod connection_lifecycle {
 
         assert_eq!(journal.remove_connection("nas").unwrap(), Removal::Retired);
         // Out of every list, and its name free for a new one.
-        assert!(journal.connections().unwrap().is_empty());
+        assert_eq!(
+            journal.connections().unwrap(),
+            [] as [connections::Connection; 0]
+        );
         assert!(journal.connection_by_name("nas").is_err());
         let again = nas(&journal, "nas");
         assert_ne!(again, id);

@@ -314,7 +314,7 @@ fn a_directory_or_a_link_is_described_but_never_read() {
     let attrs = gather(&counting, Path::new("sub"), Tier::Whole).unwrap();
     assert!(attrs.is_dir);
     assert_eq!(counting.opens(), 0);
-    assert!(counting.prefixes().is_empty());
+    assert_eq!(counting.prefixes(), [] as [u64; 0]);
 }
 
 #[test]

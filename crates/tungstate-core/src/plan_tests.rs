@@ -115,7 +115,7 @@ fn a_file_already_in_place_is_left_alone() {
 fn a_file_no_rule_wants_is_named_with_its_reason() {
     let snap = folder(&["mystery.bin"]);
     let plan = by_ext().plan(&snap);
-    assert!(plan.ops.is_empty());
+    assert_eq!(plan.ops, [] as [crate::plan::Op; 0]);
     assert_eq!(reason_for(&plan, "mystery.bin"), Reason::Unmatched);
 }
 
@@ -742,7 +742,7 @@ fn a_policy_that_never_settles_says_so_rather_than_churning() {
 fn an_ordinary_policy_settles() {
     let plan = by_ext().plan(&folder(&["a.txt", "b.mp4", "old/c.txt"]));
     assert!(plan.settles);
-    assert!(plan.unsettled.is_empty());
+    assert_eq!(plan.unsettled, [] as [std::string::String; 0]);
 }
 
 // --- the starter layouts --------------------------------------------------
