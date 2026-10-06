@@ -115,6 +115,12 @@ const KEEP = [
       This is over a network, so files were matched on samples rather than read
       in full. Anything you clear is compared byte for byte first.
     </Notice>
+    <Notice v-if="found.online_only">
+      {{ found.online_only }} {{ found.online_only === 1 ? "file is" : "files are" }} kept online only by
+      the drive's app, so {{ found.online_only === 1 ? "it was" : "they were" }} left out: comparing
+      {{ found.online_only === 1 ? "it" : "them" }} would download {{ found.online_only === 1 ? "it" : "them" }}.
+      Make them available offline in the app to include them.
+    </Notice>
     <Notice tone="bad" v-if="d.problem.value">{{ d.problem.value }}</Notice>
 
     <div class="none" v-if="!found.rows.length">

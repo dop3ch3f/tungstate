@@ -219,7 +219,8 @@ pub fn resemble(
 
     for file in &snapshot.entries {
         let path = file.relative_path();
-        if file.is_dir || file.is_symlink || file.size == 0 {
+        // A cloud placeholder would be downloaded to be decoded.
+        if file.is_dir || file.is_symlink || file.online_only || file.size == 0 {
             continue;
         }
         if snapshot::is_reserved(&path) || wants.skip.contains(&path) {

@@ -159,6 +159,10 @@ pub struct PreviewView {
     /// What a tidy here copies, where the storage cannot rename and every
     /// move is a copy and a delete. `None` where moves are renames.
     pub copies: Option<CopyCost>,
+    /// Cloud placeholders whose kind or EXIF was not read, because reading
+    /// downloads them. Counted only when the rules need those, since a rule
+    /// on names and dates files a placeholder like any other file.
+    pub online_only: usize,
 }
 
 /// What moving by copy will cost, said before the button.
@@ -246,6 +250,11 @@ pub fn preview(spot: &Spot, journal: &Journal) -> Result<PreviewView, String> {
         longest_wait: plan.longest_wait(),
         tidy: plan.ops.is_empty(),
         undoable,
+        online_only: if policy.required_tier() > tungstate_attrs::Tier::Stat {
+            before.online_only()
+        } else {
+            0
+        },
         copies: (!spot.backend.capabilities().atomic_rename && plan.blast.bytes > 0).then(|| {
             CopyCost {
                 bytes: plan.blast.bytes,

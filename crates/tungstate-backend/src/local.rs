@@ -215,6 +215,7 @@ impl Backend for LocalBackend {
             is_symlink: md.file_type().is_symlink(),
             modified: md.modified().ok(),
             identity: identity_of(&md),
+            online_only: online_only(&md),
         })
     }
 
@@ -340,6 +341,35 @@ impl WriteFinish for LocalWrite {
         // and a power cut after the journal commit would leave a deleted
         // original and an empty destination.
         self.file.sync_all().map_err(io_at(&self.path))
+    }
+}
+
+/// Whether a cloud drive's app keeps this file's bytes elsewhere.
+///
+/// Read off the metadata the system already returned, so it costs nothing.
+/// macOS marks a file-provider placeholder `SF_DATALESS`; Windows marks a
+/// cloud placeholder "recall on data access", or "recall on open", or as
+/// offline. Linux has no such thing.
+#[allow(clippy::missing_const_for_fn)] // const on one platform, not on others
+fn online_only(md: &std::fs::Metadata) -> bool {
+    #[cfg(target_os = "macos")]
+    {
+        use std::os::macos::fs::MetadataExt as _;
+        const SF_DATALESS: u32 = 0x4000_0000;
+        md.st_flags() & SF_DATALESS != 0
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt as _;
+        const OFFLINE: u32 = 0x0000_1000;
+        const RECALL_ON_OPEN: u32 = 0x0004_0000;
+        const RECALL_ON_DATA_ACCESS: u32 = 0x0040_0000;
+        md.file_attributes() & (OFFLINE | RECALL_ON_OPEN | RECALL_ON_DATA_ACCESS) != 0
+    }
+    #[cfg(not(any(target_os = "macos", windows)))]
+    {
+        let _ = md;
+        false
     }
 }
 

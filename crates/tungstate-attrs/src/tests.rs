@@ -545,3 +545,106 @@ fn a_listing_reads_nothing_and_deepening_reads_only_what_is_named() {
     assert_eq!(mime("a.jpg"), None);
     assert_eq!(mime("b.jpg").as_deref(), Some("image/jpeg"));
 }
+
+/// A local folder where one file is a cloud drive's placeholder, counting
+/// what is read.
+struct WithPlaceholder {
+    inner: Counting,
+    placeholder: &'static str,
+}
+
+impl WithPlaceholder {
+    fn mark(&self, mut meta: Meta, path: &Path) -> Meta {
+        meta.online_only = path == Path::new(self.placeholder);
+        meta
+    }
+}
+
+impl Backend for WithPlaceholder {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.inner.capabilities()
+    }
+    fn root_token(&self) -> BackendResult<RootToken> {
+        self.inner.root_token()
+    }
+    fn stat(&self, path: &Path) -> BackendResult<Meta> {
+        self.inner.stat(path).map(|meta| self.mark(meta, path))
+    }
+    fn read_dir(&self, path: &Path) -> BackendResult<Vec<Entry>> {
+        Ok(self
+            .inner
+            .read_dir(path)?
+            .into_iter()
+            .map(|entry| Entry {
+                meta: self.mark(entry.meta, &entry.path),
+                path: entry.path,
+            })
+            .collect())
+    }
+    fn open_read(&self, path: &Path) -> BackendResult<Box<dyn Read + Send>> {
+        self.inner.open_read(path)
+    }
+    fn read_prefix(&self, path: &Path, len: u64) -> BackendResult<Vec<u8>> {
+        self.inner.read_prefix(path, len)
+    }
+    fn create_write(&self, path: &Path) -> BackendResult<Box<dyn WriteFinish>> {
+        self.inner.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> BackendResult<()> {
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> BackendResult<()> {
+        self.inner.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> BackendResult<()> {
+        self.inner.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> BackendResult<()> {
+        self.inner.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_cloud_placeholder_is_never_read_to_learn_its_kind() {
+    // Reading 64 KiB of a placeholder to sniff it downloads the whole file.
+    let dir = dir();
+    std::fs::write(
+        dir.path().join("here.jpg"),
+        jpeg_with_exif_date("2021:06:01 10:00:00"),
+    )
+    .unwrap();
+    std::fs::write(
+        dir.path().join("cloud.jpg"),
+        jpeg_with_exif_date("2022:06:01 10:00:00"),
+    )
+    .unwrap();
+    let backend = WithPlaceholder {
+        inner: Counting::new(dir.path()),
+        placeholder: "cloud.jpg",
+    };
+    let probe = policy(tungstate_core::learn::PROBE);
+    let snapshot = survey_at(&backend, &probe, Tier::Meta).unwrap();
+
+    assert_eq!(
+        backend.inner.prefixes(),
+        vec![Tier::META_BYTES],
+        "only here.jpg was read"
+    );
+    let cloud = snapshot
+        .entries
+        .iter()
+        .find(|e| e.relative_path() == "cloud.jpg")
+        .unwrap();
+    assert!(cloud.online_only);
+    assert_eq!(cloud.mime, None, "its kind is unknown rather than guessed");
+}
+
+#[test]
+fn an_ordinary_local_file_is_not_a_placeholder() {
+    let dir = dir();
+    std::fs::write(dir.path().join("a.txt"), b"here").unwrap();
+    let meta = LocalBackend::new(dir.path().to_path_buf())
+        .stat(Path::new("a.txt"))
+        .unwrap();
+    assert!(!meta.online_only);
+}

@@ -14,6 +14,7 @@
 #![allow(clippy::needless_pass_by_value)]
 
 mod bridge;
+mod clouds;
 mod dupes;
 mod following;
 mod sync;
@@ -1668,6 +1669,9 @@ struct Listing {
 struct Place {
     label: String,
     path: String,
+    /// A cloud drive's folder, which the picker lists under its own heading
+    /// and whose online-only files are never read just to look.
+    cloud: bool,
 }
 
 /// Where the two panes were last pointed.
@@ -1748,6 +1752,7 @@ fn places(state: State<'_, App>) -> Vec<Place> {
                 places.push(Place {
                     label: label.to_string(),
                     path: path.display().to_string(),
+                    cloud: false,
                 });
             }
         }
@@ -1768,10 +1773,19 @@ fn places(state: State<'_, App>) -> Vec<Place> {
             .map(|e| Place {
                 label: e.file_name().to_string_lossy().into_owned(),
                 path: e.path().display().to_string(),
+                cloud: false,
             })
             .collect();
         mounted.sort_by(|a, b| a.label.cmp(&b.label));
         places.append(&mut mounted);
+    }
+    // Cloud drives whose app is installed: a drive without a browser sign-in.
+    if let Some(home) = directories_home() {
+        places.extend(clouds::cloud_folders(&home).into_iter().map(|c| Place {
+            label: c.label,
+            path: c.path.display().to_string(),
+            cloud: true,
+        }));
     }
     // Last, and on every platform. A connection is the route that works when
     // the mount does not — and it is the only entry Windows and Linux get,
@@ -1783,6 +1797,7 @@ fn places(state: State<'_, App>) -> Vec<Place> {
         places.extend(connections.into_iter().map(|connection| Place {
             path: format!("{}:", connection.name),
             label: connection.name,
+            cloud: false,
         }));
     }
     places

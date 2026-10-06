@@ -51,6 +51,16 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
+    /// How many entries are cloud drives' placeholders, whose bytes are not
+    /// on this machine and which nothing reads just to look.
+    #[must_use]
+    pub fn online_only(&self) -> usize {
+        self.entries
+            .iter()
+            .filter(|entry| entry.online_only)
+            .count()
+    }
+
     /// Build a snapshot, sorting the entries so a plan over one tree is the
     /// same however the filesystem happened to list it.
     #[must_use]

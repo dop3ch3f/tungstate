@@ -25,6 +25,8 @@ const emit = defineEmits<{ dismiss: []; chosen: [location: string] }>();
 const c = useConnections();
 const nav = useNav();
 const local = shallowRef<Place[]>([]);
+const here_ = computed(() => local.value.filter((p) => !p.cloud));
+const clouds = computed(() => local.value.filter((p) => p.cloud));
 const here = ref<string | null>(null);
 const folders_ = shallowRef<Entry[]>([]);
 const parent = ref<string | null>(null);
@@ -89,13 +91,26 @@ const inside = computed(() => {
       <nav class="pp-places">
         <h3>On this Mac</h3>
         <button
-          v-for="p in local"
+          v-for="p in here_"
           :key="p.path"
           class="pp-place"
           :class="{ 'pp-on': inside === p.path }"
           @click="open(p.path)"
         >{{ p.label }}</button>
         <button class="pp-place pp-more" @click="another()">Another folder…</button>
+
+        <!-- Kept by each drive's own app; files it keeps online only are
+             never downloaded just to be looked at. -->
+        <template v-if="clouds.length">
+          <h3>Cloud drives</h3>
+          <button
+            v-for="p in clouds"
+            :key="p.path"
+            class="pp-place"
+            :class="{ 'pp-on': inside === p.path }"
+            @click="open(p.path)"
+          >{{ p.label }}</button>
+        </template>
 
         <h3>Connections</h3>
         <button

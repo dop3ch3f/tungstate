@@ -373,7 +373,9 @@ fn sized(snapshot: &Snapshot) -> (Vec<Linked>, BTreeMap<u64, Vec<&Attributes>>) 
     let all: Vec<&Attributes> = snapshot
         .entries
         .iter()
-        .filter(|entry| !entry.is_dir && !entry.is_symlink && entry.size > 0)
+        // A cloud placeholder is left out: proving it a copy means reading
+        // it, and reading it downloads it.
+        .filter(|entry| !entry.is_dir && !entry.is_symlink && !entry.online_only && entry.size > 0)
         .filter(|entry| !snapshot::is_reserved(&entry.relative_path()))
         .collect();
 

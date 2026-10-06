@@ -5,7 +5,10 @@
 import { computed, ref, watch } from "vue";
 import { connections, folders } from "../../engine/commands";
 import type { Connection, ConnectionForm, Probe } from "../../engine/types";
-import { KINDS, S3_SERVICES, kindOf, serviceOf, splitShare, type Kind, type S3Service } from "../../lib/kinds";
+import {
+  KINDS, S3_SERVICES, SOON, WEBDAV_SERVICES, kindOf, serviceOf, splitShare, webdavServiceOf,
+  type Kind, type S3Service, type WebDavService,
+} from "../../lib/kinds";
 import { plural } from "../../lib/format";
 import Sheet from "../../ui/Sheet.vue";
 import Field from "../../ui/Field.vue";
@@ -35,6 +38,8 @@ const share = ref(splitShare(was?.root ?? "").share);
 const inside = ref(splitShare(was?.root ?? "").inside);
 const encrypt = ref(was?.options.encryption === "required");
 const service = ref<S3Service>(serviceOf(was?.options.endpoint));
+// WebDAV: which service, which fills in the address when it has a fixed one.
+const davService = ref<WebDavService>(webdavServiceOf(was?.options.endpoint));
 const endpoint = ref(was?.options.endpoint ?? "");
 const bucket = ref(was?.options.bucket ?? "");
 const region = ref(was?.options.region ?? "");
@@ -59,6 +64,7 @@ const saving = ref(false);
 const nameOk = computed(() => /^[A-Za-z0-9_-]{2,}$/.test(name.value.trim()));
 const info = computed(() => (kind.value ? kindOf(kind.value) : null));
 const s3Service = computed(() => S3_SERVICES.find((s) => s.id === service.value)!);
+const davInfo = computed(() => WEBDAV_SERVICES.find((s) => s.id === davService.value)!);
 
 function form(): ConnectionForm {
   const k = kind.value!;
@@ -97,9 +103,16 @@ function form(): ConnectionForm {
 }
 
 // A changed field makes the last check's answer about something else.
-watch([kind, host, port, username, secret, root, share, inside, encrypt, service, endpoint, bucket, region, signIn, keyFile], () => {
+watch([kind, host, port, username, secret, root, share, inside, encrypt, service, davService, endpoint, bucket, region, signIn, keyFile], () => {
   probe.value = null;
   trouble.value = null;
+});
+// A WebDAV service with one address fills it in; one with a pattern leaves
+// the field to be filled, clearing an address another service put there.
+watch(davService, () => {
+  const fixed = davInfo.value.address;
+  if (fixed) endpoint.value = fixed;
+  else if (WEBDAV_SERVICES.some((s) => s.address && s.address === endpoint.value)) endpoint.value = "";
 });
 // Choosing a service fills in what it always needs, when nothing was typed.
 watch(service, (now) => {
@@ -180,6 +193,11 @@ const verdict = computed(() => {
           <b><span class="cf-tag">{{ k.tag }}</span> {{ k.label }}</b>
           <span>{{ k.line }}</span>
         </button>
+        <!-- Planned, said here so nobody wonders whether it ever will be. -->
+        <div v-for="s in SOON" :key="s.label" class="cf-kind cf-soon" aria-disabled="true">
+          <b><span class="cf-tag">Soon</span> {{ s.label }}</b>
+          <span>{{ s.line }}</span>
+        </div>
       </div>
     </template>
 
@@ -250,8 +268,13 @@ const verdict = computed(() => {
       </template>
 
       <template v-if="kind === 'webdav'">
-        <Field class="cf-gap" label="Address" note="The server's web address, with its port. On a Synology it is usually https://its-name:5006.">
-          <input v-model="endpoint" placeholder="https://nas.local:5006" spellcheck="false" />
+        <Field class="cf-gap" label="Service" :note="davInfo.note || undefined">
+          <select v-model="davService">
+            <option v-for="s in WEBDAV_SERVICES" :key="s.id" :value="s.id">{{ s.label }}</option>
+          </select>
+        </Field>
+        <Field v-if="!davInfo.address" class="cf-gap" label="Address" note="The server's web address, with its port if it has one.">
+          <input v-model="endpoint" :placeholder="davInfo.template" spellcheck="false" />
         </Field>
         <Field class="cf-gap" label="Folder to start from" note="Optional. A folder at that address; everything is kept inside it.">
           <input v-model="root" placeholder="media" spellcheck="false" />
@@ -260,7 +283,7 @@ const verdict = computed(() => {
 
       <template v-if="kind === 's3'">
         <div class="cf-grid">
-          <Field label="Service">
+          <Field label="Service" :note="s3Service.keys">
             <select v-model="service">
               <option v-for="s in S3_SERVICES" :key="s.id" :value="s.id">{{ s.label }}</option>
             </select>
@@ -370,6 +393,8 @@ const verdict = computed(() => {
 .cf-signin { display: flex; align-items: center; gap: var(--s3); margin-bottom: var(--s3); }
 .cf-signin-label { font-size: var(--small); font-weight: 600; }
 .cf-print { font-family: var(--font-mono); font-size: var(--fine); word-break: break-all; }
+.cf-soon { cursor: default; opacity: 0.7; }
+.cf-soon:hover { background: var(--surface-raised); }
 .cf-tag {
   font-size: var(--fine);
   font-weight: 600;

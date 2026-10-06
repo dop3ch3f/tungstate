@@ -484,6 +484,7 @@ fn meta(attrs: &FileAttributes) -> Meta {
             .mtime
             .map(|seconds| UNIX_EPOCH + Duration::from_secs(u64::from(seconds))),
         identity: None,
+        online_only: false,
     }
 }
 

@@ -208,6 +208,7 @@ fn to_meta(metadata: &opendal::Metadata) -> Meta {
         // No service reports a file id, and guessing one would turn two
         // ordinary copies into "one file under two names".
         identity: None,
+        online_only: false,
     }
 }
 

@@ -84,6 +84,9 @@ export interface PreviewView {
   /** Where the storage cannot rename, every move is a copy and a delete:
    *  how much that copies, and whether the server does it or this computer. */
   copies: { bytes: number; on_server: boolean } | null;
+  /** Cloud placeholders whose kind was not read, because reading downloads
+   *  them. Zero unless the rules need a file's kind or EXIF. */
+  online_only: number;
 }
 
 /**
@@ -225,6 +228,8 @@ export interface Found {
   can_trash: boolean;
   /** Whether resemblances were looked for at all. */
   looked_alike: boolean;
+  /** Cloud placeholders left out: comparing them would download them. */
+  online_only: number;
 }
 
 export interface ScanProgress {
@@ -334,6 +339,8 @@ export interface Listing {
 export interface Place {
   label: string;
   path: string;
+  /** A cloud drive's folder, kept by its own app on this computer. */
+  cloud: boolean;
 }
 
 export interface Leg {

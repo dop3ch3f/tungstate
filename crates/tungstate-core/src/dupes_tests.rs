@@ -628,3 +628,17 @@ fn the_candidates_are_the_files_sharing_a_size_and_nothing_else() {
             .collect::<BTreeSet<_>>()
     );
 }
+
+#[test]
+fn a_cloud_placeholder_is_never_a_candidate_since_proving_it_downloads_it() {
+    let mut placeholder = at("Drive/clip.mp4", 900, Some(1));
+    placeholder.online_only = true;
+    let snapshot = folder(&[at("clip.mp4", 900, Some(1)), placeholder]);
+    // Same size as a file here, which would ordinarily make both worth
+    // reading; the placeholder's bytes are not here, so neither is.
+    assert_eq!(
+        dupes::candidates(&snapshot),
+        BTreeSet::<String>::new(),
+        "one file of that size is left, which has nothing to match"
+    );
+}

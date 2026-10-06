@@ -379,6 +379,7 @@ fn meta(len: u64, attributes: FileAttributes, modified: SystemTime) -> Meta {
         // SMB has file ids, but nothing here trusts one across servers yet,
         // and a wrong one turns two copies into "one file under two names".
         identity: None,
+        online_only: false,
     }
 }
 

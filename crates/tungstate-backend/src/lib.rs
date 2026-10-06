@@ -135,6 +135,12 @@ pub struct Meta {
     /// (DESIGN §9). `None` wherever the question has no answer, which is
     /// every remote backend.
     pub identity: Option<String>,
+    /// The file's bytes are not on this machine: a placeholder left by a
+    /// cloud drive's app (Google Drive, `OneDrive`, Dropbox, iCloud), which
+    /// downloads the file the moment anything reads it. Whatever only reads to
+    /// look (a duplicate check, sniffing a file's kind) leaves these alone,
+    /// so pointing at a cloud folder never quietly downloads all of it.
+    pub online_only: bool,
 }
 
 /// One entry from [`Backend::read_dir`], carrying its path and metadata together.

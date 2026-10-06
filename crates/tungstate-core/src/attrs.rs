@@ -116,6 +116,10 @@ pub struct Attributes {
     pub identity: Option<String>,
     /// Which link brought the file here, from the journal.
     pub source: Option<String>,
+    /// A cloud drive's placeholder: the bytes are not on this machine, and
+    /// reading them would download the file. Nothing that only reads to
+    /// look does, so a kind, EXIF or hash is never known for one.
+    pub online_only: bool,
     /// The moment the decision is being made, so `age` is reproducible.
     pub now: Timestamp,
 }
@@ -146,6 +150,7 @@ impl Attributes {
             hash: None,
             identity: None,
             source: None,
+            online_only: false,
             now,
         }
     }

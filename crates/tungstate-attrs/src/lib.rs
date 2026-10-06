@@ -71,6 +71,7 @@ fn described(relative: &str, meta: Meta, now: Timestamp) -> Attributes {
         .modified
         .and_then(|time| Timestamp::try_from(time).ok());
     attrs.identity = meta.identity;
+    attrs.online_only = meta.online_only;
     attrs
 }
 
@@ -78,8 +79,10 @@ fn described(relative: &str, meta: Meta, now: Timestamp) -> Attributes {
 /// EXIF from a prefix, or the hash from every byte. The listing's half is
 /// already there and costs no request.
 fn fill(backend: &dyn Backend, attrs: &mut Attributes, tier: Tier) -> Result<()> {
-    // A directory or a link has no content worth sniffing, whatever the tier.
-    if attrs.is_dir || attrs.is_symlink {
+    // A directory or a link has no content worth sniffing, whatever the tier,
+    // and a cloud placeholder's content is not here: reading it to sniff its
+    // kind would download the whole file.
+    if attrs.is_dir || attrs.is_symlink || attrs.online_only {
         return Ok(());
     }
     let relative = attrs.relative_path();

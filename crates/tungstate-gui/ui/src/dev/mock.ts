@@ -85,7 +85,7 @@ const links: T.Link[] = [
 const listings = fx.listings as Record<string, T.Listing>;
 // Recorded before a preview could say what copying costs: none of them copy.
 const previews = Object.fromEntries(
-  Object.entries(fx.preview).map(([name, view]) => [name, { copies: null, ...view }]),
+  Object.entries(fx.preview).map(([name, view]) => [name, { copies: null, online_only: 0, ...view }]),
 ) as unknown as Record<string, T.PreviewView>;
 const byRoot = (root: string) => previews[root.split("/").pop()!] ?? previews["messy-downloads"];
 
@@ -286,7 +286,13 @@ mockIPC((cmd, args) => {
     case "change_sync": return syncList[0];
     case "run_sync": return { started: true, waiting: 0 };
     case "put_back_sync": return { plan: 31, put_back: 2, taken_off: 5, parked_left: 0, revived: [{ member: "laptop", path: "2025/wedding-rough-cut.mp4" }] };
-    case "places": return [{ label: "Demo", path: DEMO }, { label: "Downloads", path: `${DEMO}/Downloads` }, { label: "NAS", path: `${DEMO}/nas` }];
+    case "places": return [
+      { label: "Demo", path: DEMO, cloud: false },
+      { label: "Downloads", path: `${DEMO}/Downloads`, cloud: false },
+      { label: "NAS", path: `${DEMO}/nas`, cloud: false },
+      { label: "Google Drive", path: `${DEMO}/Library/CloudStorage/GoogleDrive-me/My Drive`, cloud: true },
+      { label: "iCloud Drive", path: `${DEMO}/Library/Mobile Documents/com~apple~CloudDocs`, cloud: true },
+    ];
     case "last_panes": return { left: `${DEMO}/photos-by-nothing`, right: `${DEMO}/nas/incoming` };
     case "browse":
       if (a.path === "area51:" || a.path === "area51:media") {
@@ -326,6 +332,7 @@ function found(root: string) {
     networked: false,
     can_trash: true,
     looked_alike: true,
+    online_only: 0,
     rows: [
       {
         id: "f1",
@@ -715,7 +722,7 @@ const scenes: Record<string, () => unknown> = {
   },
   "connections-add-s3": async () => {
     await scenes["connections-add"]!();
-    press("S3 storage");
+    press("S3");
     await tick();
     const service = document.querySelector<HTMLSelectElement>(".panel select");
     if (service) { service.value = "b2"; service.dispatchEvent(new Event("change")); }
@@ -731,6 +738,22 @@ const scenes: Record<string, () => unknown> = {
     await tick();
     press("Check", true);
     await tick(); await tick();
+  },
+  // A named WebDAV service fills in its own address.
+  "connections-add-webdav-pcloud": async () => {
+    await scenes["connections-add"]!();
+    press("WebDAV");
+    await tick();
+    const service = document.querySelector<HTMLSelectElement>(".panel select");
+    if (service) { service.value = "pcloud-eu"; service.dispatchEvent(new Event("change")); }
+    await tick();
+    fill(["pcloud", "", "me@example.com", "hunter2"]);
+    await tick();
+  },
+  // A folder on a cloud drive with files kept online only.
+  "folder-preview-online-only": async () => {
+    nav.go("folder"); await f.listRegistered(); await f.open(DL);
+    f.preview.value = { ...f.preview.value!, online_only: 12 };
   },
   // A plain-http address, which says what crosses the network unencrypted.
   "connections-add-webdav-http": async () => {
@@ -835,6 +858,14 @@ const scenes: Record<string, () => unknown> = {
   },
   // What Duplicates' buttons open.
   "dupes-choose": async () => { nav.go("dupes"); await tick(); press("Choose a folder…"); await tick(); },
+  // A cloud drive's folder: placeholders are left out, and said so.
+  "dupes-found-online-only": async () => {
+    await scenes["dupes-found"]!();
+    await tick();
+    const found = dz.found.value;
+    if (found) dz.found.value = { ...found, online_only: 340 };
+    await tick();
+  },
   "dupes-clear-ask": async () => { await scenes["dupes-found"]!(); await tick(); pressIn(".ab", "Set aside 217 files"); await tick(); },
   "dupes-putback-ask": async () => { nav.go("dupes"); await tick(); await tick(); pressIn(".pr-rows", "Put back"); await tick(); },
   settings: () => nav.go("settings"),

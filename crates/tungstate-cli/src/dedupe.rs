@@ -129,6 +129,7 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
     if let Some(timings) = timings {
         print!("\n{timings}");
     }
+    left_online(snapshot.online_only());
     // The second pass, over what the first one did not already account for.
     let resembling = if asked.similar {
         match resemblances(&located.root, networked, &snapshot, &found, &journal) {
@@ -270,6 +271,16 @@ fn settle(
     settled.groups = groups;
     settled.folders = folders;
     Ok(settled)
+}
+
+/// Say what was left out because reading it would download it.
+fn left_online(count: usize) {
+    if count > 0 {
+        println!(
+            "\n{count} file(s) are kept online only by a cloud drive's app and were left out: \
+             comparing them would download them. Make them available offline to include them."
+        );
+    }
 }
 
 /// Ask before pulling a lot of data across a network.

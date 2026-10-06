@@ -187,6 +187,12 @@ async function confirmPutBack() {
 
       <Notice tone="bad" v-if="f.problem.value">{{ sentence(f.problem.value) }}</Notice>
       <Notice tone="hold" v-if="copyLine && !justTidied">{{ copyLine }}</Notice>
+      <Notice v-if="p.online_only && !justTidied">
+        {{ p.online_only }} {{ p.online_only === 1 ? "file is" : "files are" }} kept online only by the
+        drive's app, so {{ p.online_only === 1 ? "its kind was" : "their kind was" }} not read: that would
+        download {{ p.online_only === 1 ? "it" : "them" }}. Rules that need a file's kind leave
+        {{ p.online_only === 1 ? "it" : "them" }} where {{ p.online_only === 1 ? "it is" : "they are" }}.
+      </Notice>
 
       <!-- Property 1 and 5: what would move, and what would happen to the
            shape, before any button exists. -->

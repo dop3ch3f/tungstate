@@ -211,6 +211,9 @@ pub struct FoundView {
     pub can_trash: bool,
     /// Whether resemblances were looked for at all.
     pub looked_alike: bool,
+    /// Cloud placeholders left out, because comparing them means downloading
+    /// them. Said, so a short list is not mistaken for a tidy folder.
+    pub online_only: usize,
 }
 
 /// What clearing did.
@@ -326,6 +329,7 @@ pub fn scan(
         .iter()
         .filter(|entry| !entry.is_dir)
         .count();
+    let online_only = snapshot.online_only();
 
     let found = {
         let stop = Arc::clone(&stop);
@@ -416,6 +420,7 @@ pub fn scan(
             .on_this_machine(Path::new(""))
             .is_ok_and(|found| found.is_some()),
         looked_alike: also_similar,
+        online_only,
         rows,
         linked: found.linked,
         unchecked,
