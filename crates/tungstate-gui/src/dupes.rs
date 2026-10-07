@@ -232,11 +232,19 @@ pub struct WaitingView {
 /// The eye for a place: decoding where it is on this machine, or reading
 /// through the connection, from previews unless the rest may be fetched.
 fn eye_for<'a>(place: &'a Place, journal: &'a Journal, fetch: bool) -> Eye<'a> {
-    if !place.networked {
+    // `place.root` is what the person typed: a path only when there is no
+    // connection. `nas:photos` handed over as a path names nothing.
+    if place.end.connection.is_none() {
         return Eye::new(Path::new(&place.root), journal);
     }
     let eye = Eye::over(place.backend.as_ref(), &place.root, journal);
-    if fetch { eye.fetching_the_rest() } else { eye }
+    // A connection to a folder on this machine has no network to spare, so
+    // what has no preview is read whole straight away.
+    if fetch || !place.networked {
+        eye.fetching_the_rest()
+    } else {
+        eye
+    }
 }
 
 /// What clearing did.
@@ -1028,6 +1036,35 @@ mod tests {
         assert_eq!(row.copies.len(), 2);
         assert_eq!(row.copies[0].name, "IMG_4471.jpg", "the bigger one leads");
         assert!(row.copies[1].alike.is_some_and(|score| score >= 90));
+    }
+
+    #[test]
+    fn a_folder_on_a_connection_is_looked_at_through_it_not_by_its_name() {
+        // A connection target is `nas:` plus a folder. Handed to the eye as a
+        // path on this machine it names nothing, and every picture behind it
+        // went unseen.
+        let dir = tempfile::tempdir().expect("temp dir");
+        two_sizes_of_one_picture(dir.path());
+        let journal = Journal::open_in_memory().expect("journal");
+        journal
+            .create_connection(&tungstate_journal::NewConnection {
+                name: "nas".to_string(),
+                scheme: tungstate_journal::Scheme::Fs,
+                host: None,
+                port: None,
+                username: None,
+                root: dir.path().to_string_lossy().into_owned(),
+                options: std::collections::BTreeMap::new(),
+            })
+            .expect("connection");
+
+        let found = scanned("nas:", &journal, &Scan::default(), true);
+        let row = found
+            .rows
+            .iter()
+            .find(|row| row.claim == Claim::Same)
+            .expect("the re-export is found through the connection");
+        assert_eq!(row.copies.len(), 2);
     }
 
     #[test]
