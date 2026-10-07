@@ -230,6 +230,9 @@ export interface Found {
   looked_alike: boolean;
   /** Cloud placeholders left out: comparing them would download them. */
   online_only: number;
+  /** Over a connection, files with no preview not yet compared for looking
+   *  alike, and what downloading them would cost. */
+  waiting: { files: number; bytes: number } | null;
 }
 
 export interface ScanProgress {

@@ -12,6 +12,8 @@ rust-version.workspace = true
 [dependencies]
 thiserror = { workspace = true }
 image = { workspace = true }
+# Reading a camera's preview out of a JPEG's EXIF (see `preview`).
+kamadak-exif = { workspace = true }
 symphonia = { workspace = true }
 rusty-chromaprint = { workspace = true }
 

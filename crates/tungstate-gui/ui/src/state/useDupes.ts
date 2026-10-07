@@ -88,7 +88,13 @@ function ticksFor(answer: Found): Set<string> {
   return next;
 }
 
-async function look(target: string) {
+/** Look again with permission to download what has no preview. The
+ *  previews are remembered, so only the rest crosses the network. */
+async function fetchTheRest() {
+  if (root.value) await look(root.value, true);
+}
+
+async function look(target: string, fetch = false) {
   root.value = target;
   // The last run's result is not this run's: leaving it on screen would let
   // "Put 2 files back" sit above a fresh scan that put nothing anywhere.
@@ -103,7 +109,7 @@ async function look(target: string) {
   opened.value = new Set();
   phase.value = "scanning";
   try {
-    const answer = await dupes.find(target, alsoSimilar.value);
+    const answer = await dupes.find(target, alsoSimilar.value, fetch);
     found.value = answer;
     ticked.value = ticksFor(answer);
     keptBy.value = null;
@@ -389,6 +395,7 @@ export function useDupes() {
     anyUnsure,
     anyGuessed,
     look,
+    fetchTheRest,
     stop,
     tick,
     tickedIn,

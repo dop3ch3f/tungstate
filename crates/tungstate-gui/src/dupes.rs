@@ -214,6 +214,29 @@ pub struct FoundView {
     /// Cloud placeholders left out, because comparing them means downloading
     /// them. Said, so a short list is not mistaken for a tidy folder.
     pub online_only: usize,
+    /// Over a connection: files with no preview, not compared for looking
+    /// alike because each would come down whole. The window asks before it
+    /// fetches them.
+    pub waiting: Option<WaitingView>,
+}
+
+/// What looking at the rest would download.
+#[derive(Debug, Clone, Copy, Serialize)]
+pub struct WaitingView {
+    /// How many files.
+    pub files: usize,
+    /// What they weigh.
+    pub bytes: u64,
+}
+
+/// The eye for a place: decoding where it is on this machine, or reading
+/// through the connection, from previews unless the rest may be fetched.
+fn eye_for<'a>(place: &'a Place, journal: &'a Journal, fetch: bool) -> Eye<'a> {
+    if !place.networked {
+        return Eye::new(Path::new(&place.root), journal);
+    }
+    let eye = Eye::over(place.backend.as_ref(), &place.root, journal);
+    if fetch { eye.fetching_the_rest() } else { eye }
 }
 
 /// What clearing did.
@@ -310,19 +333,16 @@ fn look(backend: &dyn Backend, sniff: bool) -> Result<tungstate_core::Snapshot, 
 pub fn scan(
     target: &str,
     also_similar: bool,
+    fetch: bool,
     journal: &Journal,
     scan: &Scan,
     thumbs: Option<&Thumbs>,
     watcher: &mut (dyn FnMut(&ScanProgress) + Send),
 ) -> Result<FoundView, String> {
     let place = place(target, journal)?;
-    if also_similar && place.networked {
-        return Err(
-            "finding files that are nearly the same means decoding every one of them, and over a connection that means downloading every one of them. Try a folder on this machine."
-                .to_string(),
-        );
-    }
-    let snapshot = look(place.backend.as_ref(), also_similar)?;
+    // A file's kind comes from its extension over a network: reading the
+    // first bytes of every file to sniff it is the cost previews avoid.
+    let snapshot = look(place.backend.as_ref(), also_similar && !place.networked)?;
     let stop = scan.begin();
     let files = snapshot
         .entries
@@ -355,13 +375,11 @@ pub fn scan(
         dupes::find(&snapshot, &mut digest, &wants).map_err(describe)?
     };
 
-    // The second pass only ever runs on this machine, so it reads the
-    // filesystem directly rather than through the backend: decoding needs the
-    // whole file and there is no sampled shortcut the way there is for a hash.
+    // On this machine a picture is decoded where it is; over a connection it
+    // is printed from its preview, and the rest wait for a yes (`fetch`).
     let resembling = if also_similar {
         let stop = Arc::clone(&stop);
-        let here = PathBuf::from(&place.root);
-        let mut eye = Eye::new(&here, journal)
+        let mut eye = eye_for(&place, journal, fetch)
             .watched_by(Box::new(|seen: &Seen| {
                 watcher(&ScanProgress {
                     looked: seen.looked,
@@ -395,8 +413,15 @@ pub fn scan(
         Some((_, eye)) => rows_of(&found, &snapshot, Some(eye)),
         None => rows_of(&found, &snapshot, None),
     };
+    let mut waiting = None;
     if let Some((resembling, eye)) = resembling {
         rows.extend(resembling_rows(&resembling, &eye));
+        if !eye.waiting().is_empty() {
+            waiting = Some(WaitingView {
+                files: eye.waiting().len(),
+                bytes: eye.waiting().iter().map(|w| w.size).sum(),
+            });
+        }
         unchecked = resembling.unchecked;
     }
     rows.sort_by(|one, other| {
@@ -407,7 +432,7 @@ pub fn scan(
     });
 
     Ok(FoundView {
-        root: place.root,
+        root: place.root.clone(),
         files,
         extra_files: rows.iter().map(Row::extra_files).sum(),
         reclaimable: rows.iter().map(|row| row.reclaimable).sum(),
@@ -421,6 +446,7 @@ pub fn scan(
             .is_ok_and(|found| found.is_some()),
         looked_alike: also_similar,
         online_only,
+        waiting,
         rows,
         linked: found.linked,
         unchecked,
@@ -621,7 +647,7 @@ pub fn clear(
         return Err("the trash is this machine's; set aside instead".to_string());
     }
 
-    let snapshot = look(place.backend.as_ref(), also_similar)?;
+    let snapshot = look(place.backend.as_ref(), also_similar && !place.networked)?;
     let stop = scan_state.begin();
     let wanted: std::collections::BTreeSet<String> = paths.iter().cloned().collect();
     let mut digest = Cached::new(place.backend.as_ref(), journal, &place.root)
@@ -667,8 +693,9 @@ pub fn clear(
     }
 
     let resembling = if also_similar {
-        let here = PathBuf::from(&place.root);
-        let mut eye = Eye::new(&here, journal);
+        // Everything compared was remembered by the scan, so nothing is
+        // fetched here: what was not compared cannot be ticked.
+        let mut eye = eye_for(&place, journal, false);
         let skip = settled
             .groups
             .iter()
@@ -847,7 +874,7 @@ mod tests {
     }
 
     fn scanned(root: &str, journal: &Journal, scanning: &Scan, similar: bool) -> FoundView {
-        scan(root, similar, journal, scanning, None, &mut |_| {}).expect("the scan runs")
+        scan(root, similar, false, journal, scanning, None, &mut |_| {}).expect("the scan runs")
     }
 
     #[test]
@@ -859,6 +886,7 @@ mod tests {
 
         let found = scan(
             &dir.path().to_string_lossy(),
+            false,
             false,
             &journal,
             &scanning,
@@ -1036,6 +1064,7 @@ mod tests {
         // would be a test of nothing.
         let stopped = scan(
             &dir.path().to_string_lossy(),
+            false,
             false,
             &journal,
             &scanning,

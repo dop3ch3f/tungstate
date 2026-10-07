@@ -81,15 +81,15 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
     // nothing beside the request itself.
     let tally = Arc::new(Tally::new());
     let counted = Counted::new(&backend, Arc::clone(&tally));
+    // On a share, reading a file in full means pulling it across the network,
+    // so the pass samples instead and says which groups are unconfirmed. A
+    // file's kind comes from its name there, not from reading its first bytes.
+    let networked = backend.capabilities().networked;
     tally.enter(Stage::List);
-    let snapshot = match look(&counted, &loaded.policy, asked.similar) {
+    let snapshot = match look(&counted, &loaded.policy, asked.similar && !networked) {
         Ok(snapshot) => snapshot,
         Err(error) => return crate::fail(&error),
     };
-
-    // On a share, reading a file in full means pulling it across the network,
-    // so the pass samples instead and says which groups are unconfirmed.
-    let networked = backend.capabilities().networked;
     let wants = wanted(asked, &loaded.policy, &snapshot, networked);
 
     let mut digest = Cached::new(&counted, &journal, &root).knowing(&snapshot);
@@ -116,28 +116,26 @@ pub fn dedupe(target: Option<&str>, asked: &Asked) -> ExitCode {
         return ExitCode::SUCCESS;
     }
 
-    print!(
-        "{}",
-        report(
-            &found,
-            &located.root.display().to_string(),
-            digest.reads(),
-            digest.hits(),
-            digest.recorded()
-        )
+    let shown = located.root.display().to_string();
+    let said = report(
+        &found,
+        &shown,
+        digest.reads(),
+        digest.hits(),
+        digest.recorded(),
     );
-    if let Some(timings) = timings {
-        print!("\n{timings}");
-    }
-    left_online(snapshot.online_only());
+    print_found(&said, timings.as_deref(), snapshot.online_only());
     // The second pass, over what the first one did not already account for.
-    let resembling = if asked.similar {
-        match resemblances(&located.root, networked, &snapshot, &found, &journal) {
-            Ok(resembling) => resembling,
-            Err(code) => return code,
-        }
-    } else {
-        Resembling::default()
+    let resembling = match resemblances(
+        &located.root,
+        networked.then_some(&backend as &dyn tungstate_backend::Backend),
+        &snapshot,
+        &found,
+        &journal,
+        asked,
+    ) {
+        Ok(resembling) => resembling,
+        Err(code) => return code,
     };
 
     if (found.is_empty() && resembling.is_empty()) || !asked.apply {
@@ -273,6 +271,15 @@ fn settle(
     Ok(settled)
 }
 
+/// What the exact pass found, how long it took if asked, and what it left out.
+fn print_found(report: &str, timings: Option<&str>, online_only: usize) {
+    print!("{report}");
+    if let Some(timings) = timings {
+        print!("\n{timings}");
+    }
+    left_online(online_only);
+}
+
 /// Say what was left out because reading it would download it.
 fn left_online(count: usize) {
     if count > 0 {
@@ -281,6 +288,33 @@ fn left_online(count: usize) {
              comparing them would download them. Make them available offline to include them."
         );
     }
+}
+
+/// Whether to download what has no preview, asked once with its size.
+fn download_agreed(eye: &Eye<'_>, yes: bool) -> bool {
+    let files = eye.waiting().len();
+    let size = bytes(eye.waiting().iter().map(|w| w.size).sum());
+    if yes {
+        return true;
+    }
+    if !std::io::stdin().is_terminal() {
+        println!(
+            "{files} file(s) have no preview to compare by and were not looked at; \
+             comparing them downloads {size}. Re-run with --yes to allow it."
+        );
+        return false;
+    }
+    println!();
+    println!(
+        "{files} file(s) have no preview to compare by (screenshots, edited exports, videos)."
+    );
+    print!("Download {size} to compare them too? It is remembered after. [y/N]: ");
+    let _ = std::io::stdout().flush();
+    let mut answer = String::new();
+    if std::io::stdin().read_line(&mut answer).is_err() {
+        return false;
+    }
+    matches!(answer.trim(), "y" | "Y" | "yes")
 }
 
 /// Ask before pulling a lot of data across a network.
@@ -600,18 +634,22 @@ fn wanted(
 /// The second pass: what resembles what, printed, and handed back.
 fn resemblances(
     root: &Path,
-    networked: bool,
+    // On a share: read through it, photos from their previews.
+    networked: Option<&dyn tungstate_backend::Backend>,
     snapshot: &tungstate_core::Snapshot,
     found: &Found,
     journal: &Journal,
+    asked: &Asked,
 ) -> Result<Resembling, ExitCode> {
-    if networked {
-        eprintln!(
-            "error: finding files that are nearly the same means decoding every one of them, and over a connection that means downloading every one of them. Point --similar at a local folder."
-        );
-        return Err(ExitCode::FAILURE);
+    if !asked.similar {
+        return Ok(Resembling::default());
     }
-    let mut eye = Eye::new(root, journal);
+    let yes = asked.yes;
+    let shown = root.display().to_string();
+    let mut eye = match networked {
+        Some(backend) => Eye::over(backend, &shown, journal),
+        None => Eye::new(root, journal),
+    };
     let wants = similar::Wants {
         // A byte for byte copy is not news here, and offering it in both
         // halves is how somebody decides about one file twice.
@@ -621,7 +659,17 @@ fn resemblances(
             .flat_map(|group| group.extras.iter().map(|copy| copy.path.clone()))
             .collect(),
     };
-    match similar::resemble(snapshot, &mut eye, &wants) {
+    let first = similar::resemble(snapshot, &mut eye, &wants);
+    // What had no preview waits for a yes, since each comes down whole. The
+    // previews are remembered by now, so a second pass costs only the rest.
+    let first = match (first, networked) {
+        (Ok(_), Some(backend)) if !eye.waiting().is_empty() && download_agreed(&eye, yes) => {
+            eye = Eye::over(backend, &shown, journal).fetching_the_rest();
+            similar::resemble(snapshot, &mut eye, &wants)
+        }
+        (first, _) => first,
+    };
+    match first {
         Ok(resembling) => {
             print!(
                 "{}",

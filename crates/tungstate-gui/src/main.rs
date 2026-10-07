@@ -632,6 +632,9 @@ fn tidy_folder(root: String, state: State<'_, App>) -> Result<govern::TidyDone, 
 fn find_duplicates(
     target: String,
     similar: bool,
+    // Over a connection: also download what has no preview, which the window
+    // only asks for once the person has seen how much that is.
+    fetch: Option<bool>,
     app: AppHandle,
     state: State<'_, App>,
 ) -> Result<dupes::FoundView, String> {
@@ -644,6 +647,7 @@ fn find_duplicates(
     dupes::scan(
         &target,
         similar,
+        fetch.unwrap_or(false),
         &state.journal,
         &state.scan,
         state.thumbs.as_ref(),

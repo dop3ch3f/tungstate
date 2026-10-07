@@ -17,6 +17,7 @@
 use std::path::Path;
 
 mod picture;
+pub mod preview;
 mod sound;
 #[cfg(test)]
 mod tests;

@@ -84,7 +84,7 @@ async function look(at: string) {
       <input type="checkbox" v-model="d.alsoSimilar.value" />
       <span>
         Also find files that are nearly the same
-        <em>A photo exported smaller, a video re-encoded. Slower the first time.</em>
+        <em>A photo exported smaller, a video re-encoded. Slower the first time; on a NAS, photos are compared by the small previews inside them.</em>
       </span>
     </label>
 

@@ -115,6 +115,16 @@ const KEEP = [
       This is over a network, so files were matched on samples rather than read
       in full. Anything you clear is compared byte for byte first.
     </Notice>
+    <Notice tone="hold" v-if="found.waiting">
+      {{ found.waiting.files }} {{ found.waiting.files === 1 ? "file has" : "files have" }} no preview
+      to compare by (screenshots, edited exports, videos), so
+      {{ found.waiting.files === 1 ? "it was" : "they were" }} not looked at for looking alike. Comparing
+      {{ found.waiting.files === 1 ? "it" : "them" }} downloads {{ bytes(found.waiting.bytes) }} once; after
+      that it is remembered.
+      <template #act>
+        <Button :busy="d.phase.value === 'scanning'" @click="d.fetchTheRest()">Download and compare</Button>
+      </template>
+    </Notice>
     <Notice v-if="found.online_only">
       {{ found.online_only }} {{ found.online_only === 1 ? "file is" : "files are" }} kept online only by
       the drive's app, so {{ found.online_only === 1 ? "it was" : "they were" }} left out: comparing

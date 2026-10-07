@@ -24,9 +24,11 @@ tungstate-transfer = { path = "../tungstate-transfer" }
 thiserror = { workspace = true }
 tracing = { workspace = true }
 jiff = { workspace = true }
+# A file on a connection is downloaded to one of these to be decoded, when
+# its preview is not enough and the person has agreed to the download.
+tempfile = { workspace = true }
 
 [dev-dependencies]
-tempfile = { workspace = true }
 tungstate-attrs = { path = "../tungstate-attrs" }
 # Drawing a picture to look at, in the only place that needs one.
 image = { workspace = true }

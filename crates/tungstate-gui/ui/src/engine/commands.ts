@@ -38,8 +38,9 @@ export const folders = {
 export const dupes = {
   /** Walks the whole of `target`, which may be a folder or `connection:folder`.
    *  Emits `dupes://progress` as it goes; a long one is expected. */
-  find: (target: string, similar: boolean) =>
-    invoke<T.Found>("find_duplicates", { target, similar }),
+  /** `fetch`: over a connection, also download what has no preview. */
+  find: (target: string, similar: boolean, fetch = false) =>
+    invoke<T.Found>("find_duplicates", { target, similar, fetch }),
   stop: () => invoke<void>("stop_finding_duplicates"),
   /** Where scans have been pointed before, newest first. */
   recent: () => invoke<string[]>("recent_scans"),

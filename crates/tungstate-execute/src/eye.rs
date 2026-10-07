@@ -10,13 +10,17 @@
 //! the cache is the only thing standing between the second scan and all of
 //! that work again.
 //!
-//! **Local files only.** Decoding needs the whole file, and there is no
-//! sampled shortcut the way there is for a digest, so pointing this at a
-//! connection would pull every video across the network. The refusal lives
-//! where the scan is started, not here.
+//! **Over a connection, a photo costs its first bytes.** Cameras and phones
+//! keep a small preview inside a JPEG's EXIF, and the print is made from
+//! that ([`tungstate_likeness::preview`]). Anything without one (a PNG, an
+//! edited export, a video) would have to come down whole, so it is only
+//! listed, with its size, until the person agrees to the download
+//! ([`Eye::fetching_the_rest`]).
 
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
+
+use tungstate_backend::Backend;
 
 use tungstate_core::dupes::STOPPED;
 use tungstate_core::similar::{Look, Mark, Sort};
@@ -47,9 +51,37 @@ pub struct Seen {
     pub sort: Option<Sort>,
 }
 
+/// Where the files are.
+enum Source<'a> {
+    /// A folder on this machine, decoded where it is.
+    Here(PathBuf),
+    /// A folder on a connection.
+    There {
+        backend: &'a dyn Backend,
+        /// Download what has no preview, as the person agreed to.
+        fetch: bool,
+    },
+}
+
+/// What a file on a connection is waiting for: the download the person has
+/// not agreed to yet. Said, with its size, so they can.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Waiting {
+    /// The file.
+    pub path: String,
+    /// What downloading it would cost.
+    pub size: u64,
+}
+
+/// The sentence a file waiting for a download is reported with.
+pub const WAITING: &str = "not compared yet: it has no preview, so it would have to be downloaded";
+
 /// A [`Look`] that decodes through the filesystem and remembers what it found.
 pub struct Eye<'a> {
-    root: PathBuf,
+    source: Source<'a>,
+    /// What the journal keys a print by: the folder's path, or its target.
+    root: String,
+    waiting: Vec<Waiting>,
     journal: &'a Journal,
     /// Where small pictures go, when anybody wants them.
     thumbs: Option<&'a Thumbs>,
@@ -65,7 +97,9 @@ impl<'a> Eye<'a> {
     #[must_use]
     pub fn new(root: &Path, journal: &'a Journal) -> Self {
         Self {
-            root: root.to_path_buf(),
+            source: Source::Here(root.to_path_buf()),
+            root: root.to_string_lossy().into_owned(),
+            waiting: Vec::new(),
             journal,
             thumbs: None,
             decoded: 0,
@@ -74,6 +108,45 @@ impl<'a> Eye<'a> {
             watcher: None,
             stop: None,
         }
+    }
+
+    /// An eye for a folder on a connection, named `target` (`nas:photos`).
+    ///
+    /// Photos are printed from their previews; the rest wait, listed by
+    /// [`Eye::waiting`], until [`Eye::fetching_the_rest`].
+    #[must_use]
+    pub fn over(backend: &'a dyn Backend, target: &str, journal: &'a Journal) -> Self {
+        Self {
+            source: Source::There {
+                backend,
+                fetch: false,
+            },
+            root: target.to_string(),
+            waiting: Vec::new(),
+            journal,
+            thumbs: None,
+            decoded: 0,
+            recalled: 0,
+            looked: 0,
+            watcher: None,
+            stop: None,
+        }
+    }
+
+    /// Download and decode what has no preview: the person agreed to it.
+    #[must_use]
+    pub fn fetching_the_rest(mut self) -> Self {
+        if let Source::There { fetch, .. } = &mut self.source {
+            *fetch = true;
+        }
+        self
+    }
+
+    /// Files on a connection not compared, because each would have had to
+    /// be downloaded whole.
+    #[must_use]
+    pub fn waiting(&self) -> &[Waiting] {
+        &self.waiting
     }
 
     /// Keep a small picture of everything that has one.
@@ -114,23 +187,85 @@ impl<'a> Eye<'a> {
     pub fn picture_of(&self, path: &str) -> Option<PathBuf> {
         let thumbs = self.thumbs?;
         let (size, mtime) = self.stamp(path).ok()?;
-        let at = thumbs.at_name(&Thumbs::name(
-            &self.root.to_string_lossy(),
-            path,
-            size,
-            mtime,
-        ));
+        let at = thumbs.at_name(&Thumbs::name(&self.root, path, size, mtime));
         at.exists().then_some(at)
     }
 
     fn stamp(&self, path: &str) -> Result<(u64, Option<i64>), String> {
-        let meta = std::fs::metadata(self.root.join(path)).map_err(|error| error.to_string())?;
-        let mtime = meta.modified().ok().and_then(|at| {
+        let seconds = |at: std::time::SystemTime| {
             at.duration_since(UNIX_EPOCH)
                 .ok()
                 .and_then(|since| i64::try_from(since.as_secs()).ok())
-        });
-        Ok((meta.len(), mtime))
+        };
+        match &self.source {
+            Source::Here(root) => {
+                let meta = std::fs::metadata(root.join(path)).map_err(|error| error.to_string())?;
+                Ok((meta.len(), meta.modified().ok().and_then(seconds)))
+            }
+            Source::There { backend, .. } => {
+                let meta = backend
+                    .stat(Path::new(path))
+                    .map_err(|error| error.to_string())?;
+                Ok((meta.len, meta.modified.and_then(seconds)))
+            }
+        }
+    }
+
+    /// Fingerprint one file that was not remembered, wherever it is.
+    ///
+    /// `comparing` is false when the print is already known and only a
+    /// picture is wanted: such a file has been compared, so it is never
+    /// listed as waiting for a download.
+    fn shoot(
+        &mut self,
+        path: &str,
+        sort: Sort,
+        size: u64,
+        want_thumb: bool,
+        comparing: bool,
+    ) -> Result<tungstate_likeness::Shot, String> {
+        let (backend, fetch) = match &self.source {
+            Source::Here(root) => {
+                return tungstate_likeness::look(&root.join(path), as_kind(sort), want_thumb)
+                    .map_err(|trouble| trouble.to_string());
+            }
+            Source::There { backend, fetch } => (*backend, *fetch),
+        };
+        if sort == Sort::Picture {
+            let head = backend
+                .read_prefix(Path::new(path), tungstate_likeness::preview::HEAD_BYTES)
+                .map_err(|error| error.to_string())?;
+            if let Some(shot) = tungstate_likeness::preview::from_head(&head, want_thumb) {
+                return Ok(shot);
+            }
+        }
+        if !fetch {
+            if !comparing {
+                return Err(WAITING.to_string());
+            }
+            self.waiting.push(Waiting {
+                path: path.to_string(),
+                size,
+            });
+            return Err(WAITING.to_string());
+        }
+        // Down to a temporary file, keeping its extension, which is how the
+        // sound and video decoders tell what they are looking at. Gone when
+        // this returns, whatever happened.
+        let suffix = path
+            .rsplit_once('.')
+            .map(|(_, extension)| format!(".{extension}"))
+            .unwrap_or_default();
+        let mut local = tempfile::Builder::new()
+            .suffix(&suffix)
+            .tempfile()
+            .map_err(|error| error.to_string())?;
+        let mut reader = backend
+            .open_read(Path::new(path))
+            .map_err(|error| error.to_string())?;
+        std::io::copy(&mut reader, &mut local).map_err(|error| error.to_string())?;
+        tungstate_likeness::look(local.path(), as_kind(sort), want_thumb)
+            .map_err(|trouble| trouble.to_string())
     }
 }
 
@@ -178,7 +313,7 @@ impl Look for Eye<'_> {
         }
 
         let (size, mtime) = self.stamp(path)?;
-        let root = self.root.to_string_lossy().to_string();
+        let root = self.root.clone();
         let kept = self
             .journal
             .remembered(&root, path, size, mtime)
@@ -199,8 +334,7 @@ impl Look for Eye<'_> {
         }
 
         let want_thumb = self.thumbs.is_some();
-        let shot = tungstate_likeness::look(&self.root.join(path), as_kind(sort), want_thumb)
-            .map_err(|trouble| trouble.to_string())?;
+        let shot = self.shoot(path, sort, size, want_thumb, true)?;
         self.decoded += 1;
         self.journal
             .remember(
@@ -240,12 +374,12 @@ impl Eye<'_> {
         let Some(thumbs) = self.thumbs else {
             return Ok(());
         };
-        let shot = tungstate_likeness::look(&self.root.join(path), as_kind(sort), true)
-            .map_err(|trouble| trouble.to_string())?;
+        // Through the same route a print takes, so on a connection a picture
+        // is drawn from its preview and nothing is downloaded to draw it.
+        let shot = self.shoot(path, sort, size, true, false)?;
         if let Some(bytes) = shot.thumb.as_deref() {
-            let root = self.root.to_string_lossy().to_string();
             thumbs
-                .keep(&Thumbs::name(&root, path, size, mtime), bytes)
+                .keep(&Thumbs::name(&self.root, path, size, mtime), bytes)
                 .map_err(|error| error.to_string())?;
         }
         Ok(())

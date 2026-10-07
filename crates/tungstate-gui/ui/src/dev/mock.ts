@@ -333,6 +333,7 @@ function found(root: string) {
     can_trash: true,
     looked_alike: true,
     online_only: 0,
+    waiting: null,
     rows: [
       {
         id: "f1",
@@ -864,6 +865,14 @@ const scenes: Record<string, () => unknown> = {
     await tick();
     const found = dz.found.value;
     if (found) dz.found.value = { ...found, online_only: 340 };
+    await tick();
+  },
+  // A NAS folder: photos compared from their previews, the rest waiting.
+  "dupes-found-waiting": async () => {
+    await scenes["dupes-found"]!();
+    await tick();
+    const found = dz.found.value;
+    if (found) dz.found.value = { ...found, networked: true, waiting: { files: 37, bytes: 2_412_773_376 } };
     await tick();
   },
   "dupes-clear-ask": async () => { await scenes["dupes-found"]!(); await tick(); pressIn(".ab", "Set aside 217 files"); await tick(); },

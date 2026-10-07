@@ -133,3 +133,64 @@ fn a_file_of_no_interest_is_never_opened() {
     assert_eq!(eye.sort("holiday/IMG_1.jpg", None), Some(Sort::Picture));
     assert_eq!(eye.sort("clip.mov", None), Some(Sort::Moving));
 }
+
+/// A folder standing in for one on a connection: the eye reads it through a
+/// backend, as it would a share.
+fn a_share() -> (tempfile::TempDir, tungstate_backend::local::LocalBackend) {
+    let dir = tempfile::tempdir().expect("dir");
+    let backend = tungstate_backend::local::LocalBackend::new(dir.path().to_path_buf());
+    (dir, backend)
+}
+
+#[test]
+fn a_camera_photo_on_a_connection_is_compared_from_its_preview() {
+    let (dir, share) = a_share();
+    let photo = DynamicImage::ImageRgb8(RgbImage::from_fn(1200, 800, |x, y| {
+        image::Rgb([(x % 251) as u8, (y % 241) as u8, ((x + y) % 239) as u8])
+    }));
+    std::fs::write(
+        dir.path().join("camera.jpg"),
+        tungstate_likeness::preview::camera_jpeg(&photo, &photo.thumbnail(160, 120)),
+    )
+    .unwrap();
+    let journal = Journal::open_in_memory().expect("journal");
+
+    let mut eye = Eye::over(&share, "nas:photos", &journal);
+    let mark = eye.print("camera.jpg").expect("printed from the preview");
+    assert_eq!(
+        mark.weight,
+        1200 * 800,
+        "weighed as the photo, not the preview"
+    );
+    assert_eq!(eye.waiting(), [], "nothing waits for a download");
+}
+
+#[test]
+fn a_file_with_no_preview_waits_until_the_download_is_agreed() {
+    let (dir, share) = a_share();
+    draw(dir.path(), "export.png", 3.0);
+    let size = std::fs::metadata(dir.path().join("export.png"))
+        .unwrap()
+        .len();
+    let journal = Journal::open_in_memory().expect("journal");
+
+    let mut eye = Eye::over(&share, "nas:photos", &journal);
+    let said = eye.print("export.png").expect_err("not compared yet");
+    assert_eq!(said, crate::eye::WAITING);
+    assert_eq!(
+        eye.waiting(),
+        [crate::eye::Waiting {
+            path: "export.png".to_string(),
+            size
+        }]
+    );
+
+    let mut agreed = Eye::over(&share, "nas:photos", &journal).fetching_the_rest();
+    agreed.print("export.png").expect("downloaded and printed");
+    assert_eq!(agreed.waiting(), []);
+    // Remembered, so the next look downloads nothing.
+    let mut again = Eye::over(&share, "nas:photos", &journal);
+    again.print("export.png").expect("remembered");
+    assert_eq!(again.recalled(), 1);
+    assert_eq!(again.waiting(), []);
+}
