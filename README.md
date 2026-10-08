@@ -54,7 +54,10 @@ hand — which is still the only way to change them.
 See `docs/DESIGN.md` for the full design and `docs/SYLLABUS.md` for the build
 order.
 
-Licensed under either of Apache License, Version 2.0 or MIT license at your option.
+From 0.1.0-alpha.16 on, Tungstate is under the [Functional Source License](LICENSE.md)
+(FSL-1.1-ALv2). You can read it, build it and use it; you can't sell a competing
+copy. Each version becomes Apache-2.0 two years after its release. Versions up to
+and including 0.1.0-alpha.15 stay under MIT or Apache-2.0, at your option.
 
 ## The name
 

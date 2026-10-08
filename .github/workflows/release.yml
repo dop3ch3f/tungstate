@@ -96,7 +96,7 @@ jobs:
           bin=target/${{ matrix.target }}/release/tungstate
           [ -f "$bin" ] || bin="$bin.exe"
           cp "$bin" "dist/$name/"
-          cp README.md LICENSE-MIT LICENSE-APACHE "dist/$name/"
+          cp README.md LICENSE.md "dist/$name/"
           cd dist
           if [ "${{ runner.os }}" = Windows ]; then
             7z a "$name.zip" "$name" > /dev/null
