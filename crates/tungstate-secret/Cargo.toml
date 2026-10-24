@@ -8,7 +8,19 @@ rust-version.workspace = true
 
 [dependencies]
 thiserror = { workspace = true }
+# Named directly for its error type, which `keyring` re-exports on desktop.
+keyring-core = "1"
+
+# `keyring`'s all-in-one mode picks a store on desktop only. Phones get their
+# platform store wired up by hand in `phone.rs`.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 keyring = { workspace = true }
+
+[target.'cfg(target_os = "ios")'.dependencies]
+apple-native-keyring-store = { version = "1", features = ["protected"] }
+
+[target.'cfg(target_os = "android")'.dependencies]
+android-native-keyring-store = "1"
 
 [lints]
 workspace = true

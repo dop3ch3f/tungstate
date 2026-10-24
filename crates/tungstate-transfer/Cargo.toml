@@ -12,6 +12,9 @@ tungstate-journal = { path = "../tungstate-journal" }
 blake3 = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
+
+# Phones have no trash to send an original to; there, a trash request is refused.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 trash = { workspace = true }
 
 [dev-dependencies]

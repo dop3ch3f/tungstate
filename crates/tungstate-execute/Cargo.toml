@@ -13,7 +13,6 @@ rust-version.workspace = true
 # almost no code.
 [dependencies]
 blake3 = { workspace = true }
-trash = { workspace = true }
 tungstate-core = { path = "../tungstate-core" }
 tungstate-backend = { path = "../tungstate-backend" }
 tungstate-journal = { path = "../tungstate-journal" }
@@ -27,6 +26,10 @@ jiff = { workspace = true }
 # A file on a connection is downloaded to one of these to be decoded, when
 # its preview is not enough and the person has agreed to the download.
 tempfile = { workspace = true }
+
+# Phones have no trash to send an original to; there, a trash request is refused.
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+trash = { workspace = true }
 
 [dev-dependencies]
 tungstate-attrs = { path = "../tungstate-attrs" }

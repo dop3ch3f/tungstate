@@ -114,7 +114,16 @@ pub enum TransferError {
         path: PathBuf,
     },
 
+    /// The source is on a phone, and phones have no trash to send an original to.
+    #[error("`{path}` is on a device with no trash; use --move or --copy")]
+    NoTrashOnDevice {
+        /// The file whose original could not be trashed.
+        path: PathBuf,
+    },
+
     /// The original could not be sent to the operating system's trash.
+    // Desktop only: the `trash` crate, and so its error type, does not exist on phones.
+    #[cfg(not(any(target_os = "ios", target_os = "android")))]
     #[error("could not trash `{path}`")]
     Trash {
         /// The file that could not be trashed.
@@ -1439,6 +1448,16 @@ fn digest_watching(
     Ok(hasher.finalize().to_hex().to_string())
 }
 
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn trash_original(full: PathBuf) -> Result<()> {
+    trash::delete(&full).map_err(|source| TransferError::Trash { path: full, source })
+}
+
+#[cfg(any(target_os = "ios", target_os = "android"))]
+fn trash_original(full: PathBuf) -> Result<()> {
+    Err(TransferError::NoTrashOnDevice { path: full })
+}
+
 fn digest(backend: &dyn Backend, path: &Path) -> Result<String> {
     digest_watching(backend, path, |_| true)
 }
@@ -1465,7 +1484,7 @@ impl Transfer<'_> {
                     });
                 }
                 let full = self.link.source.path.join(path);
-                trash::delete(&full).map_err(|source| TransferError::Trash { path: full, source })
+                trash_original(full)
             }
         }
     }

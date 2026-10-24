@@ -372,12 +372,28 @@ fn perform(op: &Op, backend: &dyn Backend) -> std::result::Result<(), BackendErr
                     ),
                 });
             };
-            trash::delete(&full).map_err(|source| BackendError::Io {
-                path: full,
-                source: std::io::Error::other(source.to_string()),
-            })
+            trash_file(full)
         }
     }
+}
+
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+fn trash_file(full: PathBuf) -> std::result::Result<(), BackendError> {
+    trash::delete(&full).map_err(|source| BackendError::Io {
+        path: full,
+        source: std::io::Error::other(source.to_string()),
+    })
+}
+
+#[cfg(any(target_os = "ios", target_os = "android"))]
+fn trash_file(full: PathBuf) -> std::result::Result<(), BackendError> {
+    Err(BackendError::Io {
+        path: full,
+        source: std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "this device has no trash; set aside instead",
+        ),
+    })
 }
 
 /// Move one file: a rename where the storage has one, otherwise a copy, a

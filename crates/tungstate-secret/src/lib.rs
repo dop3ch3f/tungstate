@@ -25,7 +25,7 @@ pub enum SecretError {
         key: String,
         /// The underlying failure.
         #[source]
-        source: keyring::Error,
+        source: keyring_core::Error,
     },
 }
 
@@ -66,7 +66,8 @@ pub trait SecretStore: Send + Sync {
     fn delete(&self, key: &str) -> Result<()>;
 }
 
-/// The real thing: macOS Keychain, Windows Credential Manager, Secret Service.
+/// The real thing: macOS and iOS Keychain, Windows Credential Manager, Secret
+/// Service, Android Keystore.
 #[derive(Debug, Default, Clone, Copy)]
 pub struct KeyringStore;
 
@@ -78,8 +79,16 @@ impl KeyringStore {
     }
 }
 
-fn entry(key: &str) -> Result<keyring::Entry> {
-    keyring::Entry::new(SERVICE, key).map_err(|source| SecretError::Keyring {
+#[cfg(not(any(target_os = "ios", target_os = "android")))]
+use keyring::Entry;
+#[cfg(any(target_os = "ios", target_os = "android"))]
+use phone::Entry;
+
+#[cfg(any(target_os = "ios", target_os = "android"))]
+mod phone;
+
+fn entry(key: &str) -> Result<Entry> {
+    Entry::new(SERVICE, key).map_err(|source| SecretError::Keyring {
         key: key.to_string(),
         source,
     })
@@ -89,7 +98,7 @@ impl SecretStore for KeyringStore {
     fn get(&self, key: &str) -> Result<Option<String>> {
         match entry(key)?.get_password() {
             Ok(secret) => Ok(Some(secret)),
-            Err(keyring::Error::NoEntry) => Ok(None),
+            Err(keyring_core::Error::NoEntry) => Ok(None),
             Err(source) => Err(SecretError::Keyring {
                 key: key.to_string(),
                 source,
@@ -109,7 +118,7 @@ impl SecretStore for KeyringStore {
     fn delete(&self, key: &str) -> Result<()> {
         match entry(key)?.delete_credential() {
             // Already gone is the outcome the caller wanted.
-            Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+            Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
             Err(source) => Err(SecretError::Keyring {
                 key: key.to_string(),
                 source,

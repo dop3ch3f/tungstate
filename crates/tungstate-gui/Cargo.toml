@@ -6,6 +6,12 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 
+# A library as well as a binary: iOS and Android load the app as a library and
+# call its entry point. The binary is the desktop's thin `main`.
+[lib]
+name = "tungstate_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [[bin]]
 name = "tungstate-gui"
 path = "src/main.rs"
@@ -31,10 +37,12 @@ serde_json = { workspace = true }
 jiff = { workspace = true }
 tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
-tauri-plugin-updater = { workspace = true }
-tauri-plugin-process = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+
+[target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
+tauri-plugin-updater = { workspace = true }
+tauri-plugin-process = { workspace = true }
 
 [dev-dependencies]
 # Drawing a picture for the resemblance tests, so no binary is checked in.
