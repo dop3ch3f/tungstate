@@ -1,0 +1,342 @@
+<!doctype html>
+<html data-theme="retro">
+<head>
+<meta charset="utf-8">
+<title>Tungstate phone, approved 2026-10-25</title>
+<link rel="stylesheet" href="../../../crates/tungstate-gui/ui/src/styles/tokens.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #c9cbc2; font-family: var(--font); color: var(--text); padding: 40px; }
+  .sheet { display: grid; grid-template-columns: repeat(5, 390px); gap: 40px; }
+  .sheet.only { display: block; padding: 0; }
+  body.solo { padding: 0; background: var(--field); }
+  :root { --ink: #151515; --ink2: #3b3d37; }
+
+  .phone { width: 390px; height: 844px; background: var(--field); border: 2px solid var(--ink);
+    box-shadow: 6px 6px 0 var(--ink); position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  body.solo .phone { border: 0; box-shadow: none; }
+  .status { height: 54px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 30px 0 34px; font-weight: 600; font-size: 17px; }
+  .status .r { display: flex; gap: 6px; align-items: center; }
+  .status .r i { display: inline-block; background: var(--ink); width: 18px; height: 11px; }
+  .status .r i + i { width: 25px; height: 12px; border-radius: 3px; }
+  .scroll { flex: 1; overflow: hidden; padding: 2px 20px 16px; }
+  .head { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 14px; gap: 12px; }
+  h1 { font-size: 32px; line-height: 1.08; font-weight: 800; letter-spacing: -0.6px; }
+  h2 { font-size: 15px; font-weight: 800; margin: 22px 0 8px; }
+  .quiet { color: var(--ink2); }
+  .t15 { font-size: 15px; line-height: 1.4; }
+  .sub { font-size: 15px; color: var(--ink2); }
+
+  /* Rules: information is flat. Things you press stand alone and carry the
+     hard shadow. Rows inside a list are pressable too, and show it with a
+     chevron, never a shadow, so a list stays one object. */
+  .box { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; }
+  .pad { padding: 16px; }
+  .press { box-shadow: 4px 4px 0 var(--ink); }
+
+  .tile { width: 40px; height: 40px; border: 2px solid var(--ink); border-radius: 6px; display: grid; place-items: center; flex: none; }
+  .tile svg { width: 24px; height: 24px; }
+  .tile.sm { width: 34px; height: 34px; } .tile.sm svg { width: 20px; height: 20px; }
+
+  .meter { display: flex; height: 26px; border: 2px solid var(--ink); border-radius: 6px; overflow: hidden; margin: 16px 0 10px; }
+  .meter span { display: block; height: 100%; border-right: 2px solid var(--ink); }
+  .meter span:last-child { border-right: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 15px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--ink); margin-right: 6px; vertical-align: -1px; }
+  .big { font-size: 52px; font-weight: 800; letter-spacing: -1.5px; line-height: 0.95; }
+
+  .list { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 2px solid var(--ink); min-height: 64px; }
+  .row:first-child { border-top: 0; }
+  .row .grow { flex: 1; min-width: 0; }
+  .row b { display: block; font-size: 16px; }
+  .row .quiet { font-size: 14px; }
+  .row .num { font-size: 16px; font-weight: 800; }
+  .chev { font-weight: 800; font-size: 22px; line-height: 1; }
+  .check { width: 30px; height: 30px; border: 2px solid var(--ink); border-radius: 6px; display: grid; place-items: center; font-weight: 900; font-size: 16px; background: var(--panel); flex: none; }
+  .check.on { background: var(--tint-drain); color: #fff; }
+
+  .seg { display: flex; border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .seg span { flex: 1; text-align: center; padding: 13px 4px; font-size: 15px; font-weight: 700; border-right: 2px solid var(--ink); }
+  .seg span:last-child { border-right: 0; }
+  .seg .on { background: var(--ink); color: #fdfdf8; }
+
+  /* The one main action, in the thumb zone; its context line sits above it. */
+  .act { flex: none; padding: 10px 20px 14px; background: var(--field); }
+  .act .say { font-size: 14px; text-align: center; color: var(--ink2); margin-bottom: 10px; }
+  .btn { display: flex; align-items: center; justify-content: center; min-height: 58px; border: 2px solid var(--ink); border-radius: 8px;
+    font-size: 18px; font-weight: 800; box-shadow: 4px 4px 0 var(--ink); text-align: center; }
+  .btn.ghost { background: var(--panel); font-weight: 700; min-height: 52px; font-size: 16px; box-shadow: 3px 3px 0 var(--ink); }
+  .pair { display: flex; gap: 12px; } .pair > * { flex: 1; }
+
+  .tabs { flex: none; display: flex; padding: 8px 6px 0; gap: 2px; border-top: 2px solid var(--ink); background: var(--rail); }
+  .tab { flex: 1; height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 13px; font-weight: 700; letter-spacing: -0.3px; border-radius: 8px; border: 2px solid transparent; }
+  .tab svg { width: 26px; height: 26px; }
+  .tab.on { background: #fff; border-color: var(--ink); box-shadow: 2px 2px 0 var(--ink); font-weight: 800; }
+  .homebar { flex: none; height: 30px; background: var(--rail); display: grid; place-items: center; }
+  .homebar i { width: 134px; height: 5px; border-radius: 3px; background: var(--ink); }
+  .noTabs .homebar { background: var(--field); }
+
+  .ph { position: relative; display: grid; place-items: center; overflow: hidden; }
+  .ph svg { width: 34%; height: 34%; opacity: 0.6; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0 -20px; }
+  .grid3 .ph { aspect-ratio: 1; }
+  .keep { outline: 5px solid var(--tint-dupes); outline-offset: -5px; }
+  .state { position: absolute; right: 8px; top: 8px; height: 34px; min-width: 34px; padding: 0 12px; border-radius: 99px; border: 2px solid var(--ink); display: grid; place-items: center; font-weight: 800; font-size: 14px; background: #fff; }
+  .state.keepit { background: var(--tint-dupes); color: #fff; }
+  .state.clear { background: var(--ink); color: #fff; }
+  .dim::after { content: ""; position: absolute; inset: 0; background: rgba(253,253,248,0.5); }
+  .gh { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 8px; } .gh h2 { margin: 0; }
+  .smallbtn { font-size: 15px; font-weight: 800; border: 2px solid var(--ink); border-radius: 8px; padding: 0 14px; height: 44px; display: grid; place-items: center; background: var(--panel); box-shadow: 3px 3px 0 var(--ink); }
+
+  .blocks { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; height: 34px; }
+  .blocks i { border: 2px solid var(--ink); border-radius: 3px; background: var(--panel); }
+  .blocks i.on { background: var(--tint-drain); }
+  .note { border: 2px solid var(--ink); border-radius: 8px; background: #ffd44d; padding: 14px 16px; font-size: 15px; line-height: 1.4; }
+  .mini { display: flex; gap: 4px; }
+  .mini .ph { width: 30px; height: 30px; border-radius: 4px; border: 2px solid var(--ink); }
+  .chips { display: flex; gap: 8px; align-items: center; margin: -4px -20px 14px 0; overflow: hidden; padding-right: 20px;
+    -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); }
+  .chip { font-size: 15px; font-weight: 700; border: 2px solid var(--ink); border-radius: 99px; padding: 0 14px; height: 44px; display: grid; place-items: center; background: var(--panel); white-space: nowrap; }
+  .chip.on { background: var(--ink); color: #fdfdf8; }
+  .iconbtn { width: 44px; height: 44px; border: 2px solid var(--ink); border-radius: 8px; display: grid; place-items: center; background: var(--panel); box-shadow: 3px 3px 0 var(--ink); font-weight: 900; font-size: 20px; flex: none; }
+  .iconbtn svg { width: 22px; height: 22px; }
+  .filter { display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 16px; font-size: 16px; font-weight: 700; }
+
+  .veil { position: absolute; inset: 0; background: rgba(21,21,21,0.4); }
+  .bsheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 2px solid var(--ink); border-radius: 16px 16px 0 0; padding: 10px 20px 0; }
+  .grab { width: 44px; height: 5px; border-radius: 3px; background: var(--ink); margin: 0 auto 14px; }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet">
+
+<!-- 1. Home: the number is the title; one action; a short feed. -->
+<section class="phone" id="home">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head" style="align-items:flex-start;margin-top:10px">
+      <div><div class="big">41 GB</div><div class="sub" style="margin-top:8px">you can free on this phone</div></div>
+      <div class="iconbtn" data-px="settings"></div>
+    </div>
+    <div class="meter">
+      <span style="width:16%;background:var(--tint-drain)"></span>
+      <span style="width:58%;background:#a5a79d"></span>
+      <span style="width:26%;background:var(--panel)"></span>
+    </div>
+    <div class="legend"><span><i style="background:var(--tint-drain)"></i>Ready to send 41 GB</span><span><i style="background:var(--panel)"></i>Free 67 GB</span></div>
+    <h2>Also waiting</h2>
+    <div class="list">
+      <div class="row"><div class="tile sm" style="background:var(--tint-dupes)" data-px="dupes" data-ink="#fff"></div><div class="grow"><b>2,140 duplicates</b><span class="quiet">6.3 GB of copies and look-alikes</span></div><span class="chev">›</span></div>
+      <div class="row"><div class="tile sm" style="background:var(--tint-folder)" data-px="folder" data-ink="#fff"></div><div class="grow"><b>318 loose files</b><span class="quiet">in Downloads</span></div><span class="chev">›</span></div>
+      <div class="row"><div class="tile sm" style="background:var(--tint-connections)" data-px="connections" data-ink="#fff"></div><div class="grow"><b>Area51 is connected</b><span class="quiet">3.1 TB free on the NAS</span></div><span class="chev">›</span></div>
+    </div>
+  </div>
+  <div class="act"><div class="say">Sent to Area51, checked, then cleared here</div><div class="btn" style="background:var(--tint-drain);color:#fff">Free 41 GB</div></div>
+  <nav class="tabs" data-on="home"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 2. Free up space: result first, filters behind one summary. -->
+<section class="phone" id="choose">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head"><h1>Free up space</h1></div>
+    <div class="box pad">
+      <div style="display:flex;align-items:baseline;gap:10px"><span class="big">41 GB</span><span class="t15 quiet">3,214 items</span></div>
+      <div class="box filter press" style="margin-top:14px"><span>All · older than 3 months</span><span class="chev">▾</span></div>
+      <div class="box filter press" style="margin-top:12px;height:58px;gap:12px;justify-content:flex-start"><div class="tile sm" style="background:var(--tint-connections)" data-px="connections" data-ink="#fff"></div><span style="flex:1">To Area51 › Phone</span><span class="chev">›</span></div>
+    </div>
+    <h2>Include</h2>
+    <div class="list">
+      <div class="row"><span class="check on">✓</span><div class="grow"><b>2026</b><span class="quiet">1,204 items</span></div><span class="num">14.2 GB</span></div>
+      <div class="row"><span class="check on">✓</span><div class="grow"><b>2025</b><span class="quiet">1,688 items</span></div><span class="num">19.6 GB</span></div>
+      <div class="row"><span class="check on">✓</span><div class="grow"><b>2024 and before</b><span class="quiet">322 items</span></div><span class="num">7.4 GB</span></div>
+      <div class="row"><span class="check">&nbsp;</span><div class="grow"><b>Favourites</b><span class="quiet">Stay on the phone</span></div><span class="num quiet">2.1 GB</span></div>
+    </div>
+  </div>
+  <div class="act"><div class="say">Each item is checked on Area51 before it leaves</div><div class="btn" style="background:var(--tint-drain);color:#fff">Free 41 GB</div></div>
+  <nav class="tabs" data-on="free"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 2b. The filter sheet. -->
+<section class="phone" id="filters">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll"><div class="head"><h1>Free up space</h1></div></div>
+  <div class="veil"></div>
+  <div class="bsheet">
+    <div class="grab"></div>
+    <div class="head" style="margin:0 0 6px"><h1 style="font-size:24px">What to send</h1></div>
+    <h2 style="margin-top:12px">Kind</h2>
+    <div class="seg"><span class="on">All</span><span>Videos</span><span>Screenshots</span></div>
+    <h2>Older than</h2>
+    <div class="seg"><span>1 month</span><span class="on">3 months</span><span>1 year</span><span>Any</span></div>
+    <h2>Albums</h2>
+    <div class="list">
+      <div class="row"><span class="check on">✓</span><div class="grow"><b>Camera</b></div><span class="num">36 GB</span></div>
+      <div class="row"><span class="check on">✓</span><div class="grow"><b>WhatsApp</b></div><span class="num">5 GB</span></div>
+    </div>
+    <div class="act" style="padding:16px 0 14px;background:transparent"><div class="btn" style="background:var(--tint-drain);color:#fff">Show 41 GB</div></div>
+    <div class="homebar" style="background:transparent"><i></i></div>
+  </div>
+</section>
+
+<!-- 3. Running: hero and progress high, note under them, Pause leads. -->
+<section class="phone noTabs" id="running">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll" style="display:flex;flex-direction:column;gap:20px">
+    <div class="head" style="margin-bottom:0"><h1>Freeing space</h1></div>
+    <div class="scene" data-scene="send" style="width:250px;height:125px;margin:18px auto 0"></div>
+    <div style="text-align:center"><div class="big" style="font-size:64px">18.4 GB</div><div class="t15 quiet" style="margin-top:8px">of 41 GB · about 12 minutes left</div></div>
+    <div class="blocks"></div>
+    <div class="t15 quiet" style="text-align:center">1,448 of 3,214 checked and cleared</div>
+    <div class="note">You can lock your phone. Sending carries on, and each one is checked and cleared when you're back.</div>
+  </div>
+  <div class="act pair"><div class="btn ghost" style="min-height:58px">Pause</div><div class="btn ghost" style="min-height:58px">Stop</div></div>
+  <div class="homebar"><i></i></div>
+</section>
+
+<!-- 4. Done: the step left is the main action itself. -->
+<section class="phone noTabs" id="done">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll" style="display:flex;flex-direction:column;gap:18px">
+    <div class="head" style="margin-bottom:0"><h1>3,214 photos and<br>videos are safe</h1></div>
+    <div class="t15 quiet" style="margin-top:-8px">On Area51 › Phone. Each was read back and matched before it left this phone.</div>
+    <div class="scene" data-scene="done" style="width:250px;height:125px;margin:6px auto"></div>
+    <div class="box pad">
+      <div class="t15 quiet">Free on this phone</div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-top:6px"><span class="big" style="font-size:44px">108 GB</span><span class="t15 quiet">was 67 GB</span></div>
+    </div>
+    <div class="note" style="background:var(--panel)">Photos keeps what was cleared for 30 days. To get the space back today, open Photos › Recently Deleted and choose Delete All.</div>
+  </div>
+  <div class="act">
+    <div class="btn" style="background:var(--tint-drain);color:#fff">Open Photos</div>
+    <div style="height:12px"></div><div class="btn ghost">Done</div>
+  </div>
+  <div class="homebar"><i></i></div>
+</section>
+
+<!-- 5. Duplicates: the whole tile is the toggle; state shown in words. -->
+<section class="phone" id="dupes">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head"><h1>Duplicates</h1></div>
+    <div class="seg"><span class="on">Copies</span><span>Look-alikes</span></div>
+    <div class="gh"><h2>Beach, 12 Aug · 5</h2><span class="smallbtn">Compare</span></div>
+    <div class="grid3">
+      <div class="ph keep" style="background:var(--raw-kind-image)" data-px="photo"><span class="state keepit">Keep</span></div>
+      <div class="ph dim" style="background:#e9a24e" data-px="photo"></div>
+      <div class="ph dim" style="background:#f0b768" data-px="photo"></div>
+      <div class="ph dim" style="background:#e9a24e" data-px="photo"></div>
+      <div class="ph dim" style="background:#f0b768" data-px="photo"></div>
+    </div>
+    <div class="gh"><h2>Screen recording · 2</h2><span class="smallbtn">Compare</span></div>
+    <div class="grid3">
+      <div class="ph keep" style="background:var(--raw-kind-video)" data-px="photo"><span class="state keepit">Keep</span></div>
+      <div class="ph dim" style="background:#f2909f" data-px="photo"></div>
+    </div>
+  </div>
+  <div class="act"><div class="say">Tap a photo to keep it instead. Restore within 30 days.</div><div class="btn" style="background:var(--tint-dupes);color:#fff">Clear 2,140 extras · 6.3 GB</div></div>
+  <nav class="tabs" data-on="dupes"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 6. Compare: one photo, one Keep/Clear switch, swipe between. -->
+<section class="phone noTabs" id="compare">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 20px 12px">
+    <span style="font-size:17px;font-weight:700">‹ Beach</span><span style="font-size:15px;font-weight:700">2 of 5</span>
+  </div>
+  <div class="ph" style="flex:1;margin:0 20px;background:#e9a24e;border:2px solid var(--ink);border-radius:8px" data-px="photo"></div>
+  <div style="margin:14px 20px 0;padding:12px 16px;background:var(--ink);color:#fff;border-radius:8px;font-size:16px"><b>Marked to clear</b> · 12 MP · 4.1 MB · a little blurred</div>
+  <div class="mini" style="padding:12px 20px;gap:6px">
+    <div class="ph keep" style="width:56px;height:56px;border-radius:6px;background:var(--raw-kind-image)" data-px="photo"></div>
+    <div class="ph" style="width:56px;height:56px;border-radius:6px;background:#e9a24e;border:3px solid var(--ink);box-shadow:2px 2px 0 var(--ink)" data-px="photo"></div>
+    <div class="ph" style="width:56px;height:56px;border-radius:6px;background:#f0b768" data-px="photo"></div>
+    <div class="ph" style="width:56px;height:56px;border-radius:6px;background:#e9a24e" data-px="photo"></div>
+    <div class="ph" style="width:56px;height:56px;border-radius:6px;background:#f0b768" data-px="photo"></div>
+  </div>
+  <div style="text-align:center;font-size:15px;font-weight:700;padding:2px 20px 0">‹ swipe to clear · swipe to keep ›</div>
+  <div class="act"><div class="seg" style="height:58px"><span style="display:grid;place-items:center">Keep</span><span class="on" style="display:grid;place-items:center">Clear</span></div></div>
+  <div class="homebar"><i></i></div>
+</section>
+
+<!-- 7. Organise: one row per destination, drill in. -->
+<section class="phone" id="organise">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head"><h1>Organise</h1></div>
+    <div class="chips"><span class="chip on">Downloads · 318</span><span class="chip">Documents · 41</span><span class="chip">WhatsApp · 2,900</span><span class="chip">+ Add</span></div>
+    <h2>Where they go</h2>
+    <div class="list">
+      <div class="row"><div class="tile sm" style="background:var(--raw-kind-doc)" data-px="folder"></div><div class="grow"><b>Documents</b><span class="quiet">96 PDFs, 46 spreadsheets</span></div><span class="num">142</span><span class="chev">›</span></div>
+      <div class="row"><div class="tile sm" style="background:var(--raw-kind-image)" data-px="photo"></div><div class="grow"><b>Images</b><div class="mini" style="margin-top:4px"><div class="ph" style="background:#f0b768"></div><div class="ph" style="background:#e9a24e"></div><div class="ph" style="background:#f2909f"></div><div class="ph" style="background:#f0b768"></div></div></div><span class="num">117</span><span class="chev">›</span></div>
+      <div class="row"><div class="tile sm" style="background:var(--raw-kind-archive)" data-px="dupes"></div><div class="grow"><b>Installers</b><span class="quiet">APKs and zips</span></div><span class="num">41</span><span class="chev">›</span></div>
+      <div class="row"><div class="tile sm" style="background:#a5a79d" data-px="folder"></div><div class="grow"><b>Everything else</b><span class="quiet">Kept together, by year</span></div><span class="num">18</span><span class="chev">›</span></div>
+    </div>
+  </div>
+  <div class="act"><div class="say">Nothing is deleted. Every move can be put back.</div><div class="btn" style="background:var(--tint-folder);color:#fff">Tidy 318 files</div></div>
+  <nav class="tabs" data-on="organise"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 8. NAS: native push stack, search, two clear actions. -->
+<section class="phone" id="nas">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin:2px 0 6px"><span style="font-size:17px;font-weight:700">‹ PlexMediaServer</span><div class="iconbtn">⋯</div></div>
+    <div class="head" style="margin-top:0"><h1>Media</h1></div>
+    <div class="box" style="display:flex;align-items:center;gap:10px;padding:0 14px;height:48px;margin-bottom:14px"><span style="font-weight:900">⌕</span><span class="quiet" style="font-size:16px">Search Area51</span></div>
+    <div class="list">
+      <div class="row"><div class="tile sm" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>2026</b><span class="quiet">4,812 items</span></div><span class="num">612 GB</span><span class="chev">›</span></div>
+      <div class="row"><div class="tile sm" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>2025</b><span class="quiet">9,330 items</span></div><span class="num">1.2 TB</span><span class="chev">›</span></div>
+      <div class="row"><div class="tile sm" style="background:var(--tint-drain)" data-px="drain" data-ink="#fff"></div><div class="grow"><b>Phone</b><span class="quiet">Sent from this phone</span></div><span class="num">41 GB</span><span class="chev">›</span></div>
+      <div class="row"><div class="tile sm" style="background:var(--raw-kind-video)" data-px="photo"></div><div class="grow"><b>wedding-final.mov</b><span class="quiet">Video</span></div><span class="num">18 GB</span></div>
+      <div class="row"><div class="tile sm" style="background:var(--raw-kind-archive)" data-px="dupes"></div><div class="grow"><b>backup-old.zip</b><span class="quiet">Archive</span></div><span class="num">9 GB</span></div>
+    </div>
+  </div>
+  <div class="act pair"><div class="btn" style="background:var(--tint-connections);color:#fff;font-size:17px">Tidy Media</div><div class="btn ghost" style="min-height:58px">Find duplicates</div></div>
+  <nav class="tabs" data-on="nas"></nav><div class="homebar"><i></i></div>
+</section>
+
+</div>
+<script>
+const PX = {
+  home: ["...xx...","..xxxx..",".xx..xx.","xx....xx",".xoooox.",".xo..ox.",".xo..ox.",".xxxxxx."],
+  folder: ["........",".xxx....",".x..xxx.",".xoooox.",".xoooox.",".xoooox.",".xxxxxx.","........"],
+  drain: [".xxxxxx.",".xoooox.",".xxxxxx.","...xx...",".x.xx.x.","..xxxx..",".xxxxxx.",".xoooox."],
+  dupes: ["xxxxx...","x...x...","x.o.x...","x...xxxx","xxxxx..x","...x.o.x","...x...x","...xxxxx"],
+  connections: ["..x..x..","..x..x..",".xxxxxx.",".xoooox.",".xoooox.","..xxxx..","...xx...","...xx..."],
+  settings: ["........","..x.....","xxxxxxxx","..x.....",".....x..","xxxxxxxx",".....x..","........"],
+  photo: ["........","......x.",".....xxx","......x.","..x.....",".xxx..x.","xxxxxxxx","xxxxxxxx"],
+};
+function svg(name, ink = "#151515", second = "rgba(255,255,255,0.55)") {
+  const g = PX[name]; if (!g) return "";
+  let d = "", o = "";
+  g.forEach((row, y) => [...row].forEach((c, x) => {
+    if (c === "x") d += `M${x} ${y}h1v1h-1z`; else if (c === "o") o += `M${x} ${y}h1v1h-1z`;
+  }));
+  return `<svg viewBox="0 0 8 8" shape-rendering="crispEdges"><path d="${o}" fill="${second}"/><path d="${d}" fill="${ink}"/></svg>`;
+}
+document.querySelectorAll("[data-px]").forEach(el => el.insertAdjacentHTML("afterbegin", svg(el.dataset.px, el.dataset.ink)));
+document.querySelectorAll(".blocks").forEach(b => { b.innerHTML = Array.from({length: 20}, (_, i) => `<i class="${i < 9 ? "on" : ""}"></i>`).join(""); });
+const TABS = [["home","home","Home"],["free","drain","Free up"],["dupes","dupes","Duplicates"],["organise","folder","Organise"],["nas","connections","NAS"]];
+document.querySelectorAll(".tabs").forEach(nav => {
+  nav.innerHTML = TABS.map(([id, px, label]) => `<div class="tab ${nav.dataset.on === id ? "on" : ""}">${svg(px)}<span>${label}</span></div>`).join("");
+});
+// Hero pixel scenes, 24 x 12 squares: a phone sending to a NAS, and the NAS holding it all.
+const SCENE = {
+  send: ["........................",".xxxxx..............xxxx",".x...x.............xoooo",".x.o.x.............xxxxx",".x...x...x..x..x...xoooo",".x...x....x..x..x..xxxxx",".x...x...x..x..x...xoooo",".x...x.............xxxxx",".x...x.............xoooo",".xxxxx.............xxxxx","..xx...............xx.xx","........................"],
+  done: ["........................","..........xxxx..........",".........xoooox.........",".........xxxxxx.........",".........xoooox....x....",".........xxxxxx...xx....",".........xoooox..xx.....",".........xxxxxx.xx......",".........xoooox.x.......",".........xxxxxx.........","..........xx.xx.........","........................"],
+};
+document.querySelectorAll("[data-scene]").forEach(el => {
+  const g = SCENE[el.dataset.scene]; let d = "", o = "";
+  g.forEach((row, y) => [...row].forEach((c, x) => { if (c === "x") d += `M${x} ${y}h1v1h-1z`; else if (c === "o") o += `M${x} ${y}h1v1h-1z`; }));
+  el.innerHTML = `<svg viewBox="0 0 24 12" width="100%" height="100%" shape-rendering="crispEdges"><path d="${o}" fill="#1d4aff"/><path d="${d}" fill="#151515"/></svg>`;
+});
+const only = new URLSearchParams(location.search).get("only");
+if (only) {
+  document.body.classList.add("solo");
+  document.querySelectorAll(".phone").forEach(p => { if (p.id !== only) p.remove(); });
+  document.getElementById("sheet").classList.add("only");
+}
+</script>
+</body>
+</html>

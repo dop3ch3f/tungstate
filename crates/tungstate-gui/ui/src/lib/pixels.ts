@@ -7,6 +7,7 @@
 
 export type Art =
   | "home" | "folder" | "drain" | "sync" | "dupes" | "history" | "connections" | "settings"
+  | "photo" | "file"
   | "no-folders" | "no-runs" | "no-pairs" | "no-connections" | "no-archives" | "nothing-found"
   | "no-history" | "no-syncs" | "in-step" | "conflict";
 
@@ -91,6 +92,27 @@ const SECTIONS: Record<string, string[]> = {
     "xxxxxxxx",
     ".....x..",
     "........",
+  ],
+  // The phone's file rows: a picture (hills and a sun) and any other file.
+  photo: [
+    "........",
+    "......x.",
+    ".....xxx",
+    "......x.",
+    "..x.....",
+    ".xxx..x.",
+    "xxxxxxxx",
+    "xxxxxxxx",
+  ],
+  file: [
+    ".xxxx...",
+    ".x..xx..",
+    ".x...xx.",
+    ".x....x.",
+    ".x.oo.x.",
+    ".x....x.",
+    ".x.oo.x.",
+    ".xxxxxx.",
   ],
 };
 
