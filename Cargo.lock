@@ -8536,7 +8536,7 @@ checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
 name = "tungstate-api"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "proptest",
  "serde",
@@ -8545,7 +8545,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-attrs"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "blake3",
  "infer 0.19.0",
@@ -8562,7 +8562,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-backend"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "proptest",
  "rustix",
@@ -8572,7 +8572,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-backend-opendal"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "futures-util",
  "opendal",
@@ -8593,7 +8593,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-backend-sftp"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "futures-util",
  "russh",
@@ -8607,7 +8607,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-backend-smb"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "proptest",
  "smb",
@@ -8618,7 +8618,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-cli"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "assert_cmd",
  "clap",
@@ -8655,7 +8655,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-core"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "blake3",
  "globset",
@@ -8671,7 +8671,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-execute"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "blake3",
  "image",
@@ -8691,7 +8691,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-gui"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "directories",
  "image",
@@ -8722,7 +8722,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-journal"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "directories",
  "rusqlite",
@@ -8733,7 +8733,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-likeness"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "image",
  "kamadak-exif",
@@ -8745,7 +8745,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-secret"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "android-native-keyring-store",
  "apple-native-keyring-store",
@@ -8756,7 +8756,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-sync"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "blake3",
  "notify",
@@ -8776,7 +8776,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-transfer"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "blake3",
  "tempfile",
@@ -8791,7 +8791,7 @@ dependencies = [
 
 [[package]]
 name = "tungstate-watch"
-version = "0.1.0-alpha.16"
+version = "0.1.0-alpha.17"
 dependencies = [
  "notify",
  "notify-debouncer-full",
