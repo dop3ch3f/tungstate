@@ -33,7 +33,15 @@ pub enum SecretError {
 pub type Result<T> = std::result::Result<T, SecretError>;
 
 /// The service name every tungstate entry is filed under.
-const SERVICE: &str = "tungstate";
+///
+/// A development build files its own, as `tungstate_journal::APP_DIR` keeps
+/// its own journal: a test connection called `nas` must not overwrite the
+/// password of the real one.
+const SERVICE: &str = if cfg!(debug_assertions) {
+    "tungstate-dev"
+} else {
+    "tungstate"
+};
 
 /// The keychain account a connection's password is stored as.
 ///

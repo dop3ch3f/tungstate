@@ -2920,3 +2920,22 @@ fn folders_and_plans_from_before_v15_read_as_this_machines() {
     // And still one folder per local path.
     assert!(journal.add_folder("/Users/me/Downloads", "again").is_err());
 }
+
+#[test]
+fn a_development_build_keeps_its_journal_apart_from_the_installed_app() {
+    let path = crate::default_path().expect("a state directory");
+
+    // `cargo test --release` builds like a release, and must then match it.
+    let expected = if cfg!(debug_assertions) {
+        "tungstate-dev"
+    } else {
+        "tungstate"
+    };
+    // Windows puts a `data` folder under the app's, so look along the path.
+    assert!(
+        path.iter().any(|part| part == expected),
+        "{} is not under {expected}",
+        path.display()
+    );
+    assert_eq!(path.file_name().expect("a file"), "journal.db");
+}

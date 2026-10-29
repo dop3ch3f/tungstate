@@ -698,13 +698,22 @@ impl Journal {
     }
 }
 
+/// The name tungstate's own folders are kept under.
+///
+/// A development build gets its own, so testing a newer schema can never
+/// migrate the journal an installed release still has to read.
+pub const APP_DIR: &str = if cfg!(debug_assertions) {
+    "tungstate-dev"
+} else {
+    "tungstate"
+};
+
 /// Where the journal lives on this machine.
 ///
 /// # Errors
 /// [`JournalError::NoStateDir`] if the platform exposes no standard location.
 pub fn default_path() -> Result<PathBuf> {
-    let dirs =
-        directories::ProjectDirs::from("", "", "tungstate").ok_or(JournalError::NoStateDir)?;
+    let dirs = directories::ProjectDirs::from("", "", APP_DIR).ok_or(JournalError::NoStateDir)?;
     Ok(dirs.data_dir().join("journal.db"))
 }
 

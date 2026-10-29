@@ -335,7 +335,7 @@ fn cache_dir() -> Option<PathBuf> {
     #[cfg(mobile)]
     return phone_dirs().map(|dirs| dirs.cache.clone());
     #[cfg(desktop)]
-    directories::ProjectDirs::from("dev", "tungstate", "tungstate")
+    directories::ProjectDirs::from("dev", "tungstate", tungstate_journal::APP_DIR)
         .map(|dirs| dirs.cache_dir().to_path_buf())
 }
 
@@ -1728,7 +1728,8 @@ fn pane_state_path() -> Option<PathBuf> {
     #[cfg(mobile)]
     return phone_dirs().map(|dirs| dirs.data.join("panes.json"));
     #[cfg(desktop)]
-    directories::ProjectDirs::from("", "", "tungstate").map(|d| d.data_dir().join("panes.json"))
+    directories::ProjectDirs::from("", "", tungstate_journal::APP_DIR)
+        .map(|d| d.data_dir().join("panes.json"))
 }
 
 #[tauri::command]
