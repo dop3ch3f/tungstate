@@ -2968,6 +2968,89 @@ fn describe(error: impl std::error::Error) -> String {
     message
 }
 
+/// What to tell someone whose journal will not open, before any window exists.
+#[cfg(desktop)]
+#[derive(Debug, PartialEq, Eq)]
+struct Problem {
+    title: &'static str,
+    detail: String,
+    /// A journal from a newer version is fixed by installing that version.
+    offer_download: bool,
+}
+
+/// Where a newer version can be downloaded.
+#[cfg(desktop)]
+const LATEST_RELEASE: &str = "https://github.com/dop3ch3f/tungstate/releases/latest";
+
+#[cfg(desktop)]
+fn startup_problem(error: &JournalError) -> Problem {
+    match error {
+        JournalError::TooNew { .. } => Problem {
+            title: "Tungstate needs updating",
+            detail: format!(
+                "Your history was saved by a newer version of Tungstate, so this \
+                 copy can't read it. Nothing has been changed.\n\n\
+                 Install the latest version from {LATEST_RELEASE} to carry on."
+            ),
+            offer_download: true,
+        },
+        other => Problem {
+            title: "Tungstate couldn't open its history",
+            detail: format!("{}\n\nNothing has been changed.", describe(other)),
+            offer_download: false,
+        },
+    }
+}
+
+/// Say what went wrong in a native dialog, since there is no window yet.
+///
+/// Launched from Finder or the Start menu there is no terminal either, so
+/// without this the app would vanish without a word.
+#[cfg(desktop)]
+fn show_startup_problem(problem: &Problem) {
+    use rfd::{MessageButtons, MessageDialog, MessageDialogResult, MessageLevel};
+
+    const DOWNLOAD: &str = "Download the latest";
+    let buttons = if problem.offer_download {
+        MessageButtons::OkCancelCustom(DOWNLOAD.into(), "Quit".into())
+    } else {
+        MessageButtons::OkCustom("Quit".into())
+    };
+    // Out of date is not broken: a warning, not the red stop sign.
+    let level = if problem.offer_download {
+        MessageLevel::Warning
+    } else {
+        MessageLevel::Error
+    };
+    let answer = MessageDialog::new()
+        .set_level(level)
+        .set_title(problem.title)
+        .set_description(&problem.detail)
+        .set_buttons(buttons)
+        .show();
+    if answer == MessageDialogResult::Custom(DOWNLOAD.into()) {
+        open_in_browser(LATEST_RELEASE);
+    }
+}
+
+/// Best effort: if no browser opens, the dialog has already given the address.
+#[cfg(desktop)]
+fn open_in_browser(url: &str) {
+    use std::process::Command;
+
+    #[cfg(target_os = "macos")]
+    let mut command = Command::new("open");
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("rundll32");
+        command.arg("url.dll,FileProtocolHandler");
+        command
+    };
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    let mut command = Command::new("xdg-open");
+    let _ = command.arg(url).status();
+}
+
 /// The window's shared state, around a journal that is already open.
 fn new_app(journal: Journal, watcher: Arc<watching::Watching>) -> App {
     App {
@@ -3017,8 +3100,10 @@ pub fn run() {
         Ok(journal) => journal,
         Err(error) => {
             // No journal means no history and no crash recovery, so there is
-            // nothing safe to do. Fail loudly rather than half-working.
-            eprintln!("tungstate could not open its journal: {}", describe(error));
+            // nothing safe to do. Fail loudly, in a dialog as well as on the
+            // terminal, rather than half-working.
+            eprintln!("tungstate could not open its journal: {}", describe(&error));
+            show_startup_problem(&startup_problem(&error));
             std::process::exit(1);
         }
     };
@@ -3160,6 +3245,32 @@ pub fn run() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_journal_from_a_newer_version_asks_for_the_update_instead_of_vanishing() {
+        let problem = startup_problem(&JournalError::TooNew {
+            found: 15,
+            known: 14,
+        });
+
+        assert!(problem.offer_download);
+        assert_eq!(problem.title, "Tungstate needs updating");
+        assert!(problem.detail.contains(LATEST_RELEASE));
+        assert!(problem.detail.contains("Nothing has been changed"));
+    }
+
+    #[test]
+    fn any_other_journal_failure_says_why_and_offers_no_download() {
+        let problem = startup_problem(&JournalError::NoStateDir);
+
+        assert!(!problem.offer_download);
+        assert_eq!(problem.title, "Tungstate couldn't open its history");
+        assert!(
+            problem
+                .detail
+                .starts_with(&JournalError::NoStateDir.to_string())
+        );
+    }
 
     fn leg(source: &str, destination: &str) -> Leg {
         Leg {

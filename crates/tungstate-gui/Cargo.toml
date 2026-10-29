@@ -43,6 +43,7 @@ tracing-subscriber = { workspace = true }
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 tauri-plugin-updater = { workspace = true }
 tauri-plugin-process = { workspace = true }
+rfd = { workspace = true }
 
 [dev-dependencies]
 # Drawing a picture for the resemblance tests, so no binary is checked in.

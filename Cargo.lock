@@ -8696,6 +8696,7 @@ dependencies = [
  "directories",
  "image",
  "jiff",
+ "rfd",
  "serde",
  "serde_json",
  "tauri",

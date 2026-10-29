@@ -32,6 +32,9 @@ rpassword = "7.5"
 tauri = { version = "2", features = [] }
 tauri-build = { version = "2", features = [] }
 tauri-plugin-dialog = "2"
+# Only for the message shown when the journal cannot be opened, before Tauri
+# runs. Same version and features the dialog plugin already builds.
+rfd = { version = "0.16", default-features = false, features = ["common-controls-v6"] }
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 serde_json = "1.0"
