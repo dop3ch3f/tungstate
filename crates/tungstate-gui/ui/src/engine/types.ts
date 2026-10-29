@@ -760,3 +760,24 @@ export interface FollowingView {
 
 /** What restarting into an update would cut short. */
 export type Blocker = "transfer" | "sync";
+
+/** Whether the phone app may look at the photo library. */
+export type PhotoAccess = "full" | "limited" | "denied" | "ask";
+
+export interface PhotoFilter {
+  kind: "all" | "videos" | "screenshots";
+  /** Only what is older than this many days; zero means everything. */
+  olderThanDays: number;
+}
+
+export interface Tally {
+  count: number;
+  bytes: number;
+}
+
+/** The photo library as a filter sees it. Favourites are counted apart from
+ *  the years, newest year first, because by default they stay on the phone. */
+export interface PhotoSummary {
+  years: (Tally & { year: number })[];
+  favourites: Tally;
+}

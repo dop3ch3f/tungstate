@@ -22,6 +22,11 @@ test("one of a thing is singular, and the plural can be irregular", () => {
   assert.equal(plural(0, "copy", "copies"), "0 copies");
 });
 
+test("a large count is grouped the way the phone's language writes it", () => {
+  // A photo library printed "3214 items".
+  assert.equal(plural(3214, "item"), `${(3214).toLocaleString()} items`);
+});
+
 test("a place in line reads the way it is said", () => {
   assert.deepEqual([1, 2, 3, 4].map(ordinal), ["1st", "2nd", "3rd", "4th"]);
   assert.deepEqual([11, 12, 13, 21, 22, 111].map(ordinal), ["11th", "12th", "13th", "21st", "22nd", "111th"]);

@@ -1,0 +1,21 @@
+[package]
+name = "tauri-plugin-photos"
+description = "A phone's photo library, for Tungstate: what is there, how big, and how old."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+# Tauri's build step finds a plugin's Kotlin and Swift through this key.
+links = "tauri-plugin-photos"
+
+[dependencies]
+tauri = { workspace = true }
+serde = { workspace = true }
+thiserror = { workspace = true }
+
+[build-dependencies]
+tauri-plugin = { version = "2", features = ["build"] }
+
+[lints]
+workspace = true

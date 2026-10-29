@@ -10,13 +10,6 @@ import type { Art } from "../../lib/pixels";
 const props = defineProps<{ tab: Tab }>();
 
 const ABOUT: Partial<Record<Tab, { title: string; art: Art; tint: string; does: string; needs: string }>> = {
-  free: {
-    title: "Free up space",
-    art: "drain",
-    tint: "var(--tint-drain)",
-    does: "Send photos and videos to your NAS or another connection, check each one there, then clear them from this phone.",
-    needs: "Comes with the next build, once Tungstate can read your photo library.",
-  },
   dupes: {
     title: "Duplicates",
     art: "dupes",

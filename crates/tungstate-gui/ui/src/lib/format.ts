@@ -16,9 +16,9 @@ export function bytes(n: number): string {
   return `${value.toFixed(value < 10 ? 1 : 0)} ${units[i]}`;
 }
 
-/** `1 group`, `3 groups`: for counts that are not files. Files go through
+/** `1 group`, `3,214 groups`: for counts that are not files. Files go through
  *  `counts.ts`, which checks where the number came from. */
-export const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+export const plural = (n: number, one: string, many = `${one}s`): string => `${n.toLocaleString()} ${n === 1 ? one : many}`;
 
 /** `1st`, `2nd`, `11th`, `22nd`: a place in line. The teens are all `th`. */
 export function ordinal(n: number): string {

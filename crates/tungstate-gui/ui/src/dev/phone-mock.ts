@@ -21,6 +21,7 @@ const area51: T.Connection = {
   place: "area51.local › PlexMediaServer", last_check: { at: Date.now() - 3_600_000, ok: true, note: "" },
 };
 let saved: T.Connection[] = params.has("none") ? [] : [area51];
+let photoAccess: T.PhotoAccess = (params.get("photos") as T.PhotoAccess | null) ?? "full";
 
 const GB = 1024 ** 3;
 const dir = (path: string, name: string): T.Entry => ({ name, path: `${path}/${name}`.replace(":/", ":"), is_dir: true, size: 0, modified: null });
@@ -47,6 +48,16 @@ mockIPC((cmd, args) => {
       saved = [...saved, { ...area51, ...f, place: `${f.host} › ${f.root}`, last_check: null } as T.Connection];
       return null;
     }
+    // The photo library: `?photos=ask|denied|limited`, full by default.
+    case "plugin:photos|access": return photoAccess;
+    case "plugin:photos|ask": photoAccess = "full"; return photoAccess;
+    case "plugin:photos|summary": {
+      const f = a.filter as T.PhotoFilter;
+      // Fewer and smaller the narrower the filter, so the screens visibly respond.
+      const scale = (f.kind === "videos" ? 0.6 : f.kind === "screenshots" ? 0.03 : 1) * (f.olderThanDays === 0 ? 1.3 : f.olderThanDays >= 365 ? 0.55 : 1);
+      const year = (y: number, count: number, gb: number) => ({ year: y, count: Math.round(count * scale), bytes: Math.round(gb * scale * GB) });
+      return { years: [year(2026, 1204, 14.2), year(2025, 1688, 19.6), year(2024, 322, 7.4)], favourites: { count: 96, bytes: Math.round(2.1 * GB) } } satisfies T.PhotoSummary;
+    }
     default: throw new Error(`phone mock has no answer for ${cmd}`);
   }
 });
@@ -56,6 +67,9 @@ mockIPC((cmd, args) => {
 const app = document.getElementById("app")!;
 app.style.width = "390px";
 app.style.height = "844px";
+// Makes #app the box that `position: fixed` sheets are placed in, as the
+// phone's screen is; otherwise they span the 500px window and are cropped.
+app.style.transform = "translateZ(0)";
 
 const tab = params.get("tab") as Tab | null;
 if (tab) usePhoneNav().go(tab);

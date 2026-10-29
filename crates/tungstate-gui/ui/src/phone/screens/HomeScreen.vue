@@ -1,9 +1,12 @@
-<!-- Home. In the approved design it leads with how much this phone can free;
-     that needs the photo library, which comes with Free up space, so until
-     then the card says so and Home shows only what it really knows. -->
+<!-- Home: how much this phone can free, then your connections. The number
+     is Free up space's own, so the two screens never disagree; until the
+     person lets the app see their photos, Home asks for that instead. -->
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 import { useConnections } from "../../state/useConnections";
+import { bytes, plural } from "../../lib/format";
+import { usePhotos } from "../state/usePhotos";
+import PButton from "../ui/PButton.vue";
 import { usePhoneNav } from "../nav";
 import PScreen from "../ui/PScreen.vue";
 import PRow from "../ui/PRow.vue";
@@ -11,7 +14,11 @@ import PTile from "../ui/PTile.vue";
 
 const conns = useConnections();
 const nav = usePhoneNav();
-onMounted(() => void conns.load());
+const lib = usePhotos();
+onMounted(() => {
+  void conns.load();
+  void lib.load();
+});
 
 const first = computed(() => conns.all.value.find((c) => c.scheme !== "fs") ?? null);
 const others = computed(() => conns.all.value.filter((c) => c.scheme !== "fs").length - 1);
@@ -27,9 +34,13 @@ const line = computed(() => {
 
 <template>
   <PScreen title="Tungstate">
-    <div class="soon">
+    <div v-if="lib.canRead.value" class="hero">
+      <span class="big">{{ bytes(lib.chosen.value.bytes) }}</span>
+      <span class="sub">{{ lib.loading.value ? "counting…" : `you can free · ${plural(lib.chosen.value.count, "photo and video", "photos and videos")} older than 3 months` }}</span>
+    </div>
+    <div v-else-if="lib.access.value" class="soon">
       <b>How much this phone can free</b>
-      <p>Shows here once Tungstate can see your photos. That comes with the next build.</p>
+      <p>Shows here once Tungstate can see your photos and videos.</p>
     </div>
     <h2>Your connections</h2>
     <div class="list">
@@ -37,10 +48,17 @@ const line = computed(() => {
         <template #lead><PTile art="connections" tint="var(--tint-connections)" light /></template>
       </PRow>
     </div>
+    <template #act>
+      <PButton v-if="lib.canRead.value && lib.chosen.value.count" @press="nav.go('free')">Free {{ bytes(lib.chosen.value.bytes) }}</PButton>
+      <PButton v-else-if="lib.access.value === 'ask'" @press="nav.go('free')">See what you can free</PButton>
+    </template>
   </PScreen>
 </template>
 
 <style scoped>
+.hero { display: flex; flex-direction: column; gap: 8px; margin: 6px 0 4px; }
+.big { font-size: 52px; font-weight: 800; letter-spacing: -1.5px; line-height: 0.95; }
+.sub { font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
 .soon { display: flex; flex-direction: column; gap: 6px; padding: 16px; border: 2px dashed var(--edge); border-radius: 8px; }
 .soon b { font-size: 17px; }
 .soon p { margin: 0; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }

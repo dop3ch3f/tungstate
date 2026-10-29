@@ -178,3 +178,11 @@ export const updates = {
   /** The restart is off: keep syncs in step again. */
   notRestarting: () => invoke<void>("not_restarting"),
 };
+
+/** The phone's photo library. Every call fails on desktop, which has none. */
+export const photos = {
+  access: () => invoke<T.PhotoAccess>("plugin:photos|access"),
+  /** Shows the system's own question; answers once it is answered. */
+  ask: () => invoke<T.PhotoAccess>("plugin:photos|ask"),
+  summary: (filter: T.PhotoFilter) => invoke<T.PhotoSummary>("plugin:photos|summary", { filter }),
+};

@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Without this file Tauri resolves an empty ACL, and every core command the window calls is denied. The one that matters is event:listen: the window registers its progress listeners at startup, and a denial there means a running transfer never appears on screen and a conflict can never be answered. The rest: the title bar follows the chosen theme. Updating lives in desktop.json, because phones have no updater.",
+  "description": "Without this file Tauri resolves an empty ACL, and every core command the window calls is denied. The one that matters is event:listen: the window registers its progress listeners at startup, and a denial there means a running transfer never appears on screen and a conflict can never be answered. The rest: the title bar follows the chosen theme, and the phone app reads the photo library. Updating lives in desktop.json, because phones have no updater.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
-    "core:window:allow-set-theme"
+    "core:window:allow-set-theme",
+    "photos:default"
   ]
 }

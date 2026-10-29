@@ -37,6 +37,9 @@ serde_json = { workspace = true }
 jiff = { workspace = true }
 tauri = { workspace = true }
 tauri-plugin-dialog = { workspace = true }
+# The phone's photo library, for Free up space. On desktop it only says
+# there is no library, so the app is built the same way everywhere.
+tauri-plugin-photos = { path = "../tauri-plugin-photos" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 

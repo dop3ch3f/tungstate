@@ -3128,7 +3128,8 @@ pub fn run() {
         // a half-daemon with no way back on a platform without a dock icon.
         // Closing stops the drain, which is safe: the operation stays
         // `intended`, and the next launch offers to finish or clear it.
-        .plugin(tauri_plugin_dialog::init());
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_photos::init());
     // Updates come from the latest tagged release, signed by a key whose
     // public half is in tauri.conf.json; the window asks before any. Phones
     // are updated by their store, which forbids an app replacing itself.

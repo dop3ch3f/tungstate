@@ -9,12 +9,13 @@ import TabBar from "./TabBar.vue";
 import HomeScreen from "./screens/HomeScreen.vue";
 import ConnectionsScreen from "./screens/ConnectionsScreen.vue";
 import LaterScreen from "./screens/LaterScreen.vue";
+import FreeUpScreen from "./screens/FreeUpScreen.vue";
 
 const nav = usePhoneNav();
 
 const SCREENS: Record<Tab, Component> = {
   home: HomeScreen,
-  free: LaterScreen,
+  free: FreeUpScreen,
   dupes: LaterScreen,
   organise: LaterScreen,
   connections: ConnectionsScreen,
