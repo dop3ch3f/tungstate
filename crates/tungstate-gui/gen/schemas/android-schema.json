@@ -2281,6 +2281,48 @@
           "type": "string",
           "const": "dialog:deny-save",
           "markdownDescription": "Denies the save command without any pre-configured scope."
+        },
+        {
+          "description": "Read what is in the photo library and ask for access to it.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`",
+          "type": "string",
+          "const": "photos:default",
+          "markdownDescription": "Read what is in the photo library and ask for access to it.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`"
+        },
+        {
+          "description": "Enables the access command without any pre-configured scope.",
+          "type": "string",
+          "const": "photos:allow-access",
+          "markdownDescription": "Enables the access command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the ask command without any pre-configured scope.",
+          "type": "string",
+          "const": "photos:allow-ask",
+          "markdownDescription": "Enables the ask command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "photos:allow-summary",
+          "markdownDescription": "Enables the summary command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the access command without any pre-configured scope.",
+          "type": "string",
+          "const": "photos:deny-access",
+          "markdownDescription": "Denies the access command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ask command without any pre-configured scope.",
+          "type": "string",
+          "const": "photos:deny-ask",
+          "markdownDescription": "Denies the ask command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the summary command without any pre-configured scope.",
+          "type": "string",
+          "const": "photos:deny-summary",
+          "markdownDescription": "Denies the summary command without any pre-configured scope."
         }
       ]
     },

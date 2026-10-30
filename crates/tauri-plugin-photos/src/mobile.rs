@@ -1,10 +1,12 @@
-use serde::{Deserialize, de::DeserializeOwned};
+use std::path::Path;
+
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use tauri::{
     AppHandle, Runtime,
     plugin::{PluginApi, PluginHandle},
 };
 
-use crate::{Access, Filter, Result, Summary};
+use crate::{Access, Asset, Filter, Removed, Result, Summary};
 
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_photos);
@@ -31,6 +33,27 @@ struct Answer {
     access: Access,
 }
 
+#[derive(Deserialize)]
+struct Assets {
+    assets: Vec<Asset>,
+}
+
+#[derive(Serialize)]
+struct Export<'a> {
+    id: &'a str,
+    path: std::borrow::Cow<'a, str>,
+}
+
+#[derive(Serialize)]
+struct Ids<'a> {
+    ids: &'a [String],
+}
+
+#[derive(Serialize)]
+struct Awake {
+    on: bool,
+}
+
 impl<R: Runtime> Photos<R> {
     /// # Errors
     /// The phone's code failed.
@@ -50,5 +73,42 @@ impl<R: Runtime> Photos<R> {
     /// The phone's code failed, or access was not given.
     pub fn summary(&self, filter: Filter) -> Result<Summary> {
         Ok(self.0.run_mobile_plugin("summary", filter)?)
+    }
+
+    /// Every photo and video the filter covers, favourites included.
+    ///
+    /// # Errors
+    /// The phone's code failed, or access was not given.
+    pub fn list(&self, filter: Filter) -> Result<Vec<Asset>> {
+        Ok(self.0.run_mobile_plugin::<Assets>("list", filter)?.assets)
+    }
+
+    /// Copies one photo or video, untouched, into a file at `to`.
+    ///
+    /// # Errors
+    /// The phone's code failed: the photo is gone, unreadable, or the file
+    /// could not be written.
+    pub fn export(&self, id: &str, to: &Path) -> Result<()> {
+        let path = to.to_string_lossy();
+        self.0
+            .run_mobile_plugin::<()>("export", Export { id, path })?;
+        Ok(())
+    }
+
+    /// Asks the person, through the system's own prompt, to remove these.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn remove(&self, ids: &[String]) -> Result<Removed> {
+        Ok(self.0.run_mobile_plugin("remove", Ids { ids })?)
+    }
+
+    /// Keeps the screen on, or lets it sleep again.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn keep_awake(&self, on: bool) -> Result<()> {
+        self.0.run_mobile_plugin::<()>("keepAwake", Awake { on })?;
+        Ok(())
     }
 }

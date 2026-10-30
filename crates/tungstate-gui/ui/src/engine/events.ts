@@ -54,3 +54,9 @@ export const syncEvents = {
 };
 
 export type { UnlistenFn };
+
+/** A Free up run on a phone. */
+export const freeUpEvents = {
+  progress: on<T.FreeUpTick>("freeup://progress"),
+  done: on<T.FreeUpRan>("freeup://done"),
+};

@@ -186,3 +186,14 @@ export const photos = {
   ask: () => invoke<T.PhotoAccess>("plugin:photos|ask"),
   summary: (filter: T.PhotoFilter) => invoke<T.PhotoSummary>("plugin:photos|summary", { filter }),
 };
+
+/** Free up space: send photos to a connection, check each, then clear. */
+export const freeUp = {
+  /** Starts the run; progress and the end come as `freeup://` events. */
+  start: (start: T.FreeUpStart) => invoke<void>("free_up_start", { start }),
+  /** Pause and Stop alike: finish the photo in hand, then stop. */
+  stop: () => invoke<void>("free_up_stop"),
+  /** Shows the system's prompt to remove what the last run checked, and
+   *  answers once the person has. Only the engine knows which those are. */
+  clear: () => invoke<T.Removed>("free_up_clear"),
+};

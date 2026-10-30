@@ -781,3 +781,49 @@ export interface PhotoSummary {
   years: (Tally & { year: number })[];
   favourites: Tally;
 }
+
+/** How each photo is checked on the connection before it may be cleared. */
+export type CheckLevel = "readback" | "size";
+
+/** What Free up sends, and where. */
+export interface FreeUpStart {
+  connection: string;
+  folder: string;
+  filter: PhotoFilter;
+  years_left_out: number[];
+  favourites: boolean;
+  verify: CheckLevel;
+}
+
+/** Where a Free up run is. */
+export interface FreeUpTick {
+  /** Dealt with, whatever became of them. */
+  done: number;
+  /** Of those, checked on the connection, so safe to clear. */
+  checked: number;
+  count: number;
+  bytes: number;
+  total: number;
+  current: string;
+}
+
+/** How a Free up run ended. */
+export interface FreeUpRan {
+  checked: number;
+  checked_bytes: number;
+  /** Chosen but not proven to be on the connection; these stay. */
+  kept: number;
+  stopped: boolean;
+  problem: string | null;
+  /** Why the first photo that stayed did. */
+  reason: string | null;
+}
+
+/** What came of asking the phone to remove what a run checked. */
+export interface Removed {
+  /** Gone from the phone, counted afterwards. */
+  removed: number;
+  /** False where the phone cannot let an app remove photos (Android 10 and
+   *  earlier); the person deletes them in their gallery instead. */
+  supported: boolean;
+}

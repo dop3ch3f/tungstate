@@ -15,6 +15,7 @@ mod bridge;
 mod clouds;
 mod dupes;
 mod following;
+mod freeup;
 mod sync;
 mod watching;
 
@@ -78,6 +79,8 @@ struct App {
     /// Held while a transfer or a sync decides whether it may start, so the
     /// two cannot both find the other idle and start writing to one folder.
     gate: Mutex<()>,
+    /// Free up space on a phone: its run, and what that run proved safe.
+    freeup: freeup::FreeUp,
 }
 
 /// Work waiting for a worker, and whether a worker is there to take it.
@@ -2703,6 +2706,11 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
     if state.syncing.queue.is_running() {
         return Err("a sync is running; move files when it has finished".into());
     }
+    // Free up space holds the queue without working through it, so anything
+    // queued now would wait for a worker that never comes.
+    if state.freeup.running() {
+        return Err("Free up space is running; move files when it has finished".into());
+    }
 
     // The lock is held across the push *and* the decision to start a worker.
     // That is the whole correctness argument: a worker only ever clears
@@ -3068,6 +3076,7 @@ fn new_app(journal: Journal, watcher: Arc<watching::Watching>) -> App {
         syncing: sync::Syncing::default(),
         following: following::Following::default(),
         gate: Mutex::new(()),
+        freeup: freeup::FreeUp::default(),
     }
 }
 
@@ -3157,6 +3166,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            freeup::free_up_start,
+            freeup::free_up_stop,
+            freeup::free_up_clear,
             transfer_queue,
             remove_from_queue,
             settings_problems,

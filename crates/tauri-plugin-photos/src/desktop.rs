@@ -1,7 +1,9 @@
+use std::path::Path;
+
 use serde::de::DeserializeOwned;
 use tauri::{AppHandle, Runtime, plugin::PluginApi};
 
-use crate::{Access, Error, Filter, Result, Summary};
+use crate::{Access, Asset, Error, Filter, Removed, Result, Summary};
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
@@ -30,6 +32,30 @@ impl<R: Runtime> Photos<R> {
     /// # Errors
     /// Always [`Error::NoLibrary`].
     pub fn summary(&self, _filter: Filter) -> Result<Summary> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn list(&self, _filter: Filter) -> Result<Vec<Asset>> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn export(&self, _id: &str, _to: &Path) -> Result<()> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn remove(&self, _ids: &[String]) -> Result<Removed> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn keep_awake(&self, _on: bool) -> Result<()> {
         Err(Error::NoLibrary)
     }
 }

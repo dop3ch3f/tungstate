@@ -7,5 +7,7 @@ export function onPhone(): boolean {
 }
 
 /** Android draws under its status bar and gives the web view no inset for
- *  it; iOS reports its insets through `env(safe-area-inset-*)`. */
-export const isAndroid = (): boolean => /Android/.test(navigator.userAgent);
+ *  it; iOS reports its insets through `env(safe-area-inset-*)`. `?android`
+ *  says so in a browser, for the harness. */
+export const isAndroid = (): boolean =>
+  /Android/.test(navigator.userAgent) || new URLSearchParams(location.search).has("android");

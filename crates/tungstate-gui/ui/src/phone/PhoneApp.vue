@@ -10,8 +10,13 @@ import HomeScreen from "./screens/HomeScreen.vue";
 import ConnectionsScreen from "./screens/ConnectionsScreen.vue";
 import LaterScreen from "./screens/LaterScreen.vue";
 import FreeUpScreen from "./screens/FreeUpScreen.vue";
+import FreeingScreen from "./screens/FreeingScreen.vue";
+import { useFreeUp } from "./state/useFreeUp";
 
 const nav = usePhoneNav();
+const run = useFreeUp();
+// A Free up run takes the whole screen, tabs and all, until it is done with.
+const freeing = computed(() => run.phase.value !== "idle");
 
 const SCREENS: Record<Tab, Component> = {
   home: HomeScreen,
@@ -33,9 +38,10 @@ onUnmounted(() => window.removeEventListener("resize", measure));
 <template>
   <div class="phone" :class="{ android: isAndroid() }">
     <main class="stage">
-      <component :is="shown" :key="nav.tab.value" :tab="nav.tab.value" />
+      <FreeingScreen v-if="freeing" />
+      <component :is="shown" v-else :key="nav.tab.value" :tab="nav.tab.value" />
     </main>
-    <footer v-show="!typing" class="foot"><TabBar /></footer>
+    <footer v-show="!typing && !freeing" class="foot"><TabBar /></footer>
   </div>
 </template>
 

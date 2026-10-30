@@ -1,8 +1,12 @@
 //! A phone's photo library, for Tungstate.
 //!
 //! What is there, how big and how old, and whether the person has let the
-//! app look. Reading only, for now: copying photos out and removing them
-//! after they are safe on a connection come with the rest of Free up space.
+//! app look; copying a photo out into a file; and asking, through the
+//! system's own prompt, to remove photos once they are safe elsewhere.
+//!
+//! Only counting and asking for access are open to the window. Listing,
+//! copying out and removing are for the app's Rust, which decides what is
+//! safe to remove; nothing the window says can widen that.
 //!
 //! The work is done in Kotlin (`android/`) and Swift (`ios/`); this crate
 //! forwards to them. On desktop every call says there is no photo library.
@@ -26,9 +30,9 @@ mod models;
 pub use error::{Error, Result};
 
 #[cfg(desktop)]
-use desktop::Photos;
+pub use desktop::Photos;
 #[cfg(mobile)]
-use mobile::Photos;
+pub use mobile::Photos;
 
 /// `app.photos()`, from anything that can reach the app's state.
 pub trait PhotosExt<R: Runtime> {

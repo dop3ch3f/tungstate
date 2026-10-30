@@ -5,7 +5,7 @@
 import { computed, onMounted } from "vue";
 import { useConnections } from "../../state/useConnections";
 import { bytes, plural } from "../../lib/format";
-import { usePhotos } from "../state/usePhotos";
+import { AGES, usePhotos } from "../state/usePhotos";
 import PButton from "../ui/PButton.vue";
 import { usePhoneNav } from "../nav";
 import PScreen from "../ui/PScreen.vue";
@@ -18,6 +18,15 @@ const lib = usePhotos();
 onMounted(() => {
   void conns.load();
   void lib.load();
+});
+
+/** "1,204 photos and videos older than 3 months", following Free up's filter. */
+const freeable = computed(() => {
+  const { kind, olderThanDays } = lib.filter.value;
+  const n = lib.chosen.value.count;
+  const what = kind === "videos" ? plural(n, "video") : kind === "screenshots" ? plural(n, "screenshot") : plural(n, "photo and video", "photos and videos");
+  const age = AGES.find((a) => a.days === olderThanDays);
+  return olderThanDays && age ? `${what} older than ${age.label}` : what;
 });
 
 const first = computed(() => conns.all.value.find((c) => c.scheme !== "fs") ?? null);
@@ -36,7 +45,7 @@ const line = computed(() => {
   <PScreen title="Tungstate">
     <div v-if="lib.canRead.value" class="hero">
       <span class="big">{{ bytes(lib.chosen.value.bytes) }}</span>
-      <span class="sub">{{ lib.loading.value ? "counting…" : `you can free · ${plural(lib.chosen.value.count, "photo and video", "photos and videos")} older than 3 months` }}</span>
+      <span class="sub">{{ lib.loading.value ? "counting…" : `you can free · ${freeable}` }}</span>
     </div>
     <div v-else-if="lib.access.value" class="soon">
       <b>How much this phone can free</b>

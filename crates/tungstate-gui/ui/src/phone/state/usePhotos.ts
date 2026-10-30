@@ -8,6 +8,19 @@ import { computed, ref, shallowRef } from "vue";
 import { photos } from "../../engine/commands";
 import type { PhotoAccess, PhotoFilter, PhotoSummary } from "../../engine/types";
 
+/** The kinds and ages the filter offers, as both screens word them. */
+export const KINDS: { id: PhotoFilter["kind"]; label: string }[] = [
+  { id: "all", label: "All" },
+  { id: "videos", label: "Videos" },
+  { id: "screenshots", label: "Screenshots" },
+];
+export const AGES: { days: number; label: string }[] = [
+  { days: 30, label: "1 month" },
+  { days: 90, label: "3 months" },
+  { days: 365, label: "1 year" },
+  { days: 0, label: "Any" },
+];
+
 const access = ref<PhotoAccess | null>(null);
 /** The approved default: everything older than three months. */
 const filter = ref<PhotoFilter>({ kind: "all", olderThanDays: 90 });

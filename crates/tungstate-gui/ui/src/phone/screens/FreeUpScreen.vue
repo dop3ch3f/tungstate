@@ -1,22 +1,22 @@
 <!-- Free up space: what the photo library could give back, chosen by kind,
-     age and year, and where it would go. Matches the approved mockup.
-
-     Reading only, in this build: sending, checking each item on the
-     connection and clearing it from the phone come next, and the button
-     says so rather than pretending. -->
+     age and year, where it goes, and how carefully each one is checked
+     there. Free starts the run, which takes over the screen. Matches the
+     approved mockup. -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import type { PhotoFilter } from "../../engine/types";
+import type { CheckLevel, PhotoFilter } from "../../engine/types";
 import { bytes, plural } from "../../lib/format";
 import { useConnections } from "../../state/useConnections";
 import { usePhoneNav } from "../nav";
-import { usePhotos } from "../state/usePhotos";
+import { AGES, KINDS, usePhotos } from "../state/usePhotos";
+import { useFreeUp } from "../state/useFreeUp";
 import PScreen from "../ui/PScreen.vue";
 import PRow from "../ui/PRow.vue";
 import PTile from "../ui/PTile.vue";
 import PButton from "../ui/PButton.vue";
 
 const lib = usePhotos();
+const run = useFreeUp();
 const conns = useConnections();
 const nav = usePhoneNav();
 onMounted(() => {
@@ -29,23 +29,34 @@ const targets = computed(() => conns.all.value.filter((c) => c.scheme !== "fs"))
 const chosenTarget = ref<string | null>(null);
 const target = computed(() => targets.value.find((c) => c.name === chosenTarget.value) ?? targets.value[0] ?? null);
 
-const KINDS: { id: PhotoFilter["kind"]; label: string }[] = [
-  { id: "all", label: "All" },
-  { id: "videos", label: "Videos" },
-  { id: "screenshots", label: "Screenshots" },
-];
-const AGES: { days: number; label: string }[] = [
-  { days: 30, label: "1 month" },
-  { days: 90, label: "3 months" },
-  { days: 365, label: "1 year" },
-  { days: 0, label: "Any" },
-];
 const filterLine = computed(() => {
   const kind = KINDS.find((k) => k.id === lib.filter.value.kind)!.label;
   const age = AGES.find((a) => a.days === lib.filter.value.olderThanDays)!;
   return age.days ? `${kind} · older than ${age.label}` : `${kind} · any age`;
 });
 const pick = (next: Partial<PhotoFilter>) => void lib.setFilter({ ...lib.filter.value, ...next });
+
+/** Where under the connection photos go: `Phone/<year>/<kind>`. */
+const FOLDER = "Phone";
+
+// Each level says what it costs, so the choice is an informed one.
+const CHECKS: { id: CheckLevel; label: string; says: (to: string) => string }[] = [
+  { id: "readback", label: "Read back", says: (to) => `Reads each copy back from ${to}. Slower, and the only check that proves the bytes there are right.` },
+  { id: "size", label: "Size only", says: () => "Only compares sizes. Faster, but a copy damaged on the way would not be caught." },
+];
+const checkSays = computed(() => CHECKS.find((c) => c.id === run.check.value)!.says(target.value?.name ?? "the connection"));
+
+function free() {
+  if (!target.value) return;
+  void run.start({
+    connection: target.value.name,
+    folder: FOLDER,
+    filter: lib.filter.value,
+    years_left_out: [...lib.left.value],
+    favourites: lib.favourites.value,
+    verify: run.check.value,
+  });
+}
 </script>
 
 <template>
@@ -74,7 +85,7 @@ const pick = (next: Partial<PhotoFilter>) => void lib.setFilter({ ...lib.filter.
         </button>
         <button v-if="target" class="choice press" @click="sheet = 'target'">
           <PTile art="connections" tint="var(--tint-connections)" light :size="30" />
-          <span class="grow">To {{ target.name }}</span><span class="chev" aria-hidden="true">›</span>
+          <span class="grow">To {{ target.name }} › {{ FOLDER }}</span><span class="chev" aria-hidden="true">›</span>
         </button>
         <button v-else class="choice press" @click="nav.go('connections')">
           <span class="grow">Add a connection to send to</span><span class="chev" aria-hidden="true">›</span>
@@ -99,6 +110,7 @@ const pick = (next: Partial<PhotoFilter>) => void lib.setFilter({ ...lib.filter.
     </template>
 
     <p v-if="lib.problem.value" class="line bad">{{ lib.problem.value }}</p>
+    <p v-if="run.problem.value" class="line bad">{{ run.problem.value }}</p>
 
     <!-- Bottom sheets: what to send, and where. -->
     <div v-if="sheet" class="veil" @click="sheet = null"></div>
@@ -113,6 +125,11 @@ const pick = (next: Partial<PhotoFilter>) => void lib.setFilter({ ...lib.filter.
       <div class="seg">
         <button v-for="a in AGES" :key="a.days" :class="{ on: lib.filter.value.olderThanDays === a.days }" @click="pick({ olderThanDays: a.days })">{{ a.label }}</button>
       </div>
+      <h2>Check each one</h2>
+      <div class="seg">
+        <button v-for="c in CHECKS" :key="c.id" :class="{ on: run.check.value === c.id }" @click="run.setCheck(c.id)">{{ c.label }}</button>
+      </div>
+      <p class="says">{{ checkSays }}</p>
       <div class="sheet-act"><PButton @press="sheet = null">{{ lib.loading.value ? "Counting…" : `Show ${bytes(lib.chosen.value.bytes)}` }}</PButton></div>
     </div>
     <div v-if="sheet === 'target'" class="sheet">
@@ -130,8 +147,8 @@ const pick = (next: Partial<PhotoFilter>) => void lib.setFilter({ ...lib.filter.
         <PButton @press="lib.ask()">Allow access</PButton>
       </template>
       <template v-else-if="lib.canRead.value">
-        <p class="say">Sending, checking and clearing come in the next build.</p>
-        <PButton disabled>Free {{ bytes(lib.chosen.value.bytes) }}</PButton>
+        <p v-if="target" class="say">Each item is checked on {{ target.name }} before it leaves</p>
+        <PButton :disabled="!target || !lib.chosen.value.count || lib.loading.value" :busy="run.phase.value === 'starting'" @press="free">Free {{ bytes(lib.chosen.value.bytes) }}</PButton>
       </template>
     </template>
   </PScreen>
@@ -183,5 +200,6 @@ h3 { font-size: 24px; font-weight: 800; margin: 0 0 4px; }
 .seg button:last-child { border-right: 0; }
 .seg button.on { color: var(--panel); background: var(--edge); }
 .sheet-act { margin-top: 18px; }
+.says { margin: 10px 2px 0; font-size: 14px; line-height: 1.4; color: var(--text-quiet); }
 .say { margin: 0 2px 10px; font-size: 14px; text-align: center; color: var(--text-quiet); }
 </style>
