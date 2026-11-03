@@ -91,3 +91,50 @@ pub struct Removed {
     /// and earlier); the person deletes them in their gallery instead.
     pub supported: bool,
 }
+
+/// What a file manager's category tiles count. One tally each; a file can
+/// be in two (a PDF in Download is a document and a download).
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub struct Categories {
+    pub images: Tally,
+    pub videos: Tally,
+    pub audio: Tally,
+    pub documents: Tally,
+    pub downloads: Tally,
+    /// Installer files (`.apk`), not the apps installed on the phone.
+    pub apps: Tally,
+}
+
+/// One category tile, as the window names it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Category {
+    Images,
+    Videos,
+    Audio,
+    Documents,
+    Downloads,
+    Apps,
+}
+
+/// Files on shared storage, for sharing or opening in another app.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PathsArgs {
+    pub paths: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, Serialize)]
+pub struct CategoryArgs {
+    pub category: Category,
+}
+
+/// A file on the phone's shared storage, by its real path, which the
+/// engine reads and moves like any other local file.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StoredFile {
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    pub modified_ms: i64,
+}

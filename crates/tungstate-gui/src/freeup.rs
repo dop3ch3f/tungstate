@@ -70,6 +70,10 @@ pub(crate) struct Start {
     /// Favourites stay on the phone unless this is set.
     #[serde(default)]
     favourites: bool,
+    /// Photos unticked one by one in the findings, by id. Only ever takes
+    /// away from what the filter found, so the window cannot add a photo.
+    #[serde(default)]
+    left_out: Vec<String>,
     /// `readback` or `size`.
     verify: String,
 }
@@ -136,9 +140,13 @@ pub(crate) fn chosen(
     mut assets: Vec<Asset>,
     years_left_out: &[i32],
     favourites: bool,
+    left_out: &[String],
 ) -> Vec<Asset> {
-    let left: HashSet<i32> = years_left_out.iter().copied().collect();
-    assets.retain(|a| !left.contains(&a.year) && (favourites || !a.favourite));
+    let years: HashSet<i32> = years_left_out.iter().copied().collect();
+    let ids: HashSet<&str> = left_out.iter().map(String::as_str).collect();
+    assets.retain(|a| {
+        !years.contains(&a.year) && (favourites || !a.favourite) && !ids.contains(a.id.as_str())
+    });
     assets.sort_by(|a, b| a.taken_ms.cmp(&b.taken_ms).then_with(|| a.id.cmp(&b.id)));
     assets
 }
@@ -474,6 +482,18 @@ fn folder(raw: &str) -> Result<PathBuf, String> {
     Ok(parts.iter().collect())
 }
 
+/// Everything the filter found, favourites included, newest first: the
+/// findings the person unticks from before choosing where they go.
+///
+/// For showing only. A run lists the library again itself, and takes the
+/// window's word only for what to leave out.
+#[tauri::command(async)]
+pub(crate) fn free_up_findings(filter: Filter, app: AppHandle) -> Result<Vec<Asset>, String> {
+    let mut assets = Library::list(app.photos(), &filter)?;
+    assets.sort_by(|a, b| b.taken_ms.cmp(&a.taken_ms).then_with(|| a.id.cmp(&b.id)));
+    Ok(assets)
+}
+
 /// Start sending. Refused while a transfer or a sync runs; the run itself
 /// goes on its own thread and reports through `freeup://progress` and
 /// `freeup://done`.
@@ -553,6 +573,7 @@ fn go(
         Library::list(photos, &start.filter)?,
         &start.years_left_out,
         start.favourites,
+        &start.left_out,
     );
 
     // What a killed run left in the cache is a copy of photos still on the
@@ -726,7 +747,7 @@ mod tests {
                 work: self.work.path(),
                 stop,
             };
-            let picked = chosen(library.list(&Filter::default()).unwrap(), &[], false);
+            let picked = chosen(library.list(&Filter::default()).unwrap(), &[], false, &[]);
             carry(&run, library, &picked, &mut |_| {})
         }
 
@@ -941,8 +962,21 @@ mod tests {
         ];
         let ids = |v: Vec<Asset>| v.into_iter().map(|a| a.id).collect::<Vec<_>>();
 
-        assert_eq!(ids(chosen(all.clone(), &[2026], false)), ["1", "2"]);
-        assert_eq!(ids(chosen(all, &[2026], true)), ["1", "2", "4"]);
+        assert_eq!(ids(chosen(all.clone(), &[2026], false, &[])), ["1", "2"]);
+        assert_eq!(ids(chosen(all, &[2026], true, &[])), ["1", "2", "4"]);
+    }
+
+    #[test]
+    fn photos_unticked_in_the_findings_stay_and_unknown_ids_add_nothing() {
+        let all = vec![
+            asset("1", "a.jpg", 2024, AssetKind::Photo, 1),
+            asset("2", "b.jpg", 2025, AssetKind::Photo, 1),
+            asset("3", "c.jpg", 2026, AssetKind::Video, 1),
+        ];
+        let ids = |v: Vec<Asset>| v.into_iter().map(|a| a.id).collect::<Vec<_>>();
+        let left = ["2".to_string(), "not-in-the-library".to_string()];
+
+        assert_eq!(ids(chosen(all, &[], false, &left)), ["1", "3"]);
     }
 
     #[test]

@@ -1,14 +1,16 @@
 // The photo library as Free up space sees it: whether the app may look, what
-// the filter is, what it found, and which years and favourites are left out.
+// the filter is, what it found, and which of those the person unticked.
 //
-// Module-level, like the desktop stores, so Home's headline and Free up's
-// list are one set of numbers and cannot disagree.
+// Module-level, so the findings and the run that follows them are one list.
+// The run lists the library again itself; only what was unticked is sent
+// back, so nothing here can add a photo the filter did not find.
 
 import { computed, ref, shallowRef } from "vue";
-import { photos } from "../../engine/commands";
-import type { PhotoAccess, PhotoFilter, PhotoSummary } from "../../engine/types";
+import { freeUp, photos } from "../../engine/commands";
+import type { PhotoAccess, PhotoAsset, PhotoFilter } from "../../engine/types";
+import { byYear } from "../lib/findings";
 
-/** The kinds and ages the filter offers, as both screens word them. */
+/** The kinds and ages the filter offers, as the screens word them. */
 export const KINDS: { id: PhotoFilter["kind"]; label: string }[] = [
   { id: "all", label: "All" },
   { id: "videos", label: "Videos" },
@@ -24,39 +26,26 @@ export const AGES: { days: number; label: string }[] = [
 const access = ref<PhotoAccess | null>(null);
 /** The approved default: everything older than three months. */
 const filter = ref<PhotoFilter>({ kind: "all", olderThanDays: 90 });
-const summary = shallowRef<PhotoSummary | null>(null);
-/** Years taken out of the run, by year. Everything else is in. */
-const left = ref<Set<number>>(new Set());
-/** Favourites stay on the phone unless the person puts them in. */
-const favourites = ref(false);
+const findings = shallowRef<PhotoAsset[]>([]);
+/** Unticked, by id. Favourites start here: they stay unless ticked. */
+const unticked = ref<Set<string>>(new Set());
 const loading = ref(false);
 const problem = ref<string | null>(null);
 
 const canRead = computed(() => access.value === "full" || access.value === "limited");
+const years = computed(() => byYear(findings.value, unticked.value));
+/** What would be moved, as ticked. */
+const chosen = computed(() =>
+  years.value.reduce((t, g) => ({ count: t.count + g.ticked, bytes: t.bytes + g.tickedBytes }), { count: 0, bytes: 0 }),
+);
 
-/** What would be freed with the years and favourites as chosen. */
-const chosen = computed(() => {
-  const s = summary.value;
-  if (!s) return { count: 0, bytes: 0 };
-  let count = 0;
-  let bytes = 0;
-  for (const y of s.years) {
-    if (left.value.has(y.year)) continue;
-    count += y.count;
-    bytes += y.bytes;
-  }
-  if (favourites.value) {
-    count += s.favourites.count;
-    bytes += s.favourites.bytes;
-  }
-  return { count, bytes };
-});
-
-async function count() {
+async function find() {
   if (!canRead.value) return;
   loading.value = true;
   try {
-    summary.value = await photos.summary(filter.value);
+    const found = await freeUp.findings(filter.value);
+    findings.value = found;
+    unticked.value = new Set(found.filter((a) => a.favourite).map((a) => a.id));
     problem.value = null;
   } catch (e) {
     problem.value = String(e);
@@ -65,7 +54,7 @@ async function count() {
   }
 }
 
-/** Find out whether the app may look, and count if it may. */
+/** Find out whether the app may look, and look if it may. */
 async function load() {
   try {
     access.value = await photos.access();
@@ -73,7 +62,7 @@ async function load() {
     problem.value = String(e);
     return;
   }
-  await count();
+  await find();
 }
 
 async function ask() {
@@ -83,21 +72,33 @@ async function ask() {
     problem.value = String(e);
     return;
   }
-  await count();
+  await find();
 }
 
 async function setFilter(next: PhotoFilter) {
   filter.value = next;
-  left.value = new Set();
-  await count();
+  await find();
 }
 
+function toggle(id: string) {
+  const next = new Set(unticked.value);
+  if (!next.delete(id)) next.add(id);
+  unticked.value = next;
+}
+
+/** Tick or untick a whole year: all of it, unless all of it is ticked. */
 function toggleYear(year: number) {
-  const next = new Set(left.value);
-  if (!next.delete(year)) next.add(year);
-  left.value = next;
+  const group = years.value.find((g) => g.year === year);
+  if (!group) return;
+  const next = new Set(unticked.value);
+  const all = group.ticked === group.items.length;
+  for (const a of group.items) {
+    if (all) next.add(a.id);
+    else next.delete(a.id);
+  }
+  unticked.value = next;
 }
 
 export function usePhotos() {
-  return { access, filter, summary, left, favourites, loading, problem, canRead, chosen, load, ask, setFilter, toggleYear };
+  return { access, filter, findings, unticked, years, chosen, loading, problem, canRead, load, ask, setFilter, toggle, toggleYear };
 }

@@ -6,7 +6,10 @@ use tauri::{
     plugin::{PluginApi, PluginHandle},
 };
 
-use crate::{Access, Asset, Filter, Removed, Result, Summary};
+use crate::{
+    Access, Asset, Categories, Category, CategoryArgs, Filter, PathsArgs, Removed, Result,
+    StoredFile, Summary,
+};
 
 #[cfg(target_os = "ios")]
 tauri::ios_plugin_binding!(init_plugin_photos);
@@ -36,6 +39,11 @@ struct Answer {
 #[derive(Deserialize)]
 struct Assets {
     assets: Vec<Asset>,
+}
+
+#[derive(Deserialize)]
+struct Files {
+    files: Vec<StoredFile>,
 }
 
 #[derive(Serialize)]
@@ -101,6 +109,66 @@ impl<R: Runtime> Photos<R> {
     /// The phone's code failed.
     pub fn remove(&self, ids: &[String]) -> Result<Removed> {
         Ok(self.0.run_mobile_plugin("remove", Ids { ids })?)
+    }
+
+    /// Whether the app may read and change all of shared storage, which a
+    /// file manager needs ("All files access" on Android 11 and later).
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn files_access(&self) -> Result<Access> {
+        Ok(self
+            .0
+            .run_mobile_plugin::<Answer>("filesAccess", ())?
+            .access)
+    }
+
+    /// Opens the system's own page for All files access, and answers once
+    /// the person is back from it.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn ask_files(&self) -> Result<Access> {
+        Ok(self.0.run_mobile_plugin::<Answer>("askFiles", ())?.access)
+    }
+
+    /// Counts and sizes for the category tiles.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn categories(&self) -> Result<Categories> {
+        Ok(self.0.run_mobile_plugin("categories", ())?)
+    }
+
+    /// Every file in one category, by its real path.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn category_files(&self, category: Category) -> Result<Vec<StoredFile>> {
+        Ok(self
+            .0
+            .run_mobile_plugin::<Files>("categoryFiles", CategoryArgs { category })?
+            .files)
+    }
+
+    /// Offers these files to other apps through the system's share sheet.
+    ///
+    /// # Errors
+    /// The phone's code failed, or a file is outside shared storage.
+    pub fn share(&self, paths: Vec<String>) -> Result<()> {
+        self.0
+            .run_mobile_plugin::<()>("share", PathsArgs { paths })?;
+        Ok(())
+    }
+
+    /// Opens one file in the app the phone uses for its kind.
+    ///
+    /// # Errors
+    /// The phone's code failed, or no app opens files of this kind.
+    pub fn open(&self, path: String) -> Result<()> {
+        self.0
+            .run_mobile_plugin::<()>("open", PathsArgs { paths: vec![path] })?;
+        Ok(())
     }
 
     /// Keeps the screen on, or lets it sleep again.

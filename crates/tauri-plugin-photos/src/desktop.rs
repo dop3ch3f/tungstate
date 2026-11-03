@@ -3,7 +3,9 @@ use std::path::Path;
 use serde::de::DeserializeOwned;
 use tauri::{AppHandle, Runtime, plugin::PluginApi};
 
-use crate::{Access, Asset, Error, Filter, Removed, Result, Summary};
+use crate::{
+    Access, Asset, Categories, Category, Error, Filter, Removed, Result, StoredFile, Summary,
+};
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
     app: &AppHandle<R>,
@@ -50,6 +52,42 @@ impl<R: Runtime> Photos<R> {
     /// # Errors
     /// Always [`Error::NoLibrary`].
     pub fn remove(&self, _ids: &[String]) -> Result<Removed> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn files_access(&self) -> Result<Access> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn ask_files(&self) -> Result<Access> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn categories(&self) -> Result<Categories> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn category_files(&self, _category: Category) -> Result<Vec<StoredFile>> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn share(&self, _paths: Vec<String>) -> Result<()> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always [`Error::NoLibrary`].
+    pub fn open(&self, _path: String) -> Result<()> {
         Err(Error::NoLibrary)
     }
 

@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
     <!-- Reading the photo library. Android 13 split it into images and video,
          and 14 added choosing only some photos; before 13 it was storage. -->
     <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />
@@ -8,4 +9,11 @@
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" android:maxSdkVersion="32" />
     <!-- Without it Android strips where a photo was taken from the copy. -->
     <uses-permission android:name="android.permission.ACCESS_MEDIA_LOCATION" />
+    <!-- The Files tab is a file manager: it browses, copies and moves anything
+         on shared storage. Android 11 and later grant that as All files
+         access, on a settings page; 10 and earlier with write storage. -->
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE"
+        tools:ignore="ScopedStorage" />
+    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
+        android:maxSdkVersion="29" />
 </manifest>

@@ -1,4 +1,4 @@
-<!-- Five tabs. The current one is white, bold and outlined with the hard
+<!-- Five tabs, Files first (docs/mobile/approved-files/). The current one is white, bold and outlined with the hard
      shadow, the desktop's rule for the chosen item. The frame around it
      adds the home-bar inset below. -->
 <script setup lang="ts">
@@ -9,10 +9,10 @@ import { usePhoneNav, type Tab } from "./nav";
 const nav = usePhoneNav();
 
 const TABS: { id: Tab; art: Art; label: string }[] = [
-  { id: "home", art: "home", label: "Home" },
+  { id: "files", art: "folder", label: "Files" },
   { id: "free", art: "drain", label: "Free up" },
   { id: "dupes", art: "dupes", label: "Duplicates" },
-  { id: "organise", art: "folder", label: "Organise" },
+  { id: "organise", art: "organise", label: "Organise" },
   { id: "connections", art: "connections", label: "Connections" },
 ];
 </script>

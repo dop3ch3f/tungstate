@@ -3,14 +3,19 @@ package com.ifeanyiibekie.tungstate.photos
 import android.Manifest
 import android.app.Activity
 import android.content.ContentUris
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
+import android.os.Environment
+import android.provider.Settings
 import android.provider.MediaStore
 import android.view.WindowManager
 import androidx.activity.result.ActivityResult
 import androidx.activity.result.IntentSenderRequest
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
+import android.webkit.MimeTypeMap
 import app.tauri.PermissionState
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -46,9 +51,26 @@ class RemoveArgs {
 }
 
 @InvokeArg
+class CategoryArgs {
+  /** "images", "videos", "audio", "documents", "downloads" or "apps". */
+  var category: String = "images"
+}
+
+@InvokeArg
+class PathsArgs {
+  var paths: Array<String> = emptyArray()
+}
+
+@InvokeArg
 class AwakeArgs {
   var on: Boolean = false
 }
+
+/** One file in a category, by its real path. */
+private class Stored(val path: String, val name: String, val size: Long, val modified: Long)
+
+/** Endings that make a file a document when the index gave no type. */
+private val DOCUMENT_ENDINGS = listOf(".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".txt", ".csv", ".rtf", ".epub", ".md")
 
 /** One photo or video as the library holds it. */
 private class Row(
@@ -83,6 +105,13 @@ private class Row(
     Permission(
       strings = [Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.ACCESS_MEDIA_LOCATION],
       alias = "storage",
+    ),
+    // Android 10 and earlier: a file manager reads and writes shared storage
+    // with these. 11 and later use All files access instead, a settings page
+    // rather than a prompt, which is why it has no alias here.
+    Permission(
+      strings = [Manifest.permission.READ_EXTERNAL_STORAGE, Manifest.permission.WRITE_EXTERNAL_STORAGE],
+      alias = "files",
     ),
   ],
 )
@@ -223,6 +252,197 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
     ret.put("removed", removed)
     ret.put("supported", supported)
     invoke.resolve(ret)
+  }
+
+  /** "full" once the app may read and change all of shared storage, else
+   *  "ask"; Android never says "denied" for All files access. */
+  private fun filesState(): String =
+    if (Build.VERSION.SDK_INT >= 30) {
+      if (Environment.isExternalStorageManager()) "full" else "ask"
+    } else if (granted(Manifest.permission.WRITE_EXTERNAL_STORAGE)) {
+      "full"
+    } else if (getPermissionState("files") == PermissionState.DENIED) {
+      "denied"
+    } else {
+      "ask"
+    }
+
+  private fun answerFiles(invoke: Invoke) {
+    val ret = JSObject()
+    ret.put("access", filesState())
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun filesAccess(invoke: Invoke) = answerFiles(invoke)
+
+  /** Opens Android's own All files access page for this app, and answers
+   *  once the person comes back from it. */
+  @Command
+  fun askFiles(invoke: Invoke) {
+    if (filesState() == "full") return answerFiles(invoke)
+    if (Build.VERSION.SDK_INT < 30) return requestPermissionForAlias("files", invoke, "filesAsked")
+    val mine = Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION, Uri.parse("package:${activity.packageName}"))
+    // Some phones lack the per-app page; the list of apps is the next best.
+    val intent = if (mine.resolveActivity(activity.packageManager) != null) mine else Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)
+    startActivityForResult(invoke, intent, "filesBack")
+  }
+
+  @PermissionCallback
+  private fun filesAsked(invoke: Invoke) = answerFiles(invoke)
+
+  // The page returns no result of its own; what matters is the state after.
+  @ActivityCallback
+  private fun filesBack(invoke: Invoke, @Suppress("UNUSED_PARAMETER") result: ActivityResult) = answerFiles(invoke)
+
+  /** Counts and bytes for each category tile, in one pass over the index. */
+  @Command
+  fun categories(invoke: Invoke) {
+    offMain(invoke, "could not count what is on the phone") {
+      val names = listOf("images", "videos", "audio", "documents", "downloads", "apps")
+      val tally = names.associateWith { LongArray(2) }
+      files { file, kinds ->
+        for (kind in kinds) {
+          val t = tally.getValue(kind)
+          t[0]++
+          t[1] += file.size
+        }
+      }
+      val ret = JSObject()
+      for ((name, t) in tally) {
+        val one = JSObject()
+        one.put("count", t[0])
+        one.put("bytes", t[1])
+        ret.put(name, one)
+      }
+      invoke.resolve(ret)
+    }
+  }
+
+  /** Every file in one category, newest first, by its real path. */
+  @Command
+  fun categoryFiles(invoke: Invoke) {
+    val args = invoke.parseArgs(CategoryArgs::class.java)
+    offMain(invoke, "could not list what is on the phone") {
+      val found = mutableListOf<Stored>()
+      files { file, kinds -> if (args.category in kinds) found.add(file) }
+      found.sortByDescending { it.modified }
+      val list = JSArray()
+      for (file in found) {
+        val one = JSObject()
+        one.put("path", file.path)
+        one.put("name", file.name)
+        one.put("size", file.size)
+        one.put("modifiedMs", file.modified)
+        list.put(one)
+      }
+      val ret = JSObject()
+      ret.put("files", list)
+      invoke.resolve(ret)
+    }
+  }
+
+  /**
+   * Every file the system's index knows, with the categories it is in.
+   *
+   * The index, not a walk: Android keeps it current for all of shared
+   * storage, and walking a phone's 100k files would take seconds. With All
+   * files access it lists every file, not only photos, video and audio.
+   * `DATA` is the real path; deprecated for reading files, but still filled
+   * in, and the engine needs a path rather than a content address.
+   */
+  private fun files(visit: (Stored, List<String>) -> Unit) {
+    val type = MediaStore.Files.FileColumns.MEDIA_TYPE
+    @Suppress("DEPRECATION")
+    val data = MediaStore.MediaColumns.DATA
+    val projection = arrayOf(
+      data, MediaStore.MediaColumns.DISPLAY_NAME, MediaStore.MediaColumns.SIZE,
+      MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.MIME_TYPE, type,
+    )
+    val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).path + "/"
+    activity.contentResolver.query(MediaStore.Files.getContentUri("external"), projection, null, null, null)?.use { rows ->
+      val pathAt = rows.getColumnIndexOrThrow(data)
+      val nameAt = rows.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
+      val sizeAt = rows.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
+      val modifiedAt = rows.getColumnIndexOrThrow(MediaStore.MediaColumns.DATE_MODIFIED)
+      val mimeAt = rows.getColumnIndexOrThrow(MediaStore.MediaColumns.MIME_TYPE)
+      val typeAt = rows.getColumnIndexOrThrow(type)
+      while (rows.moveToNext()) {
+        val path = rows.getString(pathAt) ?: continue
+        // Folders are in the index too, with no type; a tile counts files.
+        if (rows.isNull(mimeAt) && File(path).isDirectory) continue
+        // A file copied in moments ago is listed before its size is filled
+        // in; the file itself knows, and All files access may ask it.
+        val size = if (rows.isNull(sizeAt)) File(path).length() else rows.getLong(sizeAt)
+        val name = rows.getString(nameAt) ?: path.substringAfterLast('/')
+        val mime = rows.getString(mimeAt) ?: ""
+        val kinds = mutableListOf<String>()
+        when (rows.getInt(typeAt)) {
+          MediaStore.Files.FileColumns.MEDIA_TYPE_IMAGE -> kinds.add("images")
+          MediaStore.Files.FileColumns.MEDIA_TYPE_VIDEO -> kinds.add("videos")
+          MediaStore.Files.FileColumns.MEDIA_TYPE_AUDIO -> kinds.add("audio")
+          else -> when {
+            mime == "application/vnd.android.package-archive" || name.endsWith(".apk", true) -> kinds.add("apps")
+            document(mime, name) -> kinds.add("documents")
+          }
+        }
+        if (path.startsWith(downloads)) kinds.add("downloads")
+        if (kinds.isEmpty()) continue
+        val modified = if (rows.isNull(modifiedAt)) File(path).lastModified() else rows.getLong(modifiedAt) * 1000
+        visit(Stored(path, name, size, modified), kinds)
+      }
+    }
+  }
+
+  private fun document(mime: String, name: String): Boolean =
+    mime == "application/pdf" || mime.startsWith("text/") || mime == "application/rtf" ||
+      mime == "application/epub+zip" || mime.startsWith("application/msword") ||
+      mime.startsWith("application/vnd.ms-") || mime.startsWith("application/vnd.openxmlformats-officedocument") ||
+      mime.startsWith("application/vnd.oasis.opendocument") ||
+      DOCUMENT_ENDINGS.any { name.endsWith(it, true) }
+
+  /** A content address another app may read, through the app's own
+   *  FileProvider; it refuses anything outside the paths it was given. */
+  private fun shareable(path: String): Uri =
+    FileProvider.getUriForFile(activity, "${activity.packageName}.fileprovider", File(path))
+
+  private fun mimeOf(path: String): String =
+    MimeTypeMap.getSingleton().getMimeTypeFromExtension(path.substringAfterLast('.', "").lowercase()) ?: "*/*"
+
+  @Command
+  fun share(invoke: Invoke) {
+    val args = invoke.parseArgs(PathsArgs::class.java)
+    try {
+      val uris = ArrayList(args.paths.map(::shareable))
+      val types = args.paths.map(::mimeOf).distinct()
+      val intent = Intent(if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE).apply {
+        type = types.singleOrNull() ?: "*/*"
+        if (uris.size == 1) putExtra(Intent.EXTRA_STREAM, uris[0]) else putParcelableArrayListExtra(Intent.EXTRA_STREAM, uris)
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      activity.startActivity(Intent.createChooser(intent, null))
+      invoke.resolve()
+    } catch (e: Exception) {
+      invoke.reject(e.message ?: "could not share these")
+    }
+  }
+
+  @Command
+  fun open(invoke: Invoke) {
+    val args = invoke.parseArgs(PathsArgs::class.java)
+    try {
+      val path = args.paths.first()
+      val intent = Intent(Intent.ACTION_VIEW).apply {
+        setDataAndType(shareable(path), mimeOf(path))
+        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+      }
+      activity.startActivity(intent)
+      invoke.resolve()
+    } catch (e: android.content.ActivityNotFoundException) {
+      invoke.reject("no app on this phone opens this kind of file")
+    } catch (e: Exception) {
+      invoke.reject(e.message ?: "could not open it")
+    }
   }
 
   /** Keeps the screen on while a run is open, so the phone does not lock on it. */

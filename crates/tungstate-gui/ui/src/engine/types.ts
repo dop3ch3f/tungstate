@@ -793,6 +793,40 @@ export interface FreeUpStart {
   years_left_out: number[];
   favourites: boolean;
   verify: CheckLevel;
+  /** Photos unticked one by one in the findings, by id. */
+  left_out?: string[];
+}
+
+/** One photo or video in Free up's findings. `id` is opaque. */
+export interface PhotoAsset {
+  id: string;
+  name: string;
+  size: number;
+  takenMs: number;
+  year: number;
+  kind: "photo" | "video" | "screenshot";
+  favourite: boolean;
+}
+
+/** A place files live on the phone: its own storage, or a card. */
+export interface Volume {
+  label: string;
+  path: string;
+  /** Both zero where the system would not say. */
+  total: number;
+  free: number;
+  removable: boolean;
+}
+
+export type Category = "images" | "videos" | "audio" | "documents" | "downloads" | "apps";
+export type Categories = Record<Category, Tally>;
+
+/** A file on the phone's shared storage, by its real path. */
+export interface StoredFile {
+  path: string;
+  name: string;
+  size: number;
+  modifiedMs: number;
 }
 
 /** Where a Free up run is. */

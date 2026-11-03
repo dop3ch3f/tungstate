@@ -1,10 +1,12 @@
-//! A phone's photo library, for Tungstate.
+//! A phone's photo library and shared storage, for Tungstate.
 //!
 //! What is there, how big and how old, and whether the person has let the
 //! app look; copying a photo out into a file; and asking, through the
-//! system's own prompt, to remove photos once they are safe elsewhere.
+//! system's own prompt, to remove photos once they are safe elsewhere. For
+//! the Files tab: All files access, and the category tiles' counts and files.
 //!
-//! Only counting and asking for access are open to the window. Listing,
+//! Open to the window: counting, asking for access, and the category files
+//! (real paths, which the engine moves like any local file). Listing photos,
 //! copying out and removing are for the app's Rust, which decides what is
 //! safe to remove; nothing the window says can widen that.
 //!
@@ -52,7 +54,13 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
         .invoke_handler(tauri::generate_handler![
             commands::access,
             commands::ask,
-            commands::summary
+            commands::summary,
+            commands::files_access,
+            commands::ask_files,
+            commands::categories,
+            commands::category_files,
+            commands::share,
+            commands::open
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

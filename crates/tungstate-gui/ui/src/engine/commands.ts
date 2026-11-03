@@ -187,8 +187,36 @@ export const photos = {
   summary: (filter: T.PhotoFilter) => invoke<T.PhotoSummary>("plugin:photos|summary", { filter }),
 };
 
+/** The phone's own storage, for the Files tab. Every call fails on desktop
+ *  except `volumes`, which answers with the home folder. */
+export const phone = {
+  volumes: () => invoke<T.Volume[]>("volumes"),
+  /** All files access: what a file manager needs on Android 11 and later. */
+  filesAccess: () => invoke<T.PhotoAccess>("plugin:photos|files_access"),
+  /** Opens the system's page for it; answers once the person is back. */
+  askFiles: () => invoke<T.PhotoAccess>("plugin:photos|ask_files"),
+  categories: () => invoke<T.Categories>("plugin:photos|categories"),
+  categoryFiles: (category: T.Category) => invoke<T.StoredFile[]>("plugin:photos|category_files", { category }),
+  /** The system's share sheet, for files on this phone. */
+  share: (paths: string[]) => invoke<void>("plugin:photos|share", { paths }),
+  /** Opens a file on this phone in the app that handles its kind. */
+  open: (path: string) => invoke<void>("plugin:photos|open", { path }),
+};
+
+/** A file manager's single steps. Each is journaled; none is a transfer. */
+export const files = {
+  /** Returns the new folder's location. */
+  makeFolder: (inside: string, called: string) => invoke<string>("make_folder", { inside, called }),
+  /** Returns the new location. Refuses a name already taken. */
+  rename: (path: string, to: string) => invoke<string>("rename_entry", { path, to }),
+  /** For good: there is no bin. Returns how many files and folders went. */
+  remove: (paths: string[]) => invoke<number>("delete_entries", { paths }),
+};
+
 /** Free up space: send photos to a connection, check each, then clear. */
 export const freeUp = {
+  /** What the filter finds, favourites included, newest first. */
+  findings: (filter: T.PhotoFilter) => invoke<T.PhotoAsset[]>("free_up_findings", { filter }),
   /** Starts the run; progress and the end come as `freeup://` events. */
   start: (start: T.FreeUpStart) => invoke<void>("free_up_start", { start }),
   /** Pause and Stop alike: finish the photo in hand, then stop. */

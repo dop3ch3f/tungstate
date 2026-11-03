@@ -319,6 +319,78 @@
           "markdownDescription": "Denies the ask command without any pre-configured scope."
         },
         {
+          "description": "Enables the ask_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-ask-files",
+          "markdownDescription": "Enables the ask_files command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the ask_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-ask-files",
+          "markdownDescription": "Denies the ask_files command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the categories command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-categories",
+          "markdownDescription": "Enables the categories command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the categories command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-categories",
+          "markdownDescription": "Denies the categories command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the category_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-category-files",
+          "markdownDescription": "Enables the category_files command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the category_files command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-category-files",
+          "markdownDescription": "Denies the category_files command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the files_access command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-files-access",
+          "markdownDescription": "Enables the files_access command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the files_access command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-files-access",
+          "markdownDescription": "Denies the files_access command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-open",
+          "markdownDescription": "Enables the open command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the open command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-open",
+          "markdownDescription": "Denies the open command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the share command without any pre-configured scope.",
+          "type": "string",
+          "const": "allow-share",
+          "markdownDescription": "Enables the share command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the share command without any pre-configured scope.",
+          "type": "string",
+          "const": "deny-share",
+          "markdownDescription": "Denies the share command without any pre-configured scope."
+        },
+        {
           "description": "Enables the summary command without any pre-configured scope.",
           "type": "string",
           "const": "allow-summary",
@@ -331,10 +403,10 @@
           "markdownDescription": "Denies the summary command without any pre-configured scope."
         },
         {
-          "description": "Read what is in the photo library and ask for access to it.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`",
+          "description": "Read what is in the photo library and on shared storage, and ask for access to both.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`\n- `allow-files-access`\n- `allow-ask-files`\n- `allow-categories`\n- `allow-category-files`\n- `allow-share`\n- `allow-open`",
           "type": "string",
           "const": "default",
-          "markdownDescription": "Read what is in the photo library and ask for access to it.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`"
+          "markdownDescription": "Read what is in the photo library and on shared storage, and ask for access to both.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`\n- `allow-files-access`\n- `allow-ask-files`\n- `allow-categories`\n- `allow-category-files`\n- `allow-share`\n- `allow-open`"
         }
       ]
     }

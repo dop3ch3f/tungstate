@@ -1,0 +1,451 @@
+<!doctype html>
+<html data-theme="retro">
+<head>
+<meta charset="utf-8">
+<title>Tungstate phone, files redesign</title>
+<link rel="stylesheet" href="../../../crates/tungstate-gui/ui/src/styles/tokens.css">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #c9cbc2; font-family: var(--font); color: var(--text); padding: 40px; }
+  .sheet { display: grid; grid-template-columns: repeat(5, 390px); gap: 40px; }
+  .sheet.only { display: block; padding: 0; }
+  body.solo { padding: 0; background: var(--field); }
+  :root { --ink: #151515; --ink2: #3b3d37; }
+
+  .phone { width: 390px; height: 844px; background: var(--field); border: 2px solid var(--ink);
+    box-shadow: 6px 6px 0 var(--ink); position: relative; overflow: hidden; display: flex; flex-direction: column; }
+  body.solo .phone { border: 0; box-shadow: none; }
+  .status { height: 54px; flex: none; display: flex; align-items: center; justify-content: space-between; padding: 0 30px 0 34px; font-weight: 600; font-size: 17px; }
+  .status .r { display: flex; gap: 6px; align-items: center; }
+  .status .r i { display: inline-block; background: var(--ink); width: 18px; height: 11px; }
+  .status .r i + i { width: 25px; height: 12px; border-radius: 3px; }
+  .scroll { flex: 1; overflow: hidden; padding: 2px 20px 16px; }
+  .head { display: flex; align-items: center; justify-content: space-between; margin: 4px 0 14px; gap: 12px; }
+  h1 { font-size: 32px; line-height: 1.08; font-weight: 800; letter-spacing: -0.6px; }
+  h2 { font-size: 15px; font-weight: 800; margin: 22px 0 8px; }
+  .quiet { color: var(--ink2); }
+  .t15 { font-size: 15px; line-height: 1.4; }
+  .sub { font-size: 15px; color: var(--ink2); }
+
+  /* Rules: information is flat. Things you press stand alone and carry the
+     hard shadow. Rows inside a list are pressable too, and show it with a
+     chevron, never a shadow, so a list stays one object. */
+  .box { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; }
+  .pad { padding: 16px; }
+  .press { box-shadow: 4px 4px 0 var(--ink); }
+
+  .tile { width: 40px; height: 40px; border: 2px solid var(--ink); border-radius: 6px; display: grid; place-items: center; flex: none; }
+  .tile svg { width: 24px; height: 24px; }
+  .tile.sm { width: 34px; height: 34px; } .tile.sm svg { width: 20px; height: 20px; }
+
+  .meter { display: flex; height: 26px; border: 2px solid var(--ink); border-radius: 6px; overflow: hidden; margin: 16px 0 10px; }
+  .meter span { display: block; height: 100%; border-right: 2px solid var(--ink); }
+  .meter span:last-child { border-right: 0; }
+  .legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 15px; }
+  .legend i { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--ink); margin-right: 6px; vertical-align: -1px; }
+  .big { font-size: 52px; font-weight: 800; letter-spacing: -1.5px; line-height: 0.95; }
+
+  .list { background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; }
+  .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 2px solid var(--ink); min-height: 64px; }
+  .row:first-child { border-top: 0; }
+  .row .grow { flex: 1; min-width: 0; }
+  .row b { display: block; font-size: 16px; }
+  .row .quiet { font-size: 14px; }
+  .row .num { font-size: 16px; font-weight: 800; }
+  .chev { font-weight: 800; font-size: 22px; line-height: 1; }
+  .check { width: 30px; height: 30px; border: 2px solid var(--ink); border-radius: 6px; display: grid; place-items: center; font-weight: 900; font-size: 16px; background: var(--panel); flex: none; }
+  .check.on { background: var(--tint-drain); color: #fff; }
+
+  .seg { display: flex; border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .seg span { flex: 1; text-align: center; padding: 13px 4px; font-size: 15px; font-weight: 700; border-right: 2px solid var(--ink); }
+  .seg span:last-child { border-right: 0; }
+  .seg .on { background: var(--ink); color: #fdfdf8; }
+
+  /* The one main action, in the thumb zone; its context line sits above it. */
+  .act { flex: none; padding: 10px 20px 14px; background: var(--field); }
+  .act .say { font-size: 14px; text-align: center; color: var(--ink2); margin-bottom: 10px; }
+  .btn { display: flex; align-items: center; justify-content: center; min-height: 58px; border: 2px solid var(--ink); border-radius: 8px;
+    font-size: 18px; font-weight: 800; box-shadow: 4px 4px 0 var(--ink); text-align: center; }
+  .btn.ghost { background: var(--panel); font-weight: 700; min-height: 52px; font-size: 16px; box-shadow: 3px 3px 0 var(--ink); }
+  .pair { display: flex; gap: 12px; } .pair > * { flex: 1; }
+
+  .tabs { flex: none; display: flex; padding: 8px 6px 0; gap: 2px; border-top: 2px solid var(--ink); background: var(--rail); }
+  .tab { flex: 1; height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font-size: 13px; font-weight: 700; letter-spacing: -0.3px; border-radius: 8px; border: 2px solid transparent; }
+  .tab svg { width: 26px; height: 26px; }
+  .tab.on { background: #fff; border-color: var(--ink); box-shadow: 2px 2px 0 var(--ink); font-weight: 800; }
+  .homebar { flex: none; height: 30px; background: var(--rail); display: grid; place-items: center; }
+  .homebar i { width: 134px; height: 5px; border-radius: 3px; background: var(--ink); }
+  .noTabs .homebar { background: var(--field); }
+
+  .ph { position: relative; display: grid; place-items: center; overflow: hidden; }
+  .ph svg { width: 34%; height: 34%; opacity: 0.6; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 4px; margin: 0 -20px; }
+  .grid3 .ph { aspect-ratio: 1; }
+  .keep { outline: 5px solid var(--tint-dupes); outline-offset: -5px; }
+  .state { position: absolute; right: 8px; top: 8px; height: 34px; min-width: 34px; padding: 0 12px; border-radius: 99px; border: 2px solid var(--ink); display: grid; place-items: center; font-weight: 800; font-size: 14px; background: #fff; }
+  .state.keepit { background: var(--tint-dupes); color: #fff; }
+  .state.clear { background: var(--ink); color: #fff; }
+  .dim::after { content: ""; position: absolute; inset: 0; background: rgba(253,253,248,0.5); }
+  .gh { display: flex; align-items: center; justify-content: space-between; margin: 20px 0 8px; } .gh h2 { margin: 0; }
+  .smallbtn { font-size: 15px; font-weight: 800; border: 2px solid var(--ink); border-radius: 8px; padding: 0 14px; height: 44px; display: grid; place-items: center; background: var(--panel); box-shadow: 3px 3px 0 var(--ink); }
+
+  .blocks { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; height: 34px; }
+  .blocks i { border: 2px solid var(--ink); border-radius: 3px; background: var(--panel); }
+  .blocks i.on { background: var(--tint-drain); }
+  .note { border: 2px solid var(--ink); border-radius: 8px; background: #ffd44d; padding: 14px 16px; font-size: 15px; line-height: 1.4; }
+  .mini { display: flex; gap: 4px; }
+  .mini .ph { width: 30px; height: 30px; border-radius: 4px; border: 2px solid var(--ink); }
+  .chips { display: flex; gap: 8px; align-items: center; margin: -4px -20px 14px 0; overflow: hidden; padding-right: 20px;
+    -webkit-mask-image: linear-gradient(to right, #000 85%, transparent); }
+  .chip { font-size: 15px; font-weight: 700; border: 2px solid var(--ink); border-radius: 99px; padding: 0 14px; height: 44px; display: grid; place-items: center; background: var(--panel); white-space: nowrap; }
+  .chip.on { background: var(--ink); color: #fdfdf8; }
+  .iconbtn { width: 44px; height: 44px; border: 2px solid var(--ink); border-radius: 8px; display: grid; place-items: center; background: var(--panel); box-shadow: 3px 3px 0 var(--ink); font-weight: 900; font-size: 20px; flex: none; }
+  .iconbtn svg { width: 22px; height: 22px; }
+  .filter { display: flex; align-items: center; justify-content: space-between; height: 52px; padding: 0 16px; font-size: 16px; font-weight: 700; }
+
+  .veil { position: absolute; inset: 0; background: rgba(21,21,21,0.4); }
+  .bsheet { position: absolute; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 2px solid var(--ink); border-radius: 16px 16px 0 0; padding: 10px 20px 0; }
+  .grab { width: 44px; height: 5px; border-radius: 3px; background: var(--ink); margin: 0 auto 14px; }
+<style>
+  .sheet { grid-template-columns: repeat(5, 390px); }
+  .tabs, .actions { padding: 8px 4px 0; gap: 0; } .tab { font-size: 11.5px; letter-spacing: -0.4px; }
+  .crumbs { display: flex; gap: 6px; align-items: center; font-size: 14px; font-weight: 700; margin: 0 -20px 12px 0; overflow: hidden; white-space: nowrap; }
+  .crumbs span { border: 2px solid var(--ink); border-radius: 99px; padding: 0 12px; height: 36px; display: grid; place-items: center; background: var(--panel); }
+  .crumbs span.on { background: var(--ink); color: #fdfdf8; }
+  .crumbs em { font-style: normal; font-weight: 900; }
+  .bar { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; font-size: 14px; }
+  .mini-seg { display: flex; border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; background: var(--panel); }
+  .mini-seg span { width: 44px; height: 40px; display: grid; place-items: center; border-right: 2px solid var(--ink); }
+  .mini-seg span:last-child { border-right: 0; }
+  .mini-seg span.on { background: var(--ink); }
+  .mini-seg svg { width: 18px; height: 18px; }
+  .sortbtn { font-weight: 800; font-size: 15px; height: 40px; display: flex; align-items: center; gap: 6px; }
+  .thumb { width: 44px; height: 44px; border: 2px solid var(--ink); border-radius: 6px; display: grid; place-items: center; flex: none; }
+  .thumb svg { width: 22px; height: 22px; opacity: .65; }
+  .row.sel { background: #e4ebff; }
+  .row.tight { min-height: 64px; padding: 9px 14px; }
+  .row .meta { font-size: 14px; color: var(--ink2); }
+  .storage .row { align-items: center; min-height: 70px; padding: 9px 14px; }
+  .smeter { height: 12px; border: 2px solid var(--ink); border-radius: 4px; overflow: hidden; margin-top: 7px; background: var(--panel); }
+  .smeter i { display: block; height: 100%; border-right: 2px solid var(--ink); }
+  .cats { display: grid; grid-template-columns: repeat(3, 1fr); background: var(--panel); border: 2px solid var(--ink); border-radius: 8px; overflow: hidden; }
+  .cat { display: flex; flex-direction: column; align-items: center; gap: 5px; padding: 9px 4px 8px; border-right: 2px solid var(--ink); border-bottom: 2px solid var(--ink); }
+  .cat:nth-child(3n) { border-right: 0; } .cat:nth-child(n+4) { border-bottom: 0; }
+  .cat b { font-size: 14px; } .cat span { font-size: 13px; color: var(--ink2); margin-top: -4px; }
+  .conns { display: flex; gap: 8px; margin: 0 -20px 0 0; overflow: hidden; }
+  .conn { display: flex; align-items: center; gap: 8px; border: 2px solid var(--ink); border-radius: 8px; background: var(--panel); height: 52px; padding: 0 12px 0 8px; white-space: nowrap; font-weight: 800; font-size: 15px; box-shadow: 3px 3px 0 var(--ink); }
+  .conn .quiet { font-weight: 600; font-size: 13px; }
+  .selhead { display: flex; align-items: center; gap: 12px; margin: 2px 0 12px; }
+  .selhead .grow { flex: 1; } .selhead b { font-size: 22px; font-weight: 800; display: block; }
+  .actions { flex: none; display: flex; padding: 8px 6px 0; gap: 2px; border-top: 2px solid var(--ink); background: var(--panel); }
+  .actions .tab svg { width: 24px; height: 24px; }
+  .actions .tab.danger { color: #c8102e; }
+  .clip { flex: none; margin: 0 12px 10px; border: 2px solid var(--ink); border-radius: 10px; background: var(--panel); box-shadow: 4px 4px 0 var(--ink); padding: 12px; }
+  .clip .top { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .clip .top b { font-size: 16px; display: block; } .clip .top .quiet { font-size: 14px; }
+  .clip .btn { min-height: 50px; font-size: 17px; }
+  .clip .btn.ghost { min-height: 50px; }
+  .wins { display: flex; gap: 8px; margin: 0 0 12px; align-items: center; }
+  .win { flex: 1; height: 44px; border: 2px solid var(--ink); border-radius: 8px; background: var(--rail); display: flex; align-items: center; gap: 8px; padding: 0 10px; font-size: 15px; font-weight: 700; white-space: nowrap; overflow: hidden; }
+  .win .n { width: 22px; height: 22px; border: 2px solid var(--ink); border-radius: 4px; display: grid; place-items: center; font-size: 12px; font-weight: 900; background: var(--panel); flex: none; }
+  .win.on { background: #fff; box-shadow: 3px 3px 0 var(--ink); font-weight: 800; }
+  .win.add { flex: none; width: 44px; justify-content: center; padding: 0; font-size: 22px; font-weight: 800; background: var(--panel); }
+  .dots { display: flex; gap: 6px; justify-content: center; margin-top: 12px; } .dots i { width: 8px; height: 8px; border: 2px solid var(--ink); border-radius: 2px; } .dots i.on { background: var(--ink); }
+  .grouph { display: flex; align-items: center; gap: 12px; padding: 10px 14px; background: var(--rail); border-top: 2px solid var(--ink); font-size: 15px; }
+  .grouph:first-child { border-top: 0; }
+  .grouph b { flex: 1; } .grouph .num { font-weight: 800; }
+  .stats { display: grid; grid-template-columns: repeat(3, 1fr); border: 2px solid var(--ink); border-radius: 8px; background: var(--panel); overflow: hidden; }
+  .stats div { padding: 12px 12px; border-right: 2px solid var(--ink); } .stats div:last-child { border-right: 0; }
+  .stats b { display: block; font-size: 22px; font-weight: 800; } .stats span { font-size: 14px; color: var(--ink2); }
+  .found .row { border-top-style: dashed; }
+  .addpill { font-size: 15px; font-weight: 800; border: 2px solid var(--ink); border-radius: 8px; padding: 0 14px; height: 44px; display: grid; place-items: center; background: var(--panel); box-shadow: 3px 3px 0 var(--ink); }
+  .ok { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--ink); border-radius: 2px; background: var(--tint-dupes); margin-right: 6px; vertical-align: -1px; }
+  .opt { display: flex; align-items: center; gap: 12px; border: 2px solid var(--ink); border-radius: 8px; padding: 12px 14px; background: var(--panel); box-shadow: 4px 4px 0 var(--ink); margin-bottom: 14px; min-height: 72px; }
+  .opt b { display: block; font-size: 16px; } .opt .quiet { font-size: 14px; }
+  .crumbs span { border-radius: 6px; }
+  .mini-seg span { height: 44px; } .sortbtn { height: 44px; }
+  .back { width: 44px; height: 44px; display: grid; place-items: center; font-size: 30px; font-weight: 800; margin-left: -10px; flex: none; }
+  .titlerow { display: flex; align-items: center; gap: 4px; flex: 1; min-width: 0; }
+  .clip { display: flex; align-items: center; gap: 10px; padding: 8px 8px 8px 10px; }
+  .clip .grow b { font-size: 15px; display: block; } .clip .grow .quiet { font-size: 13px; }
+  .clip .btn { white-space: nowrap; flex: none; min-height: 48px; padding: 0 16px; font-size: 16px; box-shadow: 3px 3px 0 var(--ink); }
+  .winbar { flex: none; display: flex; gap: 8px; padding: 8px 12px; border-top: 2px solid var(--ink); background: var(--rail); }
+  .winbar .win { height: 44px; }
+  .peek { position: absolute; right: 0; top: 140px; bottom: 210px; width: 10px; background: var(--panel); border: 2px solid var(--ink); border-right: 0; border-radius: 8px 0 0 8px; }
+  .opt.main { background: var(--tint-drain); color: #fff; } .opt.main .quiet { color: #dfe6ff; }
+  .opt.main .win { background: #fff; color: var(--ink); }
+  .dot { display: inline-block; width: 10px; height: 10px; border: 2px solid var(--ink); border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: #a5a79d; }
+  .crumbs span { height: 40px; }
+  .check.part { background: var(--tint-drain); color: #fff; }
+  .note.calm { background: var(--panel); }
+  .txtbtn { height: 44px; padding: 0 12px; border: 2px solid var(--ink); border-radius: 8px; background: var(--panel); box-shadow: 3px 3px 0 var(--ink); display: flex; align-items: center; gap: 6px; font-size: 15px; font-weight: 800; white-space: nowrap; }
+  .txtbtn svg { width: 18px; height: 18px; }
+</style>
+</head>
+<body>
+<div class="sheet" id="sheet">
+
+<!-- 1. Files home: storage first, then kinds, connections, recent. -->
+<section class="phone" id="home">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head"><h1>Files</h1><div style="display:flex;gap:10px"><div class="iconbtn" data-px="search"></div><div class="iconbtn" data-px="settings"></div></div></div>
+    <div class="list storage">
+      <div class="row"><div class="tile" style="background:var(--tint-home)" data-px="phone"></div><div class="grow"><b>Internal storage</b><div class="smeter"><i style="width:52%;background:var(--tint-drain)"></i></div><span class="quiet" style="display:block;margin-top:5px">61 GB free of 128 GB</span></div><span class="chev">›</span></div>
+      <div class="row"><div class="tile" style="background:#a5a79d" data-px="sd"></div><div class="grow"><b>SD card</b><div class="smeter"><i style="width:66%;background:var(--tint-drain)"></i></div><span class="quiet" style="display:block;margin-top:5px">22 GB free of 64 GB</span></div><span class="chev">›</span></div>
+    </div>
+    <h2 style="margin-top:16px">On this phone</h2>
+    <div class="cats">
+      <div class="cat"><div class="tile" style="background:var(--raw-kind-image)" data-px="photo"></div><b>Images</b><span>12.4 GB</span></div>
+      <div class="cat"><div class="tile" style="background:var(--raw-kind-video)" data-px="video"></div><b>Videos</b><span>31.0 GB</span></div>
+      <div class="cat"><div class="tile" style="background:var(--raw-kind-audio)" data-px="music"></div><b>Music</b><span>2.2 GB</span></div>
+      <div class="cat"><div class="tile" style="background:var(--raw-kind-doc)" data-px="doc"></div><b>Documents</b><span>840 MB</span></div>
+      <div class="cat"><div class="tile" style="background:var(--raw-kind-folder)" data-px="download"></div><b>Downloads</b><span>4.1 GB</span></div>
+      <div class="cat"><div class="tile" style="background:var(--raw-kind-archive)" data-px="apps"></div><b>Apps</b><span>9.6 GB</span></div>
+    </div>
+    <h2 style="margin-top:16px">Connections</h2>
+    <div class="conns" style="margin:0">
+      <div class="conn" style="flex:1"><div class="tile sm" style="background:var(--tint-connections)" data-px="nas" data-ink="#fff"></div>Area51</div>
+      <div class="conn" style="flex:1"><div class="tile sm" style="background:var(--tint-sync)" data-px="nas" data-ink="#fff"></div>Backup</div>
+      <div class="conn" style="padding:0 14px">+ Add</div>
+    </div>
+    <h2 style="margin-top:16px">Recent</h2>
+    <div class="list">
+      <div class="row tight"><div class="tile sm" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>Camera</b><span class="meta">Internal › DCIM</span></div><span class="chev">›</span></div>
+    </div>
+  </div>
+  <nav class="tabs" data-on="files"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 2. A folder: path chips, count, sort, list/grid. -->
+<section class="phone" id="folder">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head" style="margin-bottom:10px"><div class="titlerow"><span class="back">‹</span><h1>Camera</h1></div><div style="display:flex;gap:10px"><div class="iconbtn" data-px="search"></div><div class="iconbtn" data-px="more"></div></div></div>
+    <div class="crumbs"><span>Internal</span><em>›</em><span>DCIM</span></div>
+    <div class="bar"><span class="sortbtn">Newest first ▾</span><span class="quiet">412 items · 3.1 GB</span><div class="mini-seg"><span class="on" data-px="list" data-ink="#fdfdf8"></span><span data-px="apps"></span></div></div>
+    <div class="list">
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>Screenshots</b><span class="meta">86 items · Yesterday</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:#f0b768" data-px="photo"></div><div class="grow"><b>IMG_20261102_0912.jpg</b><span class="meta">4.2 MB · 2 Nov, 09:12</span></div></div>
+      <div class="row tight"><div class="thumb" style="background:#e9a24e" data-px="photo"></div><div class="grow"><b>IMG_20261102_0910.jpg</b><span class="meta">3.9 MB · 2 Nov, 09:10</span></div></div>
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-video)" data-px="video"></div><div class="grow"><b>VID_20261101_1840.mp4</b><span class="meta">212 MB · 1 Nov, 18:40</span></div></div>
+      <div class="row tight"><div class="thumb" style="background:#f0b768" data-px="photo"></div><div class="grow"><b>IMG_20261031_1204.jpg</b><span class="meta">3.5 MB · 31 Oct, 12:04</span></div></div>
+      <div class="row tight"><div class="thumb" style="background:#e9a24e" data-px="photo"></div><div class="grow"><b>IMG_20261031_1201.jpg</b><span class="meta">4.0 MB · 31 Oct, 12:01</span></div></div>
+      <div class="row tight"><div class="thumb" style="background:#f2909f" data-px="video"></div><div class="grow"><b>VID_20261030_2112.mp4</b><span class="meta">96 MB · 30 Oct, 21:12</span></div></div>
+    </div>
+  </div>
+  <nav class="tabs" data-on="files"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 3. Selecting: long-press; the tab bar becomes the action bar. -->
+<section class="phone" id="select">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="selhead"><div class="iconbtn">✕</div><div class="grow"><b>3 selected</b><span class="quiet" style="font-size:14px">11.6 MB</span></div><span class="smallbtn">Select all</span></div>
+    <div class="crumbs"><span>Internal</span><em>›</em><span>DCIM</span></div>
+    <div class="list">
+      <div class="row tight"><span class="check">&nbsp;</span><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>Screenshots</b><span class="meta">86 items</span></div></div>
+      <div class="row tight sel"><span class="check on">✓</span><div class="thumb" style="background:#f0b768" data-px="photo"></div><div class="grow"><b>IMG_20261102_0912.jpg</b><span class="meta">4.2 MB · 2 Nov</span></div></div>
+      <div class="row tight sel"><span class="check on">✓</span><div class="thumb" style="background:#e9a24e" data-px="photo"></div><div class="grow"><b>IMG_20261102_0910.jpg</b><span class="meta">3.9 MB · 2 Nov</span></div></div>
+      <div class="row tight"><span class="check">&nbsp;</span><div class="thumb" style="background:var(--raw-kind-video)" data-px="video"></div><div class="grow"><b>VID_20261101_1840.mp4</b><span class="meta">212 MB · 1 Nov</span></div></div>
+      <div class="row tight sel"><span class="check on">✓</span><div class="thumb" style="background:#f0b768" data-px="photo"></div><div class="grow"><b>IMG_20261031_1204.jpg</b><span class="meta">3.5 MB · 31 Oct</span></div></div>
+      <div class="row tight"><span class="check">&nbsp;</span><div class="thumb" style="background:#e9a24e" data-px="photo"></div><div class="grow"><b>IMG_20261031_1201.jpg</b><span class="meta">4.0 MB · 31 Oct</span></div></div>
+      <div class="row tight"><span class="check">&nbsp;</span><div class="thumb" style="background:#f2909f" data-px="video"></div><div class="grow"><b>VID_20261030_2112.mp4</b><span class="meta">96 MB · 30 Oct</span></div></div>
+    </div>
+  </div>
+  <nav class="actions"><div class="tab"><svg data-g="copy"></svg><span>Copy</span></div><div class="tab"><svg data-g="move"></svg><span>Move</span></div><div class="tab"><svg data-g="share"></svg><span>Share</span></div><div class="tab"><svg data-g="more"></svg><span>More</span></div><div class="tab danger"><svg data-g="trash" data-c="#c8102e"></svg><span>Delete</span></div></nav>
+  <div class="homebar" style="background:var(--panel)"><i></i></div>
+</section>
+
+<!-- 4. Clipboard: the move rides along while you browse anywhere. -->
+<section class="phone" id="clip">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head" style="margin-bottom:10px"><div class="titlerow"><span class="back">‹</span><h1>2026</h1></div><div class="txtbtn" data-px="newfolder"><span>New folder</span></div></div>
+    <div class="crumbs"><span>Area51</span><em>›</em><span>Photos</span></div>
+    <div class="list">
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>January–June</b><span class="meta">2,140 items</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>Holiday, Lisbon</b><span class="meta">318 items</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>October</b><span class="meta">96 items</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:#f0b768" data-px="photo"></div><div class="grow"><b>cover.jpg</b><span class="meta">1.1 MB · 3 Jan</span></div></div>
+    </div>
+  </div>
+  <div class="clip"><div class="iconbtn" style="box-shadow:none">✕</div><div class="grow"><b>3 photos to move</b><span class="quiet">11.6 MB from Camera</span></div><div class="btn" style="background:var(--tint-drain);color:#fff">Move here</div></div>
+  <nav class="tabs" data-on="files"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 5. Two windows: switcher at the top, swipe between. -->
+<section class="phone" id="windows">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head" style="margin-bottom:10px"><div class="titlerow"><span class="back">‹</span><h1>2026</h1></div><div class="txtbtn" data-px="newfolder"><span>New folder</span></div></div>
+    <div class="crumbs"><span>Area51</span><em>›</em><span>Photos</span></div>
+    <div class="list">
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>January–June</b><span class="meta">2,140 items</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>Holiday, Lisbon</b><span class="meta">318 items</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>October</b><span class="meta">96 items</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:#f0b768" data-px="photo"></div><div class="grow"><b>cover.jpg</b><span class="meta">1.1 MB · 3 Jan</span></div></div>
+    </div>
+  </div>
+  <div class="winbar"><div class="win"><span class="n">1</span>Camera</div><div class="win on"><span class="n">2</span>Area51 › 2026</div><div class="win add">+</div></div>
+  <nav class="tabs" data-on="files"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 5b. Move with two windows open: the other window is one tap. -->
+<section class="phone" id="moveto">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll"><div class="selhead"><div class="iconbtn">✕</div><div class="grow"><b>3 selected</b></div></div></div>
+  <div class="veil"></div>
+  <div class="bsheet">
+    <div class="grab"></div>
+    <div class="head" style="margin:0 0 4px"><h1 style="font-size:24px">Move 3 photos</h1></div>
+    <div class="t15 quiet" style="margin-bottom:16px">Each is sent, read back and checked before the original is removed.</div>
+    <div class="opt main"><div class="win on" style="flex:none;width:40px;height:40px;justify-content:center;padding:0;box-shadow:none"><span class="n" style="border:0;background:none;font-size:16px">2</span></div><div class="grow"><b>Move to window 2</b><span class="quiet">Area51 › Photos › 2026</span></div><span class="chev">›</span></div>
+    <div class="opt"><div class="tile" style="background:var(--panel)" data-px="clipboard"></div><div class="grow"><b>Choose another place</b><span class="quiet">Browse anywhere, then tap Move here</span></div><span class="chev">›</span></div>
+    <div class="act" style="padding:4px 0 14px;background:transparent"><div class="btn ghost" style="min-height:52px">Cancel</div></div>
+    <div class="homebar" style="background:transparent"><i></i></div>
+  </div>
+</section>
+
+<!-- 6. Free up findings: a normal file window, all ticked, untick freely. -->
+<section class="phone" id="findings">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head" style="margin-bottom:8px"><h1>Free up space</h1></div>
+    <div class="t15 quiet" style="margin-bottom:12px">3,214 photos and videos, 41 GB. Untick any you want to keep on the phone.</div>
+    <div class="chips"><span class="chip on">Older than 3 months ▾</span><span class="chip">Photos and videos ▾</span><span class="chip">Camera ▾</span></div>
+    <div class="list">
+      <div class="grouph"><span class="check part">–</span><b>2026 · 1,203 of 1,204</b><span class="num">14.2 GB</span></div>
+      <div class="row tight"><span class="check on">✓</span><div class="thumb" style="background:var(--raw-kind-video)" data-px="video"></div><div class="grow"><b>VID_20260712_1530.mp4</b><span class="meta">1.8 GB · 12 Jul · Camera</span></div></div>
+      <div class="row tight"><span class="check on">✓</span><div class="thumb" style="background:#f0b768" data-px="photo"></div><div class="grow"><b>IMG_20260711_0904.jpg</b><span class="meta">4.4 MB · 11 Jul · Camera</span></div></div>
+      <div class="row tight"><span class="check">&nbsp;</span><div class="thumb" style="background:#e9a24e" data-px="photo"></div><div class="grow"><b>IMG_20260711_0901.jpg</b><span class="meta">4.1 MB · 11 Jul · Favourite</span></div></div>
+      <div class="grouph"><span class="check on">✓</span><b>2025 · 1,688</b><span class="num">19.6 GB</span></div>
+      <div class="row tight"><span class="check on">✓</span><div class="thumb" style="background:#f2909f" data-px="video"></div><div class="grow"><b>VID_20251224_1912.mp4</b><span class="meta">940 MB · 24 Dec · Camera</span></div></div>
+      <div class="row tight"><span class="check on">✓</span><div class="thumb" style="background:#f0b768" data-px="photo"></div><div class="grow"><b>IMG_20251224_1903.jpg</b><span class="meta">3.8 MB · 24 Dec · Camera</span></div></div>
+    </div>
+  </div>
+  <div class="act"><div class="btn" style="background:var(--tint-drain);color:#fff">Choose where to move them</div></div>
+  <nav class="tabs" data-on="free"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 6b. Move to: window 2 opens on a connection; you choose the folder. -->
+<section class="phone" id="choosefolder">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head" style="margin-bottom:10px"><div class="titlerow"><span class="back">‹</span><h1>Phone</h1></div><div class="txtbtn" data-px="newfolder"><span>New folder</span></div></div>
+    <div class="crumbs"><span>Area51</span><em>›</em><span>Photos</span></div>
+    <div class="list">
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>2025</b><span class="meta">1,920 items</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>2026</b><span class="meta">402 items</span></div><span class="chev">›</span></div>
+      <div class="row tight"><div class="thumb" style="background:var(--raw-kind-folder)" data-px="folder"></div><div class="grow"><b>WhatsApp</b><span class="meta">3,005 items</span></div><span class="chev">›</span></div>
+    </div>
+    <div class="t15 quiet" style="margin-top:14px">Kept in year folders here, like on the phone. 3.1 TB free on Area51.</div>
+  </div>
+  <div class="clip"><div class="iconbtn" style="box-shadow:none">✕</div><div class="grow"><b>3,213 items to move</b><span class="quiet">41 GB, from window 1</span></div><div class="btn" style="background:var(--tint-drain);color:#fff">Move here</div></div>
+  <nav class="tabs" data-on="free"></nav><div class="homebar"><i></i></div>
+</section>
+
+<!-- 7. Moving: three plain counts; Pause and Stop quiet. -->
+<section class="phone noTabs" id="moving">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll" style="display:flex;flex-direction:column;gap:18px">
+    <div style="font-size:17px;font-weight:700;margin:-2px 0 -8px">‹ Keep browsing</div>
+    <div class="head" style="margin-bottom:0"><h1>Moving 3,213 items</h1></div>
+    <div class="t15 quiet" style="margin-top:-10px">To Area51 › Photos › Phone</div>
+    <div class="scene" data-scene="send" style="width:250px;height:125px;margin:4px auto 0"></div>
+    <div style="text-align:center"><div class="big" style="font-size:64px">18.4 GB</div><div class="t15 quiet" style="margin-top:8px">of 41 GB · about 12 minutes left</div></div>
+    <div class="blocks"></div>
+    <div class="stats"><div><b>1,512</b><span>sent</span></div><div><b>1,448</b><span>checked</span></div><div><b>1,448</b><span>off the phone</span></div></div>
+    <div class="t15 quiet" style="text-align:center">Each original is removed only after its copy is read back and matches. You can lock the phone or switch apps; the move carries on.</div>
+  </div>
+  <div class="act pair"><div class="btn ghost" style="min-height:58px">Pause</div><div class="btn ghost" style="min-height:58px">Stop</div></div>
+  <div class="homebar"><i></i></div>
+</section>
+
+<!-- 8. Connections: saved ones, then what the network shows. -->
+<section class="phone" id="connections">
+  <div class="status"><span>9:41</span><span class="r"><i></i><i></i></span></div>
+  <div class="scroll">
+    <div class="head"><h1>Connections</h1><div class="iconbtn" style="font-size:24px">+</div></div>
+    <div class="list">
+      <div class="row"><div class="tile" style="background:var(--tint-connections)" data-px="nas" data-ink="#fff"></div><div class="grow"><b>Area51</b><span class="meta"><i class="dot" style="background:var(--tint-dupes)"></i>SMB · 192.168.1.20 · online</span></div><span class="chev">›</span></div>
+      <div class="row"><div class="tile" style="background:var(--tint-sync)" data-px="nas" data-ink="#fff"></div><div class="grow"><b>Backup box</b><span class="meta"><i class="dot" style="background:var(--tint-dupes)"></i>SFTP · backup.local · online</span></div><span class="chev">›</span></div>
+      <div class="row"><div class="tile" style="background:var(--tint-home)" data-px="cloud"></div><div class="grow"><b>Photos bucket</b><span class="meta"><i class="dot"></i>S3 · eu-west-2 · not checked</span></div><span class="chev">›</span></div>
+    </div>
+    <div class="gh"><h2>Found on your network</h2><span class="quiet" style="font-size:14px">Looking…</span></div>
+    <div class="list found">
+      <div class="row"><div class="tile" style="background:var(--panel)" data-px="nas"></div><div class="grow"><b>DS920</b><span class="meta">SMB · 192.168.1.31 · 3 shares</span></div><span class="addpill">Add</span></div>
+      <div class="row"><div class="tile" style="background:var(--panel)" data-px="wifi"></div><div class="grow"><b>raspberrypi</b><span class="meta">SFTP · 192.168.1.44</span></div><span class="addpill">Add</span></div>
+    </div>
+    <div class="t15 quiet" style="margin-top:12px">Add fills in the address for you. You type the username and password.</div>
+  </div>
+  <nav class="tabs" data-on="conn"></nav><div class="homebar"><i></i></div>
+</section>
+
+</div>
+<script>
+const PX = {
+  folder: ["........",".xxx....",".x..xxx.",".xoooox.",".xoooox.",".xoooox.",".xxxxxx.","........"],
+  drain: [".xxxxxx.",".xoooox.",".xxxxxx.","...xx...",".x.xx.x.","..xxxx..",".xxxxxx.",".xoooox."],
+  dupes: ["xxxxx...","x...x...","x.o.x...","x...xxxx","xxxxx..x","...x.o.x","...x...x","...xxxxx"],
+  organise: ["xxxxxxxx","........","xxxxxx..","........","xxxx....","........","xx......","........"],
+  connections: ["..x..x..","..x..x..",".xxxxxx.",".xoooox.",".xoooox.","..xxxx..","...xx...","...xx..."],
+  settings: ["........","..x.....","xxxxxxxx","..x.....",".....x..","xxxxxxxx",".....x..","........"],
+  photo: ["........","......x.",".....xxx","......x.","..x.....",".xxx..x.","xxxxxxxx","xxxxxxxx"],
+  video: ["........","xxxxx...","xooox.x.","xoooxxx.","xoooxxx.","xooox.x.","xxxxx...","........"],
+  music: ["...xxxxx","...xxxxx","...x...x","...x...x","...x...x",".xxx.xxx","xxxxxxxx",".xx..xx."],
+  doc: [".xxxx...",".xooxx..",".xoooxx.",".xxxxox.",".xoooox.",".xxxxox.",".xoooox.",".xxxxxx."],
+  download: ["...xx...","...xx...","...xx...",".xxxxxx.","..xxxx..","...xx...","x......x","xxxxxxxx"],
+  apps: ["xxx..xxx","xox..xox","xxx..xxx","........","........","xxx..xxx","xox..xox","xxx..xxx"],
+  list: ["xx.xxxxx","........","xx.xxxxx","........","xx.xxxxx","........","xx.xxxxx","........"],
+  sd: ["..xxxxx.",".x.x.x.x","x......x","x.oooo.x","x.oooo.x","x......x","x......x","xxxxxxxx"],
+  phone: ["..xxxx..","..xoox..","..xoox..","..xoox..","..xoox..","..xoox..","..xxxx..","..xxxx.."],
+  search: [".xxxx...","x....x..","x....x..","x....x..","x....x..",".xxxx...",".....xx.","......xx"],
+  more: ["........","........","........","xx.xx.xx","xx.xx.xx","........","........","........"],
+  copy: ["xxxxx...","x...x...","x.xxxxx.","x.x...x.","xxx...x.","..x...x.","..xxxxx.","........"],
+  move: ["........","....x...","....xx..","xxxxxxx.","xxxxxxx.","....xx..","....x...","........"],
+  trash: ["..xxxx..","xxxxxxxx",".x....x.",".x.x.xx.",".x.x.xx.",".x.x.xx.",".x....x.",".xxxxxx."],
+  rename: [".....xx.","....x..x","...x..x.","..x..x..",".x..x...","x..x....","xxx.....","........"],
+  nas: ["xxxxxxxx","xoooooox","xxxxxxxx","xoooooox","xxxxxxxx","xoooooox","xxxxxxxx",".x....x."],
+  cloud: ["........","...xxx..","..xooox.",".xxoooox","xoooooox","xoooooox",".xxxxxx.","........"],
+  wifi: ["........",".xxxxxx.","x......x","..xxxx..",".x....x.","...xx...","...xx...","........"],
+  share: ["......x.",".....xxx","......x.","...xx.x.","..x...x.",".x....x.","x.......","xxxxxxxx"],
+  newfolder: ["........",".xxx....",".x..xxx.",".x.o.ox.",".xoxxxx.",".x.oxox.",".xxxxxx.","........"],
+  clipboard: ["..xxxx..","xxx..xxx","xoooooox","xoxxxxox","xoooooox","xoxxxxox","xoooooox","xxxxxxxx"],
+};
+function paths(name) {
+  let d = "", o = "";
+  PX[name].forEach((row, y) => [...row].forEach((c, x) => {
+    if (c === "x") d += `M${x} ${y}h1v1h-1z`; else if (c === "o") o += `M${x} ${y}h1v1h-1z`;
+  }));
+  return [d, o];
+}
+function svg(name, ink = "#151515", second = "rgba(255,255,255,0.55)") {
+  if (!PX[name]) return "";
+  const [d, o] = paths(name);
+  return `<svg viewBox="0 0 8 8" shape-rendering="crispEdges"><path d="${o}" fill="${second}"/><path d="${d}" fill="${ink}"/></svg>`;
+}
+document.querySelectorAll("[data-px]").forEach(el => el.insertAdjacentHTML("afterbegin", svg(el.dataset.px, el.dataset.ink)));
+document.querySelectorAll("svg[data-g]").forEach(el => { el.outerHTML = svg(el.dataset.g, el.dataset.c); });
+document.querySelectorAll(".blocks").forEach(b => { b.innerHTML = Array.from({length: 20}, (_, i) => `<i class="${i < 9 ? "on" : ""}"></i>`).join(""); });
+const TABS = [["files","folder","Files"],["free","drain","Free up"],["dupes","dupes","Duplicates"],["organise","organise","Organise"],["conn","connections","Connections"]];
+document.querySelectorAll(".tabs").forEach(nav => {
+  nav.innerHTML = TABS.map(([id, px, label]) => `<div class="tab ${nav.dataset.on === id ? "on" : ""}">${svg(px)}<span>${label}</span></div>`).join("");
+});
+const SCENE = {
+  send: ["........................",".xxxxx..............xxxx",".x...x.............xoooo",".x.o.x.............xxxxx",".x...x...x..x..x...xoooo",".x...x....x..x..x..xxxxx",".x...x...x..x..x...xoooo",".x...x.............xxxxx",".x...x.............xoooo",".xxxxx.............xxxxx","..xx...............xx.xx","........................"],
+};
+document.querySelectorAll("[data-scene]").forEach(el => {
+  const g = SCENE[el.dataset.scene]; let d = "", o = "";
+  g.forEach((row, y) => [...row].forEach((c, x) => { if (c === "x") d += `M${x} ${y}h1v1h-1z`; else if (c === "o") o += `M${x} ${y}h1v1h-1z`; }));
+  el.innerHTML = `<svg viewBox="0 0 24 12" width="100%" height="100%" shape-rendering="crispEdges"><path d="${o}" fill="#1d4aff"/><path d="${d}" fill="#151515"/></svg>`;
+});
+const only = new URLSearchParams(location.search).get("only");
+if (only) {
+  document.body.classList.add("solo");
+  document.querySelectorAll(".phone").forEach(p => { if (p.id !== only) p.remove(); });
+  document.getElementById("sheet").classList.add("only");
+}
+</script>
+</body>
+</html>

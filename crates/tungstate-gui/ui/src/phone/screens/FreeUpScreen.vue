@@ -1,71 +1,115 @@
-<!-- Free up space: what the photo library could give back, chosen by kind,
-     age and year, where it goes, and how carefully each one is checked
-     there. Free starts the run, which takes over the screen. Matches the
-     approved mockup. -->
+<!-- Free up space: the old photos and videos it found, as a file list you
+     untick from, grouped by year; then a second window on a connection to
+     choose the folder they go to. Matches docs/mobile/approved-files/
+     (findings, choosefolder). Favourites start unticked. Landing starts the
+     run, which takes over the screen (FreeingScreen). -->
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import type { CheckLevel, PhotoFilter } from "../../engine/types";
-import { bytes, plural } from "../../lib/format";
+import type { CheckLevel, PhotoAsset, PhotoFilter } from "../../engine/types";
+import { bytes, plural, when } from "../../lib/format";
+import Pixels from "../../ui/Pixels.vue";
 import { useConnections } from "../../state/useConnections";
 import { usePhoneNav } from "../nav";
+import FilesHome from "../files/FilesHome.vue";
+import FileWindow from "../files/FileWindow.vue";
+import { yearState } from "../lib/findings";
+import { connectionOf } from "../lib/paths";
+import { useClipboard } from "../state/useClipboard";
 import { AGES, KINDS, usePhotos } from "../state/usePhotos";
 import { useFreeUp } from "../state/useFreeUp";
+import { useWindows } from "../state/useWindows";
 import PScreen from "../ui/PScreen.vue";
-import PRow from "../ui/PRow.vue";
 import PTile from "../ui/PTile.vue";
 import PButton from "../ui/PButton.vue";
+import PSheet from "../ui/PSheet.vue";
 
 const lib = usePhotos();
 const run = useFreeUp();
 const conns = useConnections();
 const nav = usePhoneNav();
+const board = useClipboard();
+const w = useWindows();
 onMounted(() => {
   void lib.load();
   void conns.load();
 });
 
-const sheet = ref<"filter" | "target" | null>(null);
+const sheet = ref<"filter" | null>(null);
 const targets = computed(() => conns.all.value.filter((c) => c.scheme !== "fs"));
-const chosenTarget = ref<string | null>(null);
-const target = computed(() => targets.value.find((c) => c.name === chosenTarget.value) ?? targets.value[0] ?? null);
+/** Choosing the folder: window 2 is up, with the findings on the clipboard. */
+const choosing = computed(() => !!board.clip.value?.land);
 
-const filterLine = computed(() => {
-  const kind = KINDS.find((k) => k.id === lib.filter.value.kind)!.label;
+const ageLabel = computed(() => {
   const age = AGES.find((a) => a.days === lib.filter.value.olderThanDays)!;
-  return age.days ? `${kind} · older than ${age.label}` : `${kind} · any age`;
+  return age.days ? `Older than ${age.label}` : "Any age";
 });
+const kindLabel = computed(() => (lib.filter.value.kind === "all" ? "Photos and videos" : KINDS.find((k) => k.id === lib.filter.value.kind)!.label));
 const pick = (next: Partial<PhotoFilter>) => void lib.setFilter({ ...lib.filter.value, ...next });
 
-/** Where under the connection photos go: `Phone/<year>/<kind>`. */
-const FOLDER = "Phone";
-
 // Each level says what it costs, so the choice is an informed one.
-const CHECKS: { id: CheckLevel; label: string; says: (to: string) => string }[] = [
-  { id: "readback", label: "Read back", says: (to) => `Reads each copy back from ${to}. Slower, and the only check that proves the bytes there are right.` },
-  { id: "size", label: "Size only", says: () => "Only compares sizes. Faster, but a copy damaged on the way would not be caught." },
+const CHECKS: { id: CheckLevel; label: string; says: string }[] = [
+  { id: "readback", label: "Read back", says: "Reads each copy back from the connection. Slower, and the only check that proves the bytes there are right." },
+  { id: "size", label: "Size only", says: "Only compares sizes. Faster, but a copy damaged on the way would not be caught." },
 ];
-const checkSays = computed(() => CHECKS.find((c) => c.id === run.check.value)!.says(target.value?.name ?? "the connection"));
 
-function free() {
-  if (!target.value) return;
-  void run.start({
-    connection: target.value.name,
-    folder: FOLDER,
+/** Thousands of rows would choke a phone's web view, so each year shows its
+ *  first rows until asked for the rest. Ticking a year still covers it all. */
+const FIRST = 60;
+const opened = ref<Set<number>>(new Set());
+const rowsOf = (year: number, items: PhotoAsset[]) => (opened.value.has(year) ? items : items.slice(0, FIRST));
+const openYear = (year: number) => (opened.value = new Set([...opened.value, year]));
+
+const ART = { photo: "photo", video: "video", screenshot: "photo" } as const;
+const TINT = { photo: "var(--raw-kind-image)", video: "var(--raw-kind-video)", screenshot: "var(--raw-kind-doc)" } as const;
+const sub = (a: PhotoAsset) => [bytes(a.size), when(a.takenMs), a.favourite ? "Favourite" : null].filter(Boolean).join(" · ");
+
+/** Hand the findings to the clipboard and open window 2 on a connection. */
+function chooseWhere() {
+  const first = targets.value[0];
+  if (!first) return nav.go("connections");
+  const { count, bytes: size } = lib.chosen.value;
+  board.hold({
+    op: "move",
+    what: plural(count, "item"),
+    bytes: size,
+    from: "Free up",
+    paths: [],
+    land: land,
+  });
+  w.second({ kind: "folder", path: `${first.name}:` });
+}
+
+/** "Move here" in window 2: the run, into that folder on that connection. */
+async function land(destination: string) {
+  const connection = connectionOf(destination);
+  if (!connection) throw new Error("Choose a folder on a connection; Free up moves them off this phone.");
+  await run.start({
+    connection,
+    folder: destination.slice(connection.length + 1),
     filter: lib.filter.value,
-    years_left_out: [...lib.left.value],
-    favourites: lib.favourites.value,
+    years_left_out: [],
+    // Favourites are in the findings like any photo; unticked ones are
+    // left out by id with the rest.
+    favourites: true,
+    left_out: [...lib.unticked.value],
     verify: run.check.value,
   });
+  if (run.problem.value) throw new Error(run.problem.value);
 }
 </script>
 
 <template>
-  <PScreen title="Free up space">
-    <!-- Before the person has said the app may look. -->
+  <!-- Window 2, choosing the folder; the clipboard bar says what is held. -->
+  <template v-if="choosing">
+    <FilesHome v-if="w.win.value.place.kind === 'home'" />
+    <FileWindow v-else />
+  </template>
+
+  <PScreen v-else title="Free up space">
     <div v-if="lib.access.value === 'ask'" class="card">
       <PTile art="drain" tint="var(--tint-drain)" light :size="48" />
       <b>Let Tungstate see your photos</b>
-      <p>To count what can be freed. Nothing leaves this phone until you choose to send it.</p>
+      <p>To find what can be moved off this phone. Nothing leaves it until you choose where it goes.</p>
     </div>
     <div v-else-if="lib.access.value === 'denied'" class="card">
       <PTile art="drain" tint="var(--tint-drain)" light :size="48" />
@@ -74,37 +118,38 @@ function free() {
     </div>
 
     <template v-else-if="lib.canRead.value">
+      <p v-if="lib.loading.value || lib.findings.value.length" class="line">
+        <template v-if="lib.loading.value">Looking…</template>
+        <template v-else>{{ plural(lib.findings.value.length, "photo or video", "photos and videos") }}, {{ bytes(lib.findings.value.reduce((n, a) => n + a.size, 0)) }}. Untick any you want to keep on the phone.</template>
+      </p>
       <p v-if="lib.access.value === 'limited'" class="line">Tungstate sees only the photos you picked.</p>
-      <div class="box">
-        <div class="hero">
-          <span class="big">{{ bytes(lib.chosen.value.bytes) }}</span>
-          <span class="quiet">{{ plural(lib.chosen.value.count, "item") }}</span>
+      <div class="bar">
+        <div class="chips">
+          <button class="chip on" @click="sheet = 'filter'">{{ ageLabel }} ▾</button>
+          <button class="chip" @click="sheet = 'filter'">{{ kindLabel }} ▾</button>
         </div>
-        <button class="choice press" @click="sheet = 'filter'">
-          <span class="grow">{{ filterLine }}</span><span class="chev" aria-hidden="true">▾</span>
-        </button>
-        <button v-if="target" class="choice press" @click="sheet = 'target'">
-          <PTile art="connections" tint="var(--tint-connections)" light :size="30" />
-          <span class="grow">To {{ target.name }} › {{ FOLDER }}</span><span class="chev" aria-hidden="true">›</span>
-        </button>
-        <button v-else class="choice press" @click="nav.go('connections')">
-          <span class="grow">Add a connection to send to</span><span class="chev" aria-hidden="true">›</span>
-        </button>
+        <div class="seg" role="group" aria-label="View">
+          <button :class="{ on: w.win.value.view === 'list' }" aria-label="List" @click="w.setView('list')"><Pixels of="list" :size="18" /></button>
+          <button :class="{ on: w.win.value.view === 'grid' }" aria-label="Grid" @click="w.setView('grid')"><Pixels of="grid" :size="18" /></button>
+        </div>
       </div>
 
-      <h2>Include</h2>
-      <p v-if="lib.loading.value" class="line">Counting…</p>
-      <p v-else-if="!lib.summary.value?.years.length && !lib.summary.value?.favourites.count" class="line">Nothing here matches.</p>
-      <div v-else class="list">
-        <button v-for="y in lib.summary.value?.years ?? []" :key="y.year" class="pick" @click="lib.toggleYear(y.year)">
-          <span class="check" :class="{ on: !lib.left.value.has(y.year) }" aria-hidden="true">✓</span>
-          <span class="text"><b>{{ y.year }}</b><span class="quiet">{{ plural(y.count, "item") }}</span></span>
-          <span class="num">{{ bytes(y.bytes) }}</span>
+      <p v-if="!lib.loading.value && !lib.findings.value.length" class="line">Nothing on this phone matches. Try another age or kind.</p>
+      <div v-for="g in lib.years.value" :key="g.year" class="group">
+        <button class="year" @click="lib.toggleYear(g.year)">
+          <span class="check" :class="yearState(g)" aria-hidden="true">{{ yearState(g) === "some" ? "–" : "✓" }}</span>
+          <b class="grow">{{ g.year }} · {{ g.ticked === g.items.length ? g.items.length.toLocaleString() : `${g.ticked.toLocaleString()} of ${g.items.length.toLocaleString()}` }}</b>
+          <span class="num">{{ bytes(g.tickedBytes) }}</span>
         </button>
-        <button v-if="lib.summary.value?.favourites.count" class="pick" @click="lib.favourites.value = !lib.favourites.value">
-          <span class="check" :class="{ on: lib.favourites.value }" aria-hidden="true">✓</span>
-          <span class="text"><b>Favourites</b><span class="quiet">{{ lib.favourites.value ? "Sent too" : "Stay on the phone" }}</span></span>
-          <span class="num">{{ bytes(lib.summary.value.favourites.bytes) }}</span>
+        <div :class="{ grid: w.win.value.view === 'grid' }">
+          <button v-for="a in rowsOf(g.year, g.items)" :key="a.id" class="item" @click="lib.toggle(a.id)">
+            <span class="check" :class="{ all: !lib.unticked.value.has(a.id) }" aria-hidden="true">✓</span>
+            <PTile :art="ART[a.kind]" :tint="TINT[a.kind]" :size="w.win.value.view === 'grid' ? 56 : 44" />
+            <span class="text"><b>{{ a.name }}</b><span class="quiet">{{ sub(a) }}</span></span>
+          </button>
+        </div>
+        <button v-if="g.items.length > FIRST && !opened.has(g.year)" class="more" @click="openYear(g.year)">
+          Show all {{ g.items.length.toLocaleString() }} from {{ g.year }}
         </button>
       </div>
     </template>
@@ -112,44 +157,33 @@ function free() {
     <p v-if="lib.problem.value" class="line bad">{{ lib.problem.value }}</p>
     <p v-if="run.problem.value" class="line bad">{{ run.problem.value }}</p>
 
-    <!-- Bottom sheets: what to send, and where. -->
-    <div v-if="sheet" class="veil" @click="sheet = null"></div>
-    <div v-if="sheet === 'filter'" class="sheet">
-      <div class="grab"></div>
-      <h3>What to send</h3>
-      <h2>Kind</h2>
-      <div class="seg">
+    <PSheet v-if="sheet === 'filter'" title="What to look for" @close="sheet = null">
+      <b class="label">Kind</b>
+      <div class="seg wide">
         <button v-for="k in KINDS" :key="k.id" :class="{ on: lib.filter.value.kind === k.id }" @click="pick({ kind: k.id })">{{ k.label }}</button>
       </div>
-      <h2>Older than</h2>
-      <div class="seg">
+      <b class="label">Older than</b>
+      <div class="seg wide">
         <button v-for="a in AGES" :key="a.days" :class="{ on: lib.filter.value.olderThanDays === a.days }" @click="pick({ olderThanDays: a.days })">{{ a.label }}</button>
       </div>
-      <h2>Check each one</h2>
-      <div class="seg">
+      <b class="label">Check each one</b>
+      <div class="seg wide">
         <button v-for="c in CHECKS" :key="c.id" :class="{ on: run.check.value === c.id }" @click="run.setCheck(c.id)">{{ c.label }}</button>
       </div>
-      <p class="says">{{ checkSays }}</p>
-      <div class="sheet-act"><PButton @press="sheet = null">{{ lib.loading.value ? "Counting…" : `Show ${bytes(lib.chosen.value.bytes)}` }}</PButton></div>
-    </div>
-    <div v-if="sheet === 'target'" class="sheet">
-      <div class="grab"></div>
-      <h3>Send to</h3>
-      <div class="list">
-        <PRow v-for="c in targets" :key="c.name" :title="c.name" :sub="c.place" chevron @press="chosenTarget = c.name; sheet = null">
-          <template #lead><PTile art="connections" tint="var(--tint-connections)" light /></template>
-        </PRow>
-      </div>
-    </div>
+      <p class="says">{{ CHECKS.find((c) => c.id === run.check.value)!.says }}</p>
+      <PButton @press="sheet = null">{{ lib.loading.value ? "Looking…" : `Show ${plural(lib.findings.value.length, "item")}` }}</PButton>
+    </PSheet>
 
     <template #act>
-      <template v-if="lib.access.value === 'ask'">
-        <PButton @press="lib.ask()">Allow access</PButton>
-      </template>
-      <template v-else-if="lib.canRead.value">
-        <p v-if="target" class="say">Each item is checked on {{ target.name }} before it leaves</p>
-        <PButton :disabled="!target || !lib.chosen.value.count || lib.loading.value" :busy="run.phase.value === 'starting'" @press="free">Free {{ bytes(lib.chosen.value.bytes) }}</PButton>
-      </template>
+      <PButton v-if="lib.access.value === 'ask'" @press="lib.ask()">Allow access</PButton>
+      <PButton
+        v-else-if="lib.canRead.value"
+        :disabled="!lib.chosen.value.count || lib.loading.value"
+        :busy="run.phase.value === 'starting'"
+        @press="chooseWhere"
+      >
+        {{ targets.length ? `Choose where to move ${lib.chosen.value.count === 1 ? "it" : "them"}` : "Add a connection to move them to" }}
+      </PButton>
     </template>
   </PScreen>
 </template>
@@ -158,48 +192,36 @@ function free() {
 .card { display: flex; flex-direction: column; gap: 12px; padding: 18px; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
 .card b { font-size: 19px; }
 .card p { margin: 0; font-size: 16px; line-height: 1.4; color: var(--text-quiet); }
-.box { display: flex; flex-direction: column; gap: 12px; padding: 16px; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
-.hero { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
-.big { font-size: 52px; font-weight: 800; letter-spacing: -1.5px; line-height: 0.95; }
-.quiet { font-size: 15px; color: var(--text-quiet); }
-.choice {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 0 16px;
-  font: inherit; font-size: 16px; font-weight: 700; text-align: left; color: var(--text);
-  background: var(--panel); border: 2px solid var(--edge); border-radius: 8px;
-}
-.press { box-shadow: 3px 3px 0 var(--edge); }
-.press:active { transform: translate(3px, 3px); box-shadow: none; }
-.grow { flex: 1; }
-.chev { font-size: 20px; font-weight: 800; }
-h2 { font-size: 15px; font-weight: 800; margin: 22px 0 8px; }
-h3 { font-size: 24px; font-weight: 800; margin: 0 0 4px; }
-.line { margin: 4px 2px 12px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
+.line { margin: -6px 2px 12px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
 .bad { color: var(--bad); font-weight: 700; }
-.list { background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; overflow: hidden; }
-.pick {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 12px 14px;
-  font: inherit; text-align: left; color: var(--text); background: var(--panel);
-  border: 0; border-top: 2px solid var(--edge);
-}
-.pick:first-child { border-top: 0; }
-.check { width: 30px; height: 30px; flex: none; display: grid; place-items: center; font-weight: 900; color: transparent; background: var(--panel); border: 2px solid var(--edge); border-radius: 6px; }
-.check.on { color: #ffffff; background: var(--tint-drain); }
-.text { flex: 1; display: flex; flex-direction: column; gap: 2px; }
-.text b { font-size: 16px; }
-.num { font-size: 16px; font-weight: 800; }
-.veil { position: fixed; inset: 0; background: var(--veil); z-index: 1; }
-.sheet {
-  position: fixed; left: 0; right: 0; bottom: 0; z-index: 2;
-  /* Clear of the home bar on iPhone and the gesture bar on Android. */
-  padding: 10px 20px calc(env(safe-area-inset-bottom, 0px) + 22px);
-  background: var(--panel); border-top: 2px solid var(--edge); border-radius: 16px 16px 0 0;
-}
-.grab { width: 44px; height: 5px; margin: 0 auto 14px; border-radius: 3px; background: var(--edge); }
-.seg { display: flex; overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
-.seg button { flex: 1; min-height: 48px; padding: 0 4px; font: inherit; font-size: 15px; font-weight: 700; color: var(--text); background: none; border: 0; border-right: 2px solid var(--edge); }
+.bar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
+/* The chips scroll; the list/grid switch stays in reach beside them. */
+.chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none; }
+.chips > * { flex: none; }
+.chip { height: 44px; padding: 0 14px; font: inherit; font-size: 15px; font-weight: 700; white-space: nowrap; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 99px; }
+.chip.on { color: var(--panel); background: var(--edge); }
+.seg { flex: none; display: flex; margin-left: auto; overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
+.seg button { width: 44px; height: 40px; display: grid; place-items: center; font: inherit; font-size: 15px; font-weight: 700; color: var(--text); background: none; border: 0; border-right: 2px solid var(--edge); }
 .seg button:last-child { border-right: 0; }
 .seg button.on { color: var(--panel); background: var(--edge); }
-.sheet-act { margin-top: 18px; }
-.says { margin: 10px 2px 0; font-size: 14px; line-height: 1.4; color: var(--text-quiet); }
-.say { margin: 0 2px 10px; font-size: 14px; text-align: center; color: var(--text-quiet); }
+.seg.wide { margin: 0; }
+.seg.wide button { flex: 1; width: auto; min-height: 48px; }
+.group { margin-bottom: 12px; overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
+.year { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 52px; padding: 10px 14px; font: inherit; font-size: 15px; text-align: left; color: var(--text); background: var(--rail); border: 0; }
+.grow { flex: 1; }
+.num { font-weight: 800; }
+.item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 9px 14px; font: inherit; text-align: left; color: var(--text); background: var(--panel); border: 0; border-top: 2px solid var(--edge); }
+.text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.text b { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quiet { font-size: 14px; color: var(--text-quiet); }
+.check { width: 30px; height: 30px; flex: none; display: grid; place-items: center; font-weight: 900; color: transparent; background: var(--panel); border: 2px solid var(--edge); border-radius: 6px; }
+.check.all, .check.some { color: #ffffff; background: var(--tint-drain); }
+.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 6px; border-top: 2px solid var(--edge); }
+.grid .item { position: relative; flex-direction: column; gap: 6px; min-height: 0; padding: 10px 4px; text-align: center; border: 2px solid var(--edge); border-radius: 8px; }
+.grid .text b { font-size: 12px; }
+.grid .quiet { display: none; }
+.grid .check { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; }
+.more { width: 100%; min-height: 48px; font: inherit; font-size: 15px; font-weight: 800; color: var(--text); background: var(--panel); border: 0; border-top: 2px solid var(--edge); }
+.label { font-size: 15px; font-weight: 800; }
+.says { margin: 0 2px; font-size: 14px; line-height: 1.4; color: var(--text-quiet); }
 </style>

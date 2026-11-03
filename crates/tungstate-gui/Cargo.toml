@@ -43,6 +43,10 @@ tauri-plugin-photos = { path = "../tauri-plugin-photos" }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 
+# statvfs, for how full each volume is; safe, so `unsafe_code = "forbid"` holds.
+[target.'cfg(unix)'.dependencies]
+rustix = { workspace = true }
+
 [target.'cfg(not(any(target_os = "ios", target_os = "android")))'.dependencies]
 tauri-plugin-updater = { workspace = true }
 tauri-plugin-process = { workspace = true }

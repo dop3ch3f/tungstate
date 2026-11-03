@@ -8707,6 +8707,7 @@ dependencies = [
  "image",
  "jiff",
  "rfd",
+ "rustix",
  "serde",
  "serde_json",
  "tauri",

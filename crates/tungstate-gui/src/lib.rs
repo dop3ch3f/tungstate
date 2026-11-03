@@ -14,9 +14,11 @@
 mod bridge;
 mod clouds;
 mod dupes;
+mod fileops;
 mod following;
 mod freeup;
 mod sync;
+mod volumes;
 mod watching;
 
 use std::collections::{BTreeMap, VecDeque};
@@ -3167,6 +3169,11 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             freeup::free_up_start,
+            freeup::free_up_findings,
+            volumes::volumes,
+            fileops::make_folder,
+            fileops::rename_entry,
+            fileops::delete_entries,
             freeup::free_up_stop,
             freeup::free_up_clear,
             transfer_queue,

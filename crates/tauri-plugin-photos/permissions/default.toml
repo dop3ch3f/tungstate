@@ -1,3 +1,13 @@
 [default]
-description = "Read what is in the photo library and ask for access to it."
-permissions = ["allow-access", "allow-ask", "allow-summary"]
+description = "Read what is in the photo library and on shared storage, and ask for access to both."
+permissions = [
+    "allow-access",
+    "allow-ask",
+    "allow-summary",
+    "allow-files-access",
+    "allow-ask-files",
+    "allow-categories",
+    "allow-category-files",
+    "allow-share",
+    "allow-open",
+]
