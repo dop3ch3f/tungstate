@@ -8,6 +8,7 @@
 // Files: `?files=ask` before All files access; `?open=PATH` opens a window
 // there, `?second=PATH` a second window; `?hold=Name` long-presses a row; `?move=run|done|paused` says where a
 // pasted transfer is; `?identical` has it ask about an identical copy.
+// `?slow=MS` holds every folder listing that long, to photograph the loader.
 
 import { createApp } from "vue";
 import { mockIPC } from "@tauri-apps/api/mocks";
@@ -104,7 +105,9 @@ mockIPC((cmd, args) => {
     case "list_connections": return saved;
     case "browse": {
       const path = String(a.path);
-      return { path, parent: parentOf(path), entries: TREE[path] ?? [] } satisfies T.Listing;
+      const listing = { path, parent: parentOf(path), entries: TREE[path] ?? [] } satisfies T.Listing;
+      const slow = Number(params.get("slow") ?? 0);
+      return slow ? new Promise((done) => setTimeout(() => done(listing), slow)) : listing;
     }
     case "volumes": return VOLUMES;
     case "plugin:photos|files_access": return filesAccess;

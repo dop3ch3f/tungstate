@@ -7,11 +7,20 @@
 
      Copy and Move go on the clipboard, which rides along while you browse to
      where they go; with two windows open, the other window is one tap. -->
+<script lang="ts">
+import { makeShelf } from "../lib/shelf";
+import type { Entry } from "../../engine/types";
+
+// Outlives any one window, so a folder opened in either window, or before a
+// tab change, comes back at once.
+const shelf = makeShelf<Entry>();
+</script>
+
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { files, phone, transfers } from "../../engine/commands";
-import type { Entry, Fetching } from "../../engine/types";
+import type { Fetching } from "../../engine/types";
 import { bytes, kind, plural, when } from "../../lib/format";
 import Pixels from "../../ui/Pixels.vue";
 import { useBack } from "../lib/back";
@@ -22,6 +31,7 @@ import { useClipboard, type Op } from "../state/useClipboard";
 import { useStorage } from "../state/useStorage";
 import { useWindows, type Place, type Sort, type View } from "../state/useWindows";
 import PButton from "../ui/PButton.vue";
+import PLoadBar from "../ui/PLoadBar.vue";
 import ClipBar from "./ClipBar.vue";
 import Viewer from "./Viewer.vue";
 import PSheet from "../ui/PSheet.vue";
@@ -57,12 +67,40 @@ const placeKey = (at: Place) => (at.kind === "folder" ? at.path : at.kind === "c
 const box = ref<HTMLElement | null>(null);
 const scroll = useScroll(box);
 
+/** Set once a listing has kept someone waiting, so a quick folder does not
+ *  flash placeholders on its way in. */
+const slow = ref(false);
+let slowTimer: ReturnType<typeof setTimeout> | undefined;
+const shelfKey = (at: Place) => `${placeKey(at)}|${w.hidden.value ? "all" : "plain"}`;
+
+function restoreScroll(at: Place) {
+  void nextTick(() => {
+    // Back where this folder was left, as ES does when you come back up.
+    if (box.value) box.value.scrollTop = w.win.value.scrolled.get(placeKey(at)) ?? 0;
+    scroll.measure();
+  });
+}
+
 // Answers can come back out of order when someone taps through folders
 // quickly; only the latest one is drawn.
 let asked = 0;
-async function load(at: Place) {
+/** Lists `at`. Arriving somewhere draws its last listing at once, if there is
+ *  one, and the fresh one replaces it; `again` refreshes what is on screen
+ *  in place, keeping the scroll where it is. */
+async function load(at: Place, again = false) {
   const mine = ++asked;
+  const key = shelfKey(at);
+  const known = again ? undefined : shelf.get(key);
+  if (!again) {
+    entries.value = known ?? [];
+    if (known) restoreScroll(at);
+  }
   loading.value = true;
+  slow.value = false;
+  clearTimeout(slowTimer);
+  slowTimer = setTimeout(() => {
+    if (mine === asked) slow.value = true;
+  }, 150);
   trouble.value = null;
   try {
     let got: Entry[] = [];
@@ -72,7 +110,10 @@ async function load(at: Place) {
     } else if (at.kind === "category") {
       got = (await phone.categoryFiles(at.category)).map((f) => ({ name: f.name, path: f.path, is_dir: false, size: f.size, modified: f.modifiedMs }));
     }
-    if (mine === asked) entries.value = got;
+    if (mine === asked) {
+      entries.value = got;
+      shelf.put(key, got);
+    }
   } catch (e) {
     if (mine === asked) {
       entries.value = [];
@@ -81,11 +122,10 @@ async function load(at: Place) {
   } finally {
     if (mine === asked) {
       loading.value = false;
-      // Back where this folder was left, as ES does when you come back up.
-      void nextTick(() => {
-        if (box.value) box.value.scrollTop = w.win.value.scrolled.get(placeKey(at)) ?? 0;
-        scroll.measure();
-      });
+      slow.value = false;
+      clearTimeout(slowTimer);
+      if (again || known) void nextTick(scroll.measure);
+      else restoreScroll(at);
     }
   }
 }
@@ -93,11 +133,10 @@ watch(place, (at, was) => {
   if (was && box.value) w.win.value.scrolled.set(placeKey(was), box.value.scrollTop);
   search.value = null;
   said.value = null;
-  entries.value = [];
   void load(at);
 }, { immediate: true, deep: true });
 watch(w.hidden, () => void load(place.value));
-const reload = () => load(place.value);
+const reload = () => load(place.value, true);
 // Opened straight on a folder (from Connections, or Recent after a restart),
 // the volumes' names for the chips may not be known yet.
 let unlisten: UnlistenFn | undefined;
@@ -107,7 +146,10 @@ onMounted(async () => {
     if (fetching.value?.path === e.payload.path) fetching.value = { ...e.payload };
   });
 });
-onUnmounted(() => unlisten?.());
+onUnmounted(() => {
+  unlisten?.();
+  clearTimeout(slowTimer);
+});
 
 const SORTS: { id: Sort; label: string }[] = [
   { id: "newest", label: "Newest first" },
@@ -172,6 +214,10 @@ const rowHeight = computed(() => {
 const rows = computed(() => Math.ceil(shown.value.length / columns.value));
 const span = computed(() => rowsInView(scroll.top.value, scroll.height.value, rowHeight.value, rows.value));
 const drawn = computed(() => shown.value.slice(span.value[0] * columns.value, span.value[1] * columns.value));
+/** Placeholder rows while the first listing of a place is on its way: one
+ *  screenful, in the shape of the view, so the page does not sit empty. */
+const ghosts = computed(() => Math.min(30, Math.ceil(scroll.height.value / rowHeight.value) * columns.value));
+const ghostWidth = (i: number) => `${[72, 54, 84, 62, 46, 78][i % 6]}%`;
 
 // ── ticking ──────────────────────────────────────────────────────────────
 const picked = computed(() => w.win.value.picked);
@@ -442,7 +488,8 @@ const progress = (e: Entry) => (fetching.value?.path === e.path ? fetching.value
     </div>
     <div class="bar">
       <button class="sortbtn" @click="sheet = 'sort'">{{ SORTS.find((s) => s.id === w.win.value.sort)!.label.split(" ")[0] }} ▾</button>
-      <span class="quiet count-line">{{ loading ? "Opening…" : fileBytes ? `${entries.length} · ${bytes(fileBytes)}` : plural(entries.length, "item") }}</span>
+      <span v-if="loading && slow" class="count-line wait"><PLoadBar :label="`Opening ${title}`" /></span>
+      <span v-else class="quiet count-line">{{ loading && !entries.length ? "" : fileBytes ? `${entries.length} · ${bytes(fileBytes)}` : plural(entries.length, "item") }}</span>
       <div class="seg" role="group" aria-label="View">
         <button v-for="v in VIEWS" :key="v.id" :class="{ on: view === v.id }" :aria-label="v.label" :aria-pressed="view === v.id" @click="w.setView(v.id)"><Pixels :of="v.art" :size="18" /></button>
       </div>
@@ -461,6 +508,15 @@ const progress = (e: Entry) => (fetching.value?.path === e.path ? fetching.value
       <p v-if="said" class="line">{{ said }}</p>
       <p v-if="trouble" class="line bad">{{ trouble }}</p>
       <p v-else-if="!loading && !shown.length" class="line">{{ search ? "Nothing here has that in its name." : place.kind === "category" ? "Nothing of this kind on this phone." : "This folder is empty." }}</p>
+      <div v-if="loading && slow && !entries.length" class="ghosts" :class="view" aria-hidden="true">
+        <div v-for="i in ghosts" :key="i" class="ghost" :style="{ height: `${rowHeight}px` }">
+          <span class="gpic" :style="view === 'tiles' ? undefined : { width: `${view === 'detailed' ? 66 : 36}px`, height: `${view === 'detailed' ? 66 : 36}px` }"></span>
+          <span class="gtext">
+            <span class="gline" :style="{ width: ghostWidth(i) }"></span>
+            <span v-if="view === 'detailed'" class="gline short"></span>
+          </span>
+        </div>
+      </div>
       <div v-if="shown.length" class="rows" :class="view" :style="{ height: `${rows * rowHeight}px` }">
         <div class="slice" :style="{ transform: `translateY(${span[0] * rowHeight}px)` }">
           <button
@@ -651,6 +707,20 @@ h1 { margin: 0; font-size: 32px; line-height: 1.08; font-weight: 800; letter-spa
 .chev { flex: none; font-size: 22px; font-weight: 800; }
 .check { flex: none; width: 30px; height: 30px; display: grid; place-items: center; font-weight: 900; color: transparent; background: var(--panel); border: 2px solid var(--edge); border-radius: 6px; }
 .check.on { color: #ffffff; background: var(--tint-drain); }
+.count-line.wait { padding: 0 14px; }
+/* Placeholders take the shape of the view they stand in for. */
+.ghosts.list, .ghosts.detailed { background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; overflow: hidden; }
+.ghosts.tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 10px; }
+.ghost { display: flex; align-items: center; gap: 12px; padding: 0 14px; box-sizing: border-box; border-top: 2px solid var(--edge); }
+.ghost:first-child { border-top: 0; }
+.tiles .ghost { flex-direction: column; align-items: stretch; justify-content: flex-start; gap: 8px; padding: 4px 0 0; border: 0; }
+.gpic, .gline { flex: none; display: block; background: color-mix(in srgb, var(--text-quiet) 24%, var(--panel)); border-radius: 6px; animation: breathe 1.4s ease-in-out infinite; }
+.tiles .gpic { width: 100%; aspect-ratio: 1; border-radius: 0; }
+.gtext { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px; }
+.gline { height: 12px; border-radius: 3px; }
+.gline.short { width: 38% !important; height: 10px; }
+@keyframes breathe { 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .gpic, .gline { animation: none; } }
 .fetchbar { display: block; height: 10px; margin-top: 4px; overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 3px; }
 .fetchbar i { display: block; height: 100%; background: var(--tint-drain); }
 /* Tiles: a contact sheet, three across, the name under each. */

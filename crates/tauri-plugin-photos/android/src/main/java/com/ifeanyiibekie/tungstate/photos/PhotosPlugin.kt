@@ -82,6 +82,9 @@ class ShrinkArgs {
   lateinit var out: String
 }
 
+/** A filter for the system's index: a `WHERE` clause and its `?` values. */
+private class Narrow(val where: String, val args: List<String> = emptyList())
+
 /** One file in a category, by its real path. */
 private class Stored(val path: String, val name: String, val size: Long, val modified: Long)
 
@@ -143,6 +146,11 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
   // and they never queue behind a long photo export on `worker`.
   private val pictures = Executors.newFixedThreadPool(4)
 
+  // Category lists are what a person is waiting on with an empty screen, so
+  // they get their own lane rather than queueing behind the tiles' tally or
+  // a Free up count on `worker`.
+  private val lists = Executors.newSingleThreadExecutor()
+
   private var multicastLock: WifiManager.MulticastLock? = null
 
   private fun granted(permission: String) =
@@ -168,8 +176,8 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   /** Runs `job` on the worker, turning anything it throws into a rejection. */
-  private fun offMain(invoke: Invoke, fallback: String, job: () -> Unit) {
-    worker.execute {
+  private fun offMain(invoke: Invoke, fallback: String, on: java.util.concurrent.Executor = worker, job: () -> Unit) {
+    on.execute {
       try {
         job()
       } catch (e: Exception) {
@@ -324,7 +332,7 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
     offMain(invoke, "could not count what is on the phone") {
       val names = listOf("images", "videos", "audio", "documents", "downloads", "apps")
       val tally = names.associateWith { LongArray(2) }
-      files { file, kinds ->
+      files(categoryFilters.values) { file, kinds ->
         for (kind in kinds) {
           val t = tally.getValue(kind)
           t[0]++
@@ -346,9 +354,10 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
   @Command
   fun categoryFiles(invoke: Invoke) {
     val args = invoke.parseArgs(CategoryArgs::class.java)
-    offMain(invoke, "could not list what is on the phone") {
+    val narrow = categoryFilters[args.category] ?: return invoke.reject("there is no category called ${args.category}")
+    offMain(invoke, "could not list what is on the phone", lists) {
       val found = mutableListOf<Stored>()
-      files { file, kinds -> if (args.category in kinds) found.add(file) }
+      files(listOf(narrow)) { file, kinds -> if (args.category in kinds) found.add(file) }
       found.sortByDescending { it.modified }
       val list = JSArray()
       for (file in found) {
@@ -366,7 +375,38 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
   }
 
   /**
-   * Every file the system's index knows, with the categories it is in.
+   * Each category as a filter the index applies itself, so a list reads
+   * thousands of rows rather than all of a phone's quarter-million (every
+   * folder is a row too). [files] still decides each row in code; this only
+   * narrows. It filters by type rather than by name: Android types every file
+   * by its ending when it indexes it, and a `LIKE` on paths costs the index
+   * about a second per pattern on a full phone. Rows with no type are let
+   * through, so the ending checks in code still see them.
+   */
+  private val categoryFilters: Map<String, Narrow> by lazy {
+    val type = MediaStore.Files.FileColumns.MEDIA_TYPE
+    val mime = MediaStore.MediaColumns.MIME_TYPE
+    @Suppress("DEPRECATION")
+    val data = MediaStore.MediaColumns.DATA
+    val other = "$type NOT IN (1, 2, 3) AND ($mime IS NULL OR "
+    val docs = listOf("$mime = 'application/pdf'", "$mime LIKE 'text/%'", "$mime = 'application/rtf'",
+      "$mime = 'application/epub+zip'", "$mime LIKE 'application/msword%'", "$mime LIKE 'application/vnd.ms-%'",
+      "$mime LIKE 'application/vnd.openxmlformats-officedocument%'", "$mime LIKE 'application/vnd.oasis.opendocument%'")
+    val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).path + "/"
+    mapOf(
+      "images" to Narrow("$type = 1"),
+      "audio" to Narrow("$type = 2"),
+      "videos" to Narrow("$type = 3"),
+      "apps" to Narrow("$other$mime = 'application/vnd.android.package-archive')"),
+      "documents" to Narrow("$other${docs.joinToString(" OR ")})"),
+      // One prefix pattern is cheap; it is the dozen endings that were not.
+      "downloads" to Narrow("$data LIKE ?", listOf("$downloads%")),
+    )
+  }
+
+  /**
+   * Every file the system's index knows that matches any of `narrow`, with
+   * the categories it is in.
    *
    * The index, not a walk: Android keeps it current for all of shared
    * storage, and walking a phone's 100k files would take seconds. With All
@@ -374,7 +414,12 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
    * `DATA` is the real path; deprecated for reading files, but still filled
    * in, and the engine needs a path rather than a content address.
    */
-  private fun files(visit: (Stored, List<String>) -> Unit) {
+  private fun files(narrow: Collection<Narrow>, visit: (Stored, List<String>) -> Unit) {
+    // `format` 12289 is MTP's "association": a folder. Leaving them out here
+    // spares a disk check per folder below; one the index left untyped still
+    // gets it. The column is real but its constant is hidden from apps.
+    val where = "(${narrow.joinToString(" OR ") { "(${it.where})" }}) AND IFNULL(format, 0) != 12289"
+    val args = narrow.flatMap { it.args }.toTypedArray()
     val type = MediaStore.Files.FileColumns.MEDIA_TYPE
     @Suppress("DEPRECATION")
     val data = MediaStore.MediaColumns.DATA
@@ -383,7 +428,7 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
       MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.MIME_TYPE, type,
     )
     val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).path + "/"
-    activity.contentResolver.query(MediaStore.Files.getContentUri("external"), projection, null, null, null)?.use { rows ->
+    activity.contentResolver.query(MediaStore.Files.getContentUri("external"), projection, where, args, null)?.use { rows ->
       val pathAt = rows.getColumnIndexOrThrow(data)
       val nameAt = rows.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
       val sizeAt = rows.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)

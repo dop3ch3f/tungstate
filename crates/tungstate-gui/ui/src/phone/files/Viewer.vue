@@ -10,6 +10,7 @@ import { filePicture } from "../../engine/pictures";
 import { bytes, when } from "../../lib/format";
 import Pixels from "../../ui/Pixels.vue";
 import { useBack } from "../lib/back";
+import PLoadBar from "../ui/PLoadBar.vue";
 
 const props = defineProps<{ items: Entry[]; start: number }>();
 const emit = defineEmits<{ close: []; share: [Entry]; move: [Entry]; info: [Entry]; delete: [Entry] }>();
@@ -115,7 +116,7 @@ const transform = computed(() => `translate(${pan.value.x}px, ${pan.value.y}px) 
     </div>
     <div class="stage" @pointerdown="down" @pointermove="move" @pointerup="up" @pointercancel="up">
       <p v-if="failed" class="trouble">This photo could not be shown here. Info › Open with… may open it in another app.</p>
-      <p v-else-if="!loaded" class="trouble">Opening…</p>
+      <div v-else-if="!loaded" class="wait"><PLoadBar label="Opening this photo" /></div>
       <img v-if="here && !failed" :key="here.path" :src="src(here)" :alt="here.name" :style="{ transform }" :class="{ on: loaded }" draggable="false" @load="loaded = true" @error="failed = true" />
       <!-- The next one, fetched while this one is looked at. -->
       <img v-if="items[at + 1]" class="ahead" :src="src(items[at + 1])" alt="" aria-hidden="true" />
@@ -145,6 +146,8 @@ const transform = computed(() => `translate(${pan.value.x}px, ${pan.value.y}px) 
 .stage img { max-width: 100%; max-height: 100%; object-fit: contain; opacity: 0; transition: opacity 0.12s; user-select: none; -webkit-user-drag: none; }
 .stage img.on { opacity: 1; }
 .ahead { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
+/* The load bar in the viewer's own dark colours. */
+.wait { position: absolute; width: 132px; --panel: #23221e; --edge: #ece8d8; }
 .trouble { position: absolute; margin: 0 24px; font-size: 15px; line-height: 1.4; text-align: center; color: #b9b4a2; }
 .acts { flex: none; display: flex; padding: 8px 6px 6px; }
 .acts button { flex: 1; height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font: inherit; font-size: 12px; font-weight: 700; color: #ece8d8; background: none; border: 0; }
