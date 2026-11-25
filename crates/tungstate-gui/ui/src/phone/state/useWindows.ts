@@ -4,6 +4,7 @@
 
 import { computed, reactive, ref } from "vue";
 import type { Category } from "../../engine/types";
+import { storedView, type View } from "../lib/views";
 
 /** Where a window is: Files home, a folder, or one category tile's files. */
 export type Place =
@@ -12,7 +13,7 @@ export type Place =
   | { kind: "category"; category: Category };
 
 export type Sort = "newest" | "oldest" | "name" | "largest";
-export type View = "list" | "grid";
+export type { View };
 
 export interface Win {
   place: Place;
@@ -20,17 +21,29 @@ export interface Win {
   view: View;
   /** Ticked, by location. Ticking anything puts the window in selection. */
   picked: Set<string>;
+  /** How far down each folder was scrolled, so coming back up a level lands
+   *  where you left it, as ES does. */
+  scrolled: Map<string, number>;
 }
 
 /** Two at most: a phone screen shows one, and the second is for a copy or a
  *  move between two places, which is the only reason ES users open more. */
 const MAX = 2;
 const VIEW_KEY = "tungstate.phone.view";
+const HIDDEN_KEY = "tungstate.phone.hidden";
+
 
 const fresh = (place: Place = { kind: "home" }): Win =>
-  reactive({ place, sort: "newest", view: (localStorage.getItem(VIEW_KEY) as View | null) ?? "list", picked: new Set<string>() });
+  reactive({ place, sort: "newest", view: storedView(localStorage.getItem(VIEW_KEY)), picked: new Set<string>(), scrolled: new Map<string, number>() });
 
 const wins = ref<Win[]>([fresh()]);
+/** Names starting with a dot, shown or not, in every window. */
+const hidden = ref(localStorage.getItem(HIDDEN_KEY) === "1");
+
+function setHidden(on: boolean) {
+  hidden.value = on;
+  localStorage.setItem(HIDDEN_KEY, on ? "1" : "0");
+}
 const active = ref(0);
 
 const win = computed(() => wins.value[active.value]!);
@@ -80,5 +93,5 @@ function setView(view: View) {
 }
 
 export function useWindows() {
-  return { wins, active, win, selecting, go, toggle, pickAll, clearPicks, second, close, switchTo, setView, max: MAX };
+  return { wins, active, win, selecting, hidden, setHidden, go, toggle, pickAll, clearPicks, second, close, switchTo, setView, max: MAX };
 }

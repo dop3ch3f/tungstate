@@ -3,13 +3,17 @@
      desktop's own. Matches docs/mobile/approved-files/. -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, type Component } from "vue";
+import { onBackButtonPress, exit } from "@tauri-apps/api/app";
 import { attachTransferStream, useTransfer } from "../state/useTransfer";
+import { phone } from "../engine/commands";
+import { addStep, stepBack } from "./lib/back";
 import { isAndroid } from "./platform";
 import { usePhoneNav, type Tab } from "./nav";
 import TabBar from "./TabBar.vue";
 import FilesScreen from "./screens/FilesScreen.vue";
 import ConnectionsScreen from "./screens/ConnectionsScreen.vue";
-import LaterScreen from "./screens/LaterScreen.vue";
+import DupesScreen from "./screens/DupesScreen.vue";
+import OrganiseScreen from "./screens/OrganiseScreen.vue";
 import FreeUpScreen from "./screens/FreeUpScreen.vue";
 import FreeingScreen from "./screens/FreeingScreen.vue";
 import MovingScreen from "./files/MovingScreen.vue";
@@ -37,8 +41,8 @@ const moving = computed(() => board.started.value !== null && !tucked.value);
 const SCREENS: Record<Tab, Component> = {
   files: FilesScreen,
   free: FreeUpScreen,
-  dupes: LaterScreen,
-  organise: LaterScreen,
+  dupes: DupesScreen,
+  organise: OrganiseScreen,
   connections: ConnectionsScreen,
 };
 const shown = computed(() => SCREENS[nav.tab.value]);
@@ -50,11 +54,50 @@ const selecting = computed(() => w.selecting.value && (nav.tab.value === "files"
 // bar is tucked away then, as phone apps do, so a form keeps its room.
 const typing = ref(false);
 const measure = () => (typing.value = window.innerHeight < window.screen.height * 0.7);
-onMounted(() => {
+// The bars' real heights, where the phone says; the CSS fallbacks are for a
+// phone that does not, and for the harness.
+const insets = ref<{ top: number; bottom: number } | null>(null);
+async function readInsets() {
+  try {
+    const got = await phone.insets();
+    if (got.top > 0 || got.bottom > 0) insets.value = got;
+  } catch {
+    // Not a phone, or an old plugin: the CSS defaults stand.
+  }
+}
+
+// Android's back button: whatever is on screen steps back first (lib/back);
+// at the bottom of it all another tab goes to Files, and Files home leaves
+// the app on a second press, so one stray swipe never closes it.
+const leaving = ref(false);
+let leaveTimer: ReturnType<typeof setTimeout> | undefined;
+const removeBase = addStep(() => {
+  if (nav.tab.value !== "files") return nav.go("files"), true;
+  return false;
+});
+let unlistenBack: { unregister: () => Promise<void> } | undefined;
+onMounted(async () => {
   window.addEventListener("resize", measure);
   void attachTransferStream();
+  void readInsets();
+  if (!isAndroid()) return;
+  try {
+    unlistenBack = await onBackButtonPress(() => {
+      if (stepBack()) return;
+      if (leaving.value) return void exit(0);
+      leaving.value = true;
+      clearTimeout(leaveTimer);
+      leaveTimer = setTimeout(() => (leaving.value = false), 2000);
+    });
+  } catch {
+    // Outside Tauri (the harness): there is no back button to take over.
+  }
 });
-onUnmounted(() => window.removeEventListener("resize", measure));
+onUnmounted(() => {
+  window.removeEventListener("resize", measure);
+  removeBase();
+  void unlistenBack?.unregister();
+});
 
 /** The same file is already there, byte for byte: may the original go? */
 const sameEverywhere = ref(false);
@@ -65,7 +108,11 @@ async function identical(remove: boolean) {
 </script>
 
 <template>
-  <div class="phone" :class="{ android: isAndroid() }">
+  <div
+    class="phone"
+    :class="{ android: isAndroid() }"
+    :style="insets ? { '--top': `${insets.top}px`, '--bottom': `${insets.bottom}px` } : undefined"
+  >
     <main class="stage">
       <FreeingScreen v-if="freeing" />
       <MovingScreen v-else-if="moving" @hide="tucked = true" />
@@ -76,6 +123,7 @@ async function identical(remove: boolean) {
       <TabBar />
     </footer>
     <div v-show="selecting || moving" class="inset"></div>
+    <p v-if="leaving" class="toast" role="status">Press back again to leave</p>
 
     <PSheet
       v-if="t.identical.value"
@@ -114,6 +162,7 @@ async function identical(remove: boolean) {
 .foot { flex: none; padding-bottom: var(--bottom); background: var(--rail); }
 /* With the tabs away, the gesture bar still needs its room below. */
 .inset { flex: none; height: var(--bottom); background: var(--panel); }
+.toast { position: fixed; left: 50%; bottom: calc(var(--bottom) + 90px); z-index: 9; transform: translateX(-50%); margin: 0; padding: 10px 16px; font-size: 15px; font-weight: 700; white-space: nowrap; color: var(--panel); background: var(--edge); border-radius: 8px; }
 .all { display: flex; align-items: center; gap: 10px; min-height: 44px; font-size: 16px; font-weight: 700; }
 .all input { width: 24px; height: 24px; }
 </style>

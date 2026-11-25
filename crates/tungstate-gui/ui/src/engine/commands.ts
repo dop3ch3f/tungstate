@@ -102,7 +102,8 @@ export const history = {
 };
 
 export const transfers = {
-  browse: (path: string) => invoke<T.Listing>("browse", { path }),
+  /** `hidden`: also list names starting with a dot. */
+  browse: (path: string, hidden = false) => invoke<T.Listing>("browse", { path, hidden }),
   places: () => invoke<T.Place[]>("places"),
   lastPanes: () => invoke<{ left: string | null; right: string | null }>("last_panes"),
   rememberPanes: (panes: { left: string | null; right: string | null }) =>
@@ -201,6 +202,22 @@ export const phone = {
   share: (paths: string[]) => invoke<void>("plugin:photos|share", { paths }),
   /** Opens a file on this phone in the app that handles its kind. */
   open: (path: string) => invoke<void>("plugin:photos|open", { path }),
+  /** How much of the screen the status and navigation bars cover. */
+  insets: () => invoke<T.Insets>("plugin:photos|insets"),
+  /** Copies a file on a connection into the app's cache and answers with the
+   *  copy's path, for the viewer or another app. Emits `fetch://progress`. */
+  fetchCopy: (path: string) => invoke<string>("fetch_copy", { path }),
+};
+
+/** What the add-connection form asks of the network. */
+export const network = {
+  /** Looks for file servers for a few seconds. Each one also arrives as
+   *  `discover://found` as soon as it is seen. Null when a look is already
+   *  running, whose events are still coming. */
+  discover: () => invoke<T.FoundServer[] | null>("discover"),
+  /** The shares an SMB server offers to this user. Nothing is saved. */
+  shares: (host: string, port: number | null, username: string, secret: string) =>
+    invoke<string[]>("connection_shares", { host, port, username, secret }),
 };
 
 /** A file manager's single steps. Each is journaled; none is a transfer. */

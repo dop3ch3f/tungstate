@@ -1,25 +1,31 @@
 <!-- One file window, as ES File Explorer has them: a folder on this phone or
-     a connection, or one category's files, as a list or a grid. Long-press
-     to tick; the tab bar then gives way to Copy · Move · Share · More · Delete.
-     Matches docs/mobile/approved-files/ (folder, select, clip, moveto).
+     a connection, or one category's files, in one of three views (List,
+     Detailed list, Tiles), each with previews. Long-press to tick; the tab
+     bar then gives way to Copy · Move · Share · More · Delete. A tap opens:
+     a folder, the viewer for a photo, or the phone's own app for the rest
+     (fetched first when it is on a connection).
 
      Copy and Move go on the clipboard, which rides along while you browse to
      where they go; with two windows open, the other window is one tap. -->
 <script setup lang="ts">
-import { computed, nextTick, onMounted, ref, shallowRef, watch } from "vue";
+import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
+import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { files, phone, transfers } from "../../engine/commands";
-import type { Entry } from "../../engine/types";
-import { bytes, plural, when } from "../../lib/format";
+import type { Entry, Fetching } from "../../engine/types";
+import { bytes, kind, plural, when } from "../../lib/format";
 import Pixels from "../../ui/Pixels.vue";
-import { artOf, CATEGORY_LABEL, tintOf } from "../lib/look";
+import { useBack } from "../lib/back";
+import { artOf, CATEGORY_LABEL, isPicture } from "../lib/look";
 import { connectionOf, crumbs, nameOf, parentOf, placeName, topOf } from "../lib/paths";
+import { rowsInView, useScroll } from "../lib/virtual";
 import { useClipboard, type Op } from "../state/useClipboard";
 import { useStorage } from "../state/useStorage";
-import { useWindows, type Place, type Sort } from "../state/useWindows";
+import { useWindows, type Place, type Sort, type View } from "../state/useWindows";
 import PButton from "../ui/PButton.vue";
 import ClipBar from "./ClipBar.vue";
+import Viewer from "./Viewer.vue";
 import PSheet from "../ui/PSheet.vue";
-import PTile from "../ui/PTile.vue";
+import PThumb from "../ui/PThumb.vue";
 
 const w = useWindows();
 const store = useStorage();
@@ -30,17 +36,26 @@ const loading = ref(false);
 const trouble = ref<string | null>(null);
 const said = ref<string | null>(null);
 const search = ref<string | null>(null);
-type Sheet = "sort" | "more" | "pickmore" | "name" | "delete" | "move";
+type Sheet = "sort" | "more" | "pickmore" | "name" | "delete" | "move" | "info";
 const sheet = ref<Sheet | null>(null);
 /** The name sheet: making a folder, or renaming the one ticked. */
 const naming = ref<{ mode: "new" | "rename"; value: string } | null>(null);
 const busy = ref(false);
 /** What Copy or Move was pressed for, while the two-window sheet is up. */
 const pending = ref<Op>("move");
+/** The one file the Info and Delete sheets are about, from the viewer. */
+const about = ref<Entry | null>(null);
+/** The viewer, open on these photos at this one. */
+const viewing = ref<{ items: Entry[]; at: number } | null>(null);
+/** A file on a connection being fetched to open, and how far it has come. */
+const fetching = ref<{ path: string; done: number; total: number } | null>(null);
 
 const place = computed(() => w.win.value.place);
 const folder = computed(() => (place.value.kind === "folder" ? place.value.path : null));
-const remote = computed(() => folder.value !== null && connectionOf(folder.value) !== null);
+const placeKey = (at: Place) => (at.kind === "folder" ? at.path : at.kind === "category" ? `category:${at.category}` : "home");
+
+const box = ref<HTMLElement | null>(null);
+const scroll = useScroll(box);
 
 // Answers can come back out of order when someone taps through folders
 // quickly; only the latest one is drawn.
@@ -52,7 +67,7 @@ async function load(at: Place) {
   try {
     let got: Entry[] = [];
     if (at.kind === "folder") {
-      got = (await transfers.browse(at.path)).entries;
+      got = (await transfers.browse(at.path, w.hidden.value)).entries;
       store.visited(at.path);
     } else if (at.kind === "category") {
       got = (await phone.categoryFiles(at.category)).map((f) => ({ name: f.name, path: f.path, is_dir: false, size: f.size, modified: f.modifiedMs }));
@@ -64,21 +79,35 @@ async function load(at: Place) {
       trouble.value = String(e);
     }
   } finally {
-    if (mine === asked) loading.value = false;
+    if (mine === asked) {
+      loading.value = false;
+      // Back where this folder was left, as ES does when you come back up.
+      void nextTick(() => {
+        if (box.value) box.value.scrollTop = w.win.value.scrolled.get(placeKey(at)) ?? 0;
+        scroll.measure();
+      });
+    }
   }
 }
-watch(place, (at) => {
+watch(place, (at, was) => {
+  if (was && box.value) w.win.value.scrolled.set(placeKey(was), box.value.scrollTop);
   search.value = null;
   said.value = null;
   entries.value = [];
   void load(at);
 }, { immediate: true, deep: true });
+watch(w.hidden, () => void load(place.value));
 const reload = () => load(place.value);
 // Opened straight on a folder (from Connections, or Recent after a restart),
 // the volumes' names for the chips may not be known yet.
-onMounted(() => {
+let unlisten: UnlistenFn | undefined;
+onMounted(async () => {
   if (!store.volumes.value.length) void store.load();
+  unlisten = await listen<Fetching>("fetch://progress", (e) => {
+    if (fetching.value?.path === e.payload.path) fetching.value = { ...e.payload };
+  });
 });
+onUnmounted(() => unlisten?.());
 
 const SORTS: { id: Sort; label: string }[] = [
   { id: "newest", label: "Newest first" },
@@ -117,6 +146,32 @@ function back() {
   }
   w.go({ kind: "home" });
 }
+// Android's back: end selection first, then go up a level.
+useBack(() => {
+  if (w.selecting.value) return w.clearPicks(), true;
+  if (search.value !== null) return (search.value = null), true;
+  back();
+  return true;
+});
+
+// ── the three views, drawing only what is on screen ─────────────────────
+const VIEWS: { id: View; label: string; art: "list" | "detail" | "grid" }[] = [
+  { id: "list", label: "List", art: "list" },
+  { id: "detailed", label: "Detailed list", art: "detail" },
+  { id: "tiles", label: "Tiles", art: "grid" },
+];
+const view = computed(() => w.win.value.view);
+const columns = computed(() => (view.value === "tiles" ? 3 : 1));
+/** Each view's row height. A tile is its square plus two lines of name. */
+const rowHeight = computed(() => {
+  if (view.value === "list") return 56;
+  if (view.value === "detailed") return 88;
+  const cell = (scroll.width.value - 40 - 2 * 10) / 3;
+  return Math.round(cell + 50);
+});
+const rows = computed(() => Math.ceil(shown.value.length / columns.value));
+const span = computed(() => rowsInView(scroll.top.value, scroll.height.value, rowHeight.value, rows.value));
+const drawn = computed(() => shown.value.slice(span.value[0] * columns.value, span.value[1] * columns.value));
 
 // ── ticking ──────────────────────────────────────────────────────────────
 const picked = computed(() => w.win.value.picked);
@@ -150,15 +205,31 @@ function hold(e: Entry) {
 }
 async function tap(e: Entry) {
   if (heldFired) return void (heldFired = false);
+  if (pulled) return;
   if (w.selecting.value) return w.toggle(e.path);
   if (e.is_dir) return w.go({ kind: "folder", path: e.path });
-  // A file on a connection would have to come down first; for now a tap
-  // ticks it, ready for Copy or Move.
-  if (connectionOf(e.path) !== null) return w.toggle(e.path);
+  if (isPicture(e.name)) {
+    const photos = shown.value.filter((x) => !x.is_dir && isPicture(x.name));
+    viewing.value = { items: photos, at: Math.max(0, photos.findIndex((x) => x.path === e.path)) };
+    return;
+  }
+  await openElsewhere(e);
+}
+
+/** Hands a file to the phone's app for its kind, fetching it first from a
+ *  connection, with the row showing how far the fetch has come. */
+async function openElsewhere(e: Entry) {
   try {
-    await phone.open(e.path);
+    let local = e.path;
+    if (connectionOf(e.path) !== null) {
+      fetching.value = { path: e.path, done: 0, total: e.size };
+      local = await phone.fetchCopy(e.path);
+    }
+    await phone.open(local);
   } catch (err) {
     said.value = String(err);
+  } finally {
+    fetching.value = null;
   }
 }
 
@@ -171,9 +242,9 @@ const otherFolder = computed(() => {
   return at?.kind === "folder" ? at.path : null;
 });
 
-function startClip(op: Op) {
-  const list = pickedEntries.value;
-  board.hold({ op, what: what(list), bytes: pickedBytes.value, from: title.value, paths: list.map((e) => e.path) });
+function startClip(op: Op, list = pickedEntries.value) {
+  const sum = list.reduce((n, e) => n + (e.is_dir ? 0 : e.size), 0);
+  board.hold({ op, what: what(list), bytes: sum, from: title.value, paths: list.map((e) => e.path) });
   w.clearPicks();
 }
 
@@ -202,17 +273,25 @@ async function pasteInto(to: string) {
   }
 }
 
-async function share() {
-  const list = pickedEntries.value.filter((e) => !e.is_dir);
-  if (!list.length || list.some((e) => connectionOf(e.path) !== null)) {
-    said.value = "Share sends files on this phone. Move or copy these here first.";
-    return;
-  }
+async function shareEntries(list: Entry[]) {
+  const wanted = list.filter((e) => !e.is_dir);
+  if (!wanted.length) return void (said.value = "Folders can't be shared; open one and choose its files.");
   try {
-    await phone.share(list.map((e) => e.path));
+    // A file on a connection is fetched first; other apps can only read
+    // files on this phone.
+    const local = [];
+    for (const e of wanted) local.push(connectionOf(e.path) !== null ? await phone.fetchCopy(e.path) : e.path);
+    await phone.share(local);
   } catch (e) {
     said.value = String(e);
   }
+}
+
+/** Opens the search field ready to type in, or closes it. */
+const searchBox = ref<HTMLInputElement | null>(null);
+function toggleSearch() {
+  search.value = search.value === null ? "" : null;
+  if (search.value !== null) void nextTick(() => searchBox.value?.focus());
 }
 
 function askName(mode: "new" | "rename") {
@@ -242,20 +321,53 @@ async function saveName() {
   }
 }
 
+/** What the delete sheet is about: the one from the viewer, or the ticked. */
+const doomed = computed(() => (about.value ? [about.value] : pickedEntries.value));
 async function remove() {
   busy.value = true;
+  const list = doomed.value;
   try {
-    const gone = await files.remove(pickedEntries.value.map((e) => e.path));
+    const gone = await files.remove(list.map((e) => e.path));
     said.value = `Deleted ${plural(gone, "file or folder", "files and folders")}.`;
     w.clearPicks();
+    if (viewing.value) {
+      const left = viewing.value.items.filter((x) => !list.some((d) => d.path === x.path));
+      viewing.value = left.length ? { items: left, at: Math.min(viewing.value.at, left.length - 1) } : null;
+    }
   } catch (e) {
     said.value = String(e);
   } finally {
     busy.value = false;
     sheet.value = null;
+    about.value = null;
     await reload();
   }
 }
+
+/** From the viewer: one photo onto the clipboard, then back to the folder. */
+function moveOne(e: Entry) {
+  viewing.value = null;
+  startClip("move", [e]);
+}
+function infoOf(e: Entry) {
+  about.value = e;
+  sheet.value = "info";
+}
+function deleteOne(e: Entry) {
+  about.value = e;
+  sheet.value = "delete";
+}
+function closeSheet() {
+  sheet.value = null;
+  about.value = null;
+}
+
+/** Info about the one ticked or the one in the viewer. */
+const infoFor = computed(() => about.value ?? (pickedEntries.value.length === 1 ? pickedEntries.value[0]! : null));
+const whereOf = (e: Entry) => {
+  const up = parentOf(e.path);
+  return up ? placeName(up, store.tops.value) : "";
+};
 
 // Swipe sideways on the list to change window, once there are two.
 let from: { x: number; y: number } | null = null;
@@ -269,8 +381,31 @@ function swipeEnd(e: PointerEvent) {
   from = null;
 }
 
+// Pull down at the top of the list to look again, as ES does.
+const pull = ref(0);
+let pullFrom: number | null = null;
+let pulled = false;
+function touchStart(e: TouchEvent) {
+  pulled = false;
+  pullFrom = box.value && box.value.scrollTop <= 0 ? e.touches[0]!.clientY : null;
+}
+function touchMove(e: TouchEvent) {
+  if (pullFrom === null) return;
+  pull.value = Math.max(0, Math.min(90, (e.touches[0]!.clientY - pullFrom) * 0.5));
+}
+function touchEnd() {
+  if (pull.value >= 60) {
+    pulled = true;
+    void reload();
+  }
+  pull.value = 0;
+  pullFrom = null;
+}
+
 const placeLabel = computed(() => (folder.value ? (connectionOf(folder.value) ?? top.value?.label ?? "this phone") : "this phone"));
 const sub = (e: Entry) => [e.is_dir ? null : bytes(e.size), e.modified ? when(e.modified) : null].filter(Boolean).join(" · ") || (e.is_dir ? "Folder" : "");
+const kindLine = (e: Entry) => (e.is_dir ? "Folder" : [bytes(e.size), kind(e)].join(" · "));
+const progress = (e: Entry) => (fetching.value?.path === e.path ? fetching.value : null);
 </script>
 
 <template>
@@ -289,51 +424,80 @@ const sub = (e: Entry) => [e.is_dir ? null : bytes(e.size), e.modified ? when(e.
       <h1 class="grow">{{ title }}</h1>
       <button v-if="board.held.value && folder" class="txtbtn" @click="askName('new')"><Pixels of="new-folder" :size="18" />New folder</button>
       <template v-else>
-        <button class="iconbtn" aria-label="Search" @click="search = search === null ? '' : null"><Pixels of="search" :size="22" /></button>
+        <button class="iconbtn" aria-label="Search" @click="toggleSearch"><Pixels of="search" :size="22" /></button>
         <button class="iconbtn" aria-label="More" @click="sheet = 'more'"><Pixels of="more" :size="22" /></button>
       </template>
     </div>
 
-    <input v-if="search !== null" :value="search" class="search" @input="search = ($event.target as HTMLInputElement).value" type="search" placeholder="Find in this folder" aria-label="Find in this folder" />
-    <div v-if="chips.length" class="crumbs">
+    <input v-if="search !== null" ref="searchBox" :value="search" class="search" @input="search = ($event.target as HTMLInputElement).value" type="search" placeholder="Find in this folder" aria-label="Find in this folder" />
+    <div v-if="chips.length || folder" class="crumbs">
       <template v-for="(c, i) in chips" :key="c.path">
         <span v-if="i" class="sep" aria-hidden="true">›</span>
         <button class="chip" @click="w.go({ kind: 'folder', path: c.path })">{{ c.label }}</button>
       </template>
+      <template v-if="chips.length">
+        <span class="sep" aria-hidden="true">›</span>
+        <span class="chip" aria-current="page">{{ title }}</span>
+      </template>
     </div>
     <div class="bar">
-      <button class="sortbtn" @click="sheet = 'sort'">{{ SORTS.find((s) => s.id === w.win.value.sort)!.label }} ▾</button>
-      <span class="quiet">{{ loading ? "Opening…" : fileBytes ? `${plural(entries.length, "item")} · ${bytes(fileBytes)}` : plural(entries.length, "item") }}</span>
+      <button class="sortbtn" @click="sheet = 'sort'">{{ SORTS.find((s) => s.id === w.win.value.sort)!.label.split(" ")[0] }} ▾</button>
+      <span class="quiet count-line">{{ loading ? "Opening…" : fileBytes ? `${entries.length} · ${bytes(fileBytes)}` : plural(entries.length, "item") }}</span>
       <div class="seg" role="group" aria-label="View">
-        <button :class="{ on: w.win.value.view === 'list' }" aria-label="List" @click="w.setView('list')"><Pixels of="list" :size="18" /></button>
-        <button :class="{ on: w.win.value.view === 'grid' }" aria-label="Grid" @click="w.setView('grid')"><Pixels of="grid" :size="18" /></button>
+        <button v-for="v in VIEWS" :key="v.id" :class="{ on: view === v.id }" :aria-label="v.label" :aria-pressed="view === v.id" @click="w.setView(v.id)"><Pixels :of="v.art" :size="18" /></button>
       </div>
     </div>
 
-    <div class="body" @pointerdown="swipeStart" @pointerup="swipeEnd">
+    <div
+      ref="box"
+      class="body"
+      @pointerdown="swipeStart"
+      @pointerup="swipeEnd"
+      @touchstart.passive="touchStart"
+      @touchmove.passive="touchMove"
+      @touchend="touchEnd"
+    >
+      <div class="pull" :style="{ height: `${pull}px` }" aria-hidden="true"><span v-if="pull > 20">{{ pull >= 60 ? "Let go to refresh" : "Pull to refresh" }}</span></div>
       <p v-if="said" class="line">{{ said }}</p>
       <p v-if="trouble" class="line bad">{{ trouble }}</p>
       <p v-else-if="!loading && !shown.length" class="line">{{ search ? "Nothing here has that in its name." : place.kind === "category" ? "Nothing of this kind on this phone." : "This folder is empty." }}</p>
-      <div v-if="shown.length" :class="w.win.value.view === 'grid' ? 'grid' : 'list'">
-        <button
-          v-for="e in shown"
-          :key="e.path"
-          class="entry"
-          :class="{ sel: picked.has(e.path) }"
-          @click="tap(e)"
-          @pointerdown="press(e)"
-          @pointerup="release"
-          @pointerleave="release"
-          @contextmenu.prevent="hold(e)"
-        >
-          <span v-if="w.selecting.value" class="check" :class="{ on: picked.has(e.path) }" aria-hidden="true">✓</span>
-          <PTile :art="artOf(e)" :tint="tintOf(e)" :size="w.win.value.view === 'grid' ? 64 : 44" />
-          <span class="text">
-            <b>{{ e.name }}</b>
-            <span class="quiet">{{ sub(e) }}</span>
-          </span>
-          <span v-if="e.is_dir && !w.selecting.value && w.win.value.view === 'list'" class="chev" aria-hidden="true">›</span>
-        </button>
+      <div v-if="shown.length" class="rows" :class="view" :style="{ height: `${rows * rowHeight}px` }">
+        <div class="slice" :style="{ transform: `translateY(${span[0] * rowHeight}px)` }">
+          <button
+            v-for="e in drawn"
+            :key="e.path"
+            class="entry"
+            :class="{ sel: picked.has(e.path) }"
+            :style="{ height: `${rowHeight}px` }"
+            @click="tap(e)"
+            @pointerdown="press(e)"
+            @pointerup="release"
+            @pointerleave="release"
+            @contextmenu.prevent="hold(e)"
+          >
+            <span v-if="w.selecting.value" class="check" :class="{ on: picked.has(e.path) }" aria-hidden="true">✓</span>
+            <template v-if="view === 'tiles'">
+              <PThumb class="pic" :name="e.name" :path="e.path" :is-dir="e.is_dir" fill />
+              <b class="tname">{{ e.name }}</b>
+            </template>
+            <template v-else>
+              <PThumb :name="e.name" :path="e.path" :is-dir="e.is_dir" :size="view === 'detailed' ? 66 : 36" />
+              <span class="text">
+                <b>{{ e.name }}</b>
+                <template v-if="progress(e)">
+                  <span class="quiet">Opening… {{ bytes(progress(e)!.done) }} of {{ bytes(progress(e)!.total) }}</span>
+                  <span class="fetchbar"><i :style="{ width: `${progress(e)!.total ? (100 * progress(e)!.done) / progress(e)!.total : 5}%` }"></i></span>
+                </template>
+                <template v-else-if="view === 'detailed'">
+                  <span class="quiet">{{ kindLine(e) }}</span>
+                  <span v-if="e.modified" class="quiet">{{ when(e.modified) }}</span>
+                </template>
+              </span>
+              <span v-if="view === 'list' && !progress(e)" class="quiet side">{{ e.is_dir ? "" : bytes(e.size) }}</span>
+              <span v-if="e.is_dir && !w.selecting.value" class="chev" aria-hidden="true">›</span>
+            </template>
+          </button>
+        </div>
       </div>
     </div>
 
@@ -344,10 +508,21 @@ const sub = (e: Entry) => [e.is_dir ? null : bytes(e.size), e.modified ? when(e.
     <nav v-if="w.selecting.value" class="actions">
       <button @click="copyOrMove('copy')"><Pixels of="copy" :size="24" /><span>Copy</span></button>
       <button @click="copyOrMove('move')"><Pixels of="move" :size="24" /><span>Move</span></button>
-      <button @click="share"><Pixels of="share" :size="24" /><span>Share</span></button>
+      <button @click="shareEntries(pickedEntries)"><Pixels of="share" :size="24" /><span>Share</span></button>
       <button @click="sheet = 'pickmore'"><Pixels of="more" :size="24" /><span>More</span></button>
       <button class="danger" @click="sheet = 'delete'"><Pixels of="trash" :size="24" /><span>Delete</span></button>
     </nav>
+
+    <Viewer
+      v-if="viewing"
+      :items="viewing.items"
+      :start="viewing.at"
+      @close="viewing = null"
+      @share="(e) => shareEntries([e])"
+      @move="moveOne"
+      @info="infoOf"
+      @delete="deleteOne"
+    />
 
     <!-- Sheets. -->
     <PSheet v-if="sheet === 'sort'" title="Sort" @close="sheet = null">
@@ -358,6 +533,7 @@ const sub = (e: Entry) => [e.is_dir ? null : bytes(e.size), e.modified ? when(e.
     <PSheet v-if="sheet === 'more'" :title="title" @close="sheet = null">
       <div class="options">
         <button v-if="folder" class="option" @click="askName('new')">New folder</button>
+        <button v-if="folder" class="option" :class="{ on: w.hidden.value }" @click="w.setHidden(!w.hidden.value); sheet = null">Show hidden files</button>
         <button v-if="w.wins.value.length < w.max" class="option" @click="sheet = null; w.second()">Open a second window</button>
         <button v-else class="option" @click="sheet = null; w.close(w.active.value)">Close this window</button>
         <button class="option" @click="sheet = null; reload()">Refresh</button>
@@ -366,10 +542,27 @@ const sub = (e: Entry) => [e.is_dir ? null : bytes(e.size), e.modified ? when(e.
     <PSheet v-if="sheet === 'pickmore'" :title="`${picked.size} selected`" @close="sheet = null">
       <div class="options">
         <button v-if="picked.size === 1" class="option" @click="askName('rename')">Rename</button>
-        <div class="detail">
+        <button v-if="infoFor" class="option" @click="sheet = 'info'">Info</button>
+        <button v-if="infoFor && !infoFor.is_dir" class="option" @click="sheet = null; openElsewhere(infoFor)">Open with…</button>
+        <div v-if="!infoFor" class="detail">
           <b>{{ pickedBytes ? `${what(pickedEntries)} · ${bytes(pickedBytes)}` : what(pickedEntries) }}</b>
           <span class="quiet">In {{ [...chips.map((c) => c.label), title].join(" › ") }}</span>
         </div>
+      </div>
+    </PSheet>
+    <PSheet v-if="sheet === 'info' && infoFor" :title="infoFor.name" @close="closeSheet">
+      <div class="ihead">
+        <PThumb :name="infoFor.name" :path="infoFor.path" :is-dir="infoFor.is_dir" :size="72" />
+        <span class="quiet">{{ infoFor.is_dir ? "Folder" : kind(infoFor) }}</span>
+      </div>
+      <dl class="props">
+        <template v-if="!infoFor.is_dir"><dt>Size</dt><dd>{{ bytes(infoFor.size) }}</dd></template>
+        <template v-if="infoFor.modified"><dt>Changed</dt><dd>{{ when(infoFor.modified) }}</dd></template>
+        <dt>Where</dt><dd>{{ whereOf(infoFor) }}</dd>
+      </dl>
+      <div class="pair">
+        <PButton v-if="!about && picked.size === 1" quiet @press="askName('rename')">Rename</PButton>
+        <PButton v-if="!infoFor.is_dir" quiet @press="closeSheet(); openElsewhere(infoFor)">Open with…</PButton>
       </div>
     </PSheet>
     <PSheet v-if="sheet === 'name' && naming" :title="naming.mode === 'new' ? 'New folder' : 'Rename'" @close="sheet = null">
@@ -378,12 +571,12 @@ const sub = (e: Entry) => [e.is_dir ? null : bytes(e.size), e.modified ? when(e.
     </PSheet>
     <PSheet
       v-if="sheet === 'delete'"
-      :title="`Delete ${what(pickedEntries)}?`"
+      :title="`Delete ${what(doomed)}?`"
       :says="`There is no bin on ${placeLabel}, so this cannot be undone.`"
-      @close="sheet = null"
+      @close="closeSheet"
     >
-      <PButton tint="var(--bad)" :busy="busy" @press="remove">Delete {{ what(pickedEntries) }}</PButton>
-      <PButton quiet @press="sheet = null">{{ picked.size === 1 ? "Keep it" : "Keep them" }}</PButton>
+      <PButton tint="var(--bad)" :busy="busy" @press="remove">Delete {{ what(doomed) }}</PButton>
+      <PButton quiet @press="closeSheet">{{ doomed.length === 1 ? "Keep it" : "Keep them" }}</PButton>
     </PSheet>
     <PSheet
       v-if="sheet === 'move'"
@@ -397,7 +590,7 @@ const sub = (e: Entry) => [e.is_dir ? null : bytes(e.size), e.modified ? when(e.
         <span class="chev" aria-hidden="true">›</span>
       </button>
       <button class="opt" @click="sheet = null; startClip(pending)">
-        <PTile art="clipboard" tint="var(--panel)" :size="40" />
+        <span class="num"><Pixels of="clipboard" :size="20" /></span>
         <span class="grow"><b>Choose another place</b><span class="q">Browse anywhere, then tap {{ pending === "move" ? "Move here" : "Copy here" }}</span></span>
         <span class="chev" aria-hidden="true">›</span>
       </button>
@@ -424,38 +617,49 @@ h1 { margin: 0; font-size: 32px; line-height: 1.08; font-weight: 800; letter-spa
 .iconbtn:active, .txtbtn:active, .smallbtn:active { transform: translate(3px, 3px); box-shadow: none; }
 .search { flex: none; margin: 0 20px 10px; height: 44px; padding: 0 12px; font: inherit; font-size: 16px; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
 .crumbs { flex: none; display: flex; align-items: center; gap: 6px; padding: 0 20px 10px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
-.chip { flex: none; height: 40px; padding: 0 12px; font: inherit; font-size: 14px; font-weight: 700; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 6px; }
+.crumbs:empty { display: none; }
+.chip { flex: none; height: 38px; padding: 0 12px; display: grid; place-items: center; font: inherit; font-size: 14px; font-weight: 700; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 6px; }
+.chip[aria-current="page"] { color: var(--panel); background: var(--edge); }
 .sep { font-weight: 900; }
 .bar { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 0 20px 10px; }
-.sortbtn { height: 44px; padding: 0; font: inherit; font-size: 15px; font-weight: 800; color: var(--text); background: none; border: 0; }
-.seg { display: flex; overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
+.count-line { flex: 1; min-width: 0; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sortbtn { height: 44px; padding: 0; font: inherit; font-size: 15px; font-weight: 800; color: var(--text); background: none; border: 0; white-space: nowrap; }
+.seg { flex: none; display: flex; overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
 .seg button { width: 44px; height: 40px; display: grid; place-items: center; color: var(--text); background: none; border: 0; border-right: 2px solid var(--edge); }
 .seg button:last-child { border-right: 0; }
 .seg button.on { color: var(--panel); background: var(--edge); }
-.body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 16px; -webkit-overflow-scrolling: touch; }
+.body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 16px; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
+.pull { display: grid; place-items: end center; overflow: hidden; font-size: 14px; font-weight: 700; color: var(--text-quiet); }
 .line { margin: 4px 2px 12px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
 .bad { color: var(--bad); font-weight: 700; }
-.list { background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; overflow: hidden; }
+.rows { position: relative; }
+.rows.list .slice, .rows.detailed .slice { background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; overflow: hidden; }
+.slice { will-change: transform; }
 .entry {
-  display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 9px 14px;
+  display: flex; align-items: center; gap: 12px; width: 100%; padding: 0 14px; box-sizing: border-box;
   font: inherit; text-align: left; color: var(--text); background: var(--panel);
   border: 0; border-top: 2px solid var(--edge);
   -webkit-touch-callout: none;
 }
-.list .entry:first-child { border-top: 0; }
+.slice .entry:first-child { border-top: 0; }
 .entry:active { background: var(--surface-hover); }
 .entry.sel { background: color-mix(in srgb, var(--tint-drain) 14%, var(--panel)); }
 .text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
 .text b { font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.list .text b { font-size: 15px; font-weight: 700; }
+.side { flex: none; }
 .chev { flex: none; font-size: 22px; font-weight: 800; }
 .check { flex: none; width: 30px; height: 30px; display: grid; place-items: center; font-weight: 900; color: transparent; background: var(--panel); border: 2px solid var(--edge); border-radius: 6px; }
 .check.on { color: #ffffff; background: var(--tint-drain); }
-/* The grid: three across, the name under each, ticks in the corner. */
-.grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
-.grid .entry { position: relative; flex-direction: column; justify-content: flex-start; gap: 6px; min-height: 0; padding: 10px 6px; text-align: center; border: 2px solid var(--edge); border-radius: 8px; }
-.grid .text b { font-size: 13px; }
-.grid .text .quiet { font-size: 12px; }
-.grid .check { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; }
+.fetchbar { display: block; height: 10px; margin-top: 4px; overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 3px; }
+.fetchbar i { display: block; height: 100%; background: var(--tint-drain); }
+/* Tiles: a contact sheet, three across, the name under each. */
+.rows.tiles .slice { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 10px; }
+.tiles .entry { position: relative; flex-direction: column; justify-content: flex-start; align-items: stretch; gap: 6px; padding: 4px 0 0; background: none; border: 0; }
+.tiles .entry.sel { background: none; }
+.tiles .entry.sel .pic { outline: 4px solid var(--tint-drain); outline-offset: -4px; }
+.tname { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; font-size: 12.5px; line-height: 1.25; word-break: break-all; }
+.tiles .check { position: absolute; top: 10px; left: 6px; z-index: 1; width: 26px; height: 26px; }
 .actions { flex: none; display: flex; padding: 8px 4px 6px; border-top: 2px solid var(--edge); background: var(--panel); }
 .actions button { flex: 1; height: 58px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px; font: inherit; font-size: 12px; font-weight: 700; color: var(--text); background: none; border: 0; }
 .actions .danger { color: var(--bad); }
@@ -466,6 +670,13 @@ h1 { margin: 0; font-size: 32px; line-height: 1.08; font-weight: 800; letter-spa
 .option.on::after { content: " ✓"; }
 .detail { display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; border-top: 2px solid var(--edge); }
 .detail:first-child { border-top: 0; }
+.ihead { display: flex; align-items: center; gap: 14px; }
+.props { display: grid; grid-template-columns: 96px 1fr; margin: 0; overflow: hidden; border: 2px solid var(--edge); border-radius: 8px; }
+.props dt, .props dd { margin: 0; padding: 10px 12px; font-size: 15px; border-top: 2px solid var(--edge); overflow-wrap: anywhere; }
+.props dt { font-weight: 800; background: var(--rail); border-right: 2px solid var(--edge); }
+.props dt:first-of-type, .props dd:first-of-type { border-top: 0; }
+.pair { display: flex; gap: 12px; }
+.pair > * { flex: 1; }
 .name-input { height: 52px; padding: 0 14px; font: inherit; font-size: 17px; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
 .opt { display: flex; align-items: center; gap: 12px; min-height: 72px; padding: 12px 14px; font: inherit; text-align: left; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; box-shadow: 4px 4px 0 var(--edge); }
 .opt b { display: block; font-size: 16px; }

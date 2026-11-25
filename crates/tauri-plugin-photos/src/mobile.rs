@@ -7,7 +7,7 @@ use tauri::{
 };
 
 use crate::{
-    Access, Asset, Categories, Category, CategoryArgs, Filter, PathsArgs, Removed, Result,
+    Access, Asset, Categories, Category, CategoryArgs, Filter, Insets, PathsArgs, Removed, Result,
     StoredFile, Summary,
 };
 
@@ -60,6 +60,13 @@ struct Ids<'a> {
 #[derive(Serialize)]
 struct Awake {
     on: bool,
+}
+
+#[derive(Serialize)]
+struct Shrink<'a> {
+    path: &'a str,
+    size: u32,
+    out: std::borrow::Cow<'a, str>,
 }
 
 impl<R: Runtime> Photos<R> {
@@ -168,6 +175,36 @@ impl<R: Runtime> Photos<R> {
     pub fn open(&self, path: String) -> Result<()> {
         self.0
             .run_mobile_plugin::<()>("open", PathsArgs { paths: vec![path] })?;
+        Ok(())
+    }
+
+    /// Holds Wi-Fi multicast open while on, so mDNS answers reach the app.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn multicast(&self, on: bool) -> Result<()> {
+        self.0.run_mobile_plugin::<()>("multicast", Awake { on })?;
+        Ok(())
+    }
+
+    /// The status and navigation bars' heights.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn insets(&self) -> Result<Insets> {
+        Ok(self.0.run_mobile_plugin("insets", ())?)
+    }
+
+    /// Writes a JPEG of `path` no bigger than `size` on its long side to
+    /// `out`, using the phone's own decoders: photos (HEIC too), a video's
+    /// frame, an app installer's icon, a song's cover.
+    ///
+    /// # Errors
+    /// The phone's code failed, or it has no picture for this kind of file.
+    pub fn thumbnail(&self, path: &str, size: u32, out: &Path) -> Result<()> {
+        let out = out.to_string_lossy();
+        self.0
+            .run_mobile_plugin::<()>("thumbnail", Shrink { path, size, out })?;
         Ok(())
     }
 

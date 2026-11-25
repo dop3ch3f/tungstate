@@ -12,6 +12,7 @@
 //! vanished mount.
 
 mod path;
+mod shares;
 
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
@@ -24,7 +25,7 @@ use smb::{
     Client, ClientConfig, ConnectionConfig, CreateDisposition, CreateOptions, DirAccessMask,
     Directory, FileAccessMask, FileAttributes, FileBasicInformation, FileCreateArgs,
     FileDispositionInformation, FileFullDirectoryInformation, FileNetworkOpenInformation,
-    FileRenameInformation, ReadAt, Resource, UncPath, WriteAt,
+    FileRenameInformation, IoctlBuffer, PipeTransceiveRequest, ReadAt, Resource, UncPath, WriteAt,
 };
 use tungstate_backend::{
     Backend, BackendError, Capabilities, Entry, Meta, Result, RootToken, WriteFinish,
@@ -61,6 +62,77 @@ impl std::fmt::Debug for Settings {
             .field("require_encryption", &self.require_encryption)
             .finish_non_exhaustive()
     }
+}
+
+/// A client set up the way every sign-in here wants it.
+fn client_for(settings: &Settings) -> Client {
+    let mut connection = ConnectionConfig {
+        port: settings.port,
+        timeout: Some(TIMEOUT),
+        encryption_mode: if settings.require_encryption {
+            EncryptionMode::Required
+        } else {
+            EncryptionMode::Allowed
+        },
+        ..ConnectionConfig::default()
+    };
+    // A home NAS signs in with a user and a password; Kerberos would go
+    // looking for a domain that is not there.
+    connection.auth_methods.kerberos = false;
+    connection.auth_methods.ntlm = true;
+    Client::new(ClientConfig {
+        connection,
+        ..ClientConfig::default()
+    })
+}
+
+/// The shares a server offers to this user, by name, sorted: disk shares
+/// only, less the hidden ones (`C$`, `IPC$`, anything ending in `$`).
+///
+/// For the add-connection form, so a share is picked rather than typed.
+/// `settings.root` is not used.
+///
+/// # Errors
+/// [`BackendError::Auth`] if the server refuses the user or password, and a
+/// remote error if it cannot be reached or will not list its shares.
+pub fn list_shares(settings: &Settings, endpoint: &str) -> Result<Vec<String>> {
+    let client = client_for(settings);
+    client
+        .ipc_connect(
+            &settings.host,
+            &settings.username,
+            settings.password.clone(),
+        )
+        .map_err(|error| {
+            if status_of(&error) == Some(status::LOGON_FAILURE) {
+                return BackendError::Auth {
+                    endpoint: endpoint.to_string(),
+                };
+            }
+            remote(endpoint, "connect", error)
+        })?;
+    let pipe = client
+        .open_pipe(&settings.host, "srvsvc")
+        .map_err(|error| remote(endpoint, "list shares", error))?;
+    let call = |pdu: Vec<u8>| -> Result<Vec<u8>> {
+        let reply = pipe
+            .fsctl_with_options(
+                PipeTransceiveRequest::from(IoctlBuffer::from(pdu)),
+                u32::from(shares::MOST_FRAGMENT),
+            )
+            .map_err(|error| remote(endpoint, "list shares", error))?;
+        let bytes: &[u8] = &reply;
+        Ok(bytes.to_vec())
+    };
+    let refused = |why: String| BackendError::Remote {
+        endpoint: endpoint.to_string(),
+        operation: "list shares",
+        source: why.into(),
+    };
+    shares::bound(&call(shares::bind(2))?).map_err(refused)?;
+    let mut names = shares::shares(&call(shares::ask(3))?).map_err(refused)?;
+    names.sort_by_key(|name| name.to_lowercase());
+    Ok(names)
 }
 
 /// NT status codes this backend reads. Protocol constants from MS-ERREF, the
@@ -128,24 +200,7 @@ impl SmbBackend {
         let mut base = anchor.clone();
         base.extend(path::parts(link_end)?);
 
-        let mut connection = ConnectionConfig {
-            port: settings.port,
-            timeout: Some(TIMEOUT),
-            encryption_mode: if settings.require_encryption {
-                EncryptionMode::Required
-            } else {
-                EncryptionMode::Allowed
-            },
-            ..ConnectionConfig::default()
-        };
-        // A home NAS signs in with a user and a password; Kerberos would go
-        // looking for a domain that is not there.
-        connection.auth_methods.kerberos = false;
-        connection.auth_methods.ntlm = true;
-        let client = Client::new(ClientConfig {
-            connection,
-            ..ClientConfig::default()
-        });
+        let client = client_for(settings);
 
         let share = UncPath::from_str(&format!(r"\\{}\{share_name}", settings.host))
             .map_err(|_| unreachable())?;

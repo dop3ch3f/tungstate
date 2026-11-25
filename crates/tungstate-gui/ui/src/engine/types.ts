@@ -818,6 +818,27 @@ export interface Volume {
   removable: boolean;
 }
 
+export interface Insets {
+  top: number;
+  bottom: number;
+}
+
+/** One file server seen on the network, by address. */
+export interface FoundServer {
+  address: string;
+  /** What it calls itself, when it announced itself. */
+  name: string | null;
+  /** Its `.local` name, when it said. */
+  host: string | null;
+  offers: { kind: "smb" | "ftp" | "sftp" | "webdav" | "webdavs"; port: number }[];
+}
+
+export interface Fetching {
+  path: string;
+  done: number;
+  total: number;
+}
+
 export type Category = "images" | "videos" | "audio" | "documents" | "downloads" | "apps";
 export type Categories = Record<Category, Tally>;
 

@@ -16,6 +16,15 @@ import androidx.activity.result.IntentSenderRequest
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import android.webkit.MimeTypeMap
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.media.MediaMetadataRetriever
+import android.media.ThumbnailUtils
+import android.net.wifi.WifiManager
+import android.util.Size
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import app.tauri.PermissionState
 import app.tauri.annotation.ActivityCallback
 import app.tauri.annotation.Command
@@ -64,6 +73,13 @@ class PathsArgs {
 @InvokeArg
 class AwakeArgs {
   var on: Boolean = false
+}
+
+@InvokeArg
+class ShrinkArgs {
+  lateinit var path: String
+  var size: Int = 256
+  lateinit var out: String
 }
 
 /** One file in a category, by its real path. */
@@ -121,6 +137,13 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
   // Commands arrive on the main thread. Reading the library and copying out
   // of it can take a while, so it happens here, one job at a time.
   private val worker = Executors.newSingleThreadExecutor()
+
+  // Pictures for file lists come in bursts as a folder scrolls past; four at
+  // a time keeps the phone's decoders busy without starving everything else,
+  // and they never queue behind a long photo export on `worker`.
+  private val pictures = Executors.newFixedThreadPool(4)
+
+  private var multicastLock: WifiManager.MulticastLock? = null
 
   private fun granted(permission: String) =
     ContextCompat.checkSelfPermission(activity, permission) == PackageManager.PERMISSION_GRANTED
@@ -443,6 +466,125 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
     } catch (e: Exception) {
       invoke.reject(e.message ?: "could not open it")
     }
+  }
+
+  /** Holds multicast open while the app looks for servers: Android drops mDNS
+   *  answers addressed to other apps otherwise. Released when the look ends. */
+  @Command
+  fun multicast(invoke: Invoke) {
+    val args = invoke.parseArgs(AwakeArgs::class.java)
+    try {
+      if (args.on && multicastLock == null) {
+        val wifi = activity.applicationContext.getSystemService(android.content.Context.WIFI_SERVICE) as WifiManager
+        multicastLock = wifi.createMulticastLock("tungstate-discovery").apply {
+          setReferenceCounted(false)
+          acquire()
+        }
+      } else if (!args.on) {
+        multicastLock?.release()
+        multicastLock = null
+      }
+      invoke.resolve()
+    } catch (e: Exception) {
+      invoke.reject(e.message ?: "could not listen for servers")
+    }
+  }
+
+  /** The status bar's and the navigation bar's heights, in CSS pixels. */
+  @Command
+  fun insets(invoke: Invoke) {
+    activity.runOnUiThread {
+      val ret = JSObject()
+      val density = activity.resources.displayMetrics.density
+      val insets = ViewCompat.getRootWindowInsets(activity.window.decorView)
+        ?.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+      ret.put("top", (insets?.top ?: 0) / density)
+      ret.put("bottom", (insets?.bottom ?: 0) / density)
+      invoke.resolve(ret)
+    }
+  }
+
+  /**
+   * A JPEG of one file, no bigger than `size` on its long side, written to
+   * `out`. The phone's own decoders do the work, so HEIC photos, video
+   * frames, app installer icons and song covers all come out, rotated the way
+   * the camera meant.
+   */
+  @Command
+  fun thumbnail(invoke: Invoke) {
+    val args = invoke.parseArgs(ShrinkArgs::class.java)
+    pictures.execute {
+      try {
+        val picture = shrink(File(args.path), args.size) ?: return@execute invoke.reject("no picture for this kind of file")
+        File(args.out).outputStream().use { picture.compress(Bitmap.CompressFormat.JPEG, 82, it) }
+        picture.recycle()
+        invoke.resolve()
+      } catch (e: Exception) {
+        invoke.reject(e.message ?: "could not make a picture")
+      }
+    }
+  }
+
+  private fun shrink(file: File, size: Int): Bitmap? {
+    val box = Size(size, size)
+    // Free up lists photos by the library's own address rather than a path.
+    if (file.path.startsWith("content:")) {
+      if (Build.VERSION.SDK_INT < 29) return null
+      return activity.contentResolver.loadThumbnail(Uri.parse(file.path.replaceFirst("content:/", "content://")), box, null)
+    }
+    val mime = mimeOf(file.path)
+    return when {
+      mime.startsWith("image/") ->
+        if (Build.VERSION.SDK_INT >= 29) ThumbnailUtils.createImageThumbnail(file, box, null) else sampled(file, size)
+      mime.startsWith("video/") ->
+        if (Build.VERSION.SDK_INT >= 29) ThumbnailUtils.createVideoThumbnail(file, box, null) else frame(file)
+      mime.startsWith("audio/") -> cover(file)
+      mime == "application/vnd.android.package-archive" -> icon(file, size)
+      else -> null
+    }
+  }
+
+  /** Android 9 and earlier: decode at the nearest power of two above `size`. */
+  private fun sampled(file: File, size: Int): Bitmap? {
+    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+    BitmapFactory.decodeFile(file.path, bounds)
+    var sample = 1
+    while (bounds.outWidth / (sample * 2) >= size && bounds.outHeight / (sample * 2) >= size) sample *= 2
+    return BitmapFactory.decodeFile(file.path, BitmapFactory.Options().apply { inSampleSize = sample })
+  }
+
+  private fun frame(file: File): Bitmap? = MediaMetadataRetriever().run {
+    try {
+      setDataSource(file.path)
+      frameAtTime
+    } finally {
+      release()
+    }
+  }
+
+  private fun cover(file: File): Bitmap? = MediaMetadataRetriever().run {
+    try {
+      setDataSource(file.path)
+      embeddedPicture?.let { BitmapFactory.decodeByteArray(it, 0, it.size) }
+    } finally {
+      release()
+    }
+  }
+
+  /** An installer's icon. Android reads it from the archive only once told
+   *  where the archive is, hence the two source paths. */
+  private fun icon(file: File, size: Int): Bitmap? {
+    val pm = activity.packageManager
+    val info = pm.getPackageArchiveInfo(file.path, 0)?.applicationInfo ?: return null
+    info.sourceDir = file.path
+    info.publicSourceDir = file.path
+    val drawable = info.loadIcon(pm)
+    val bitmap = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
+    // White behind it, since JPEG has no transparency and black would swallow dark icons.
+    bitmap.eraseColor(android.graphics.Color.WHITE)
+    drawable.setBounds(0, 0, size, size)
+    drawable.draw(Canvas(bitmap))
+    return bitmap
   }
 
   /** Keeps the screen on while a run is open, so the phone does not lock on it. */

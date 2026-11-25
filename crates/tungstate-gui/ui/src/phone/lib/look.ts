@@ -43,3 +43,22 @@ export const CATEGORIES: { id: Category; label: string; art: Art; tint: string }
 ];
 
 export const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.label])) as Record<Category, string>;
+
+const PICTURE = /\.(jpe?g|png|gif|webp|heic|heif|bmp|avif|tiff?)$/i;
+const MOVING = /\.(mp4|mov|m4v|mkv|webm|3gp|avi)$/i;
+const SOUND = /\.(mp3|m4a|flac|ogg|opus|wav|aac)$/i;
+
+/** A photo the viewer can show. */
+export const isPicture = (name: string): boolean => PICTURE.test(name);
+
+/**
+ * Whether asking for a preview can come back with one. On this phone, the
+ * system draws photos, video frames, song covers and app icons; on a
+ * connection only photos are worth the network read.
+ */
+export function hasPicture(e: { name: string; is_dir: boolean; path: string }): boolean {
+  if (e.is_dir) return false;
+  // `name:path` is a connection; `content://` is this phone's photo library.
+  if (/^[^/:]+:(?!\/\/)/.test(e.path)) return PICTURE.test(e.name);
+  return PICTURE.test(e.name) || MOVING.test(e.name) || SOUND.test(e.name) || /\.apk$/i.test(e.name);
+}

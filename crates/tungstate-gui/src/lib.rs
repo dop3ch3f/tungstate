@@ -13,10 +13,13 @@
 
 mod bridge;
 mod clouds;
+mod discover;
 mod dupes;
 mod fileops;
 mod following;
 mod freeup;
+mod network;
+mod previews;
 mod sync;
 mod volumes;
 mod watching;
@@ -67,6 +70,8 @@ struct App {
     /// `None` when the cache directory could not be made, which costs pictures
     /// and nothing else: the scan still runs and the rows still list.
     thumbs: Option<Thumbs>,
+    /// Pictures of files for the phone's file lists and viewer.
+    previews: previews::Previews,
     /// A ceiling on how many files move at once, when one has been asked for.
     ///
     /// Raises the number the governor climbs towards; it does not skip the
@@ -1468,6 +1473,7 @@ fn set_connection_password(
     // Looked up first so a typo names itself rather than writing a keychain
     // entry nothing will ever read.
     state.journal.connection_by_name(&name).map_err(describe)?;
+    state.previews.forget(&name);
     let key = connection_key(&name);
     // A blank answer removes the password rather than storing an empty one,
     // which would be a credential that exists and always fails.
@@ -1483,7 +1489,10 @@ fn set_connection_password(
 ///
 /// A listing of the root, never a write: proving we can reach a NAS must not
 /// leave a file in it.
-#[tauri::command]
+// `async`, as are `test_settings` and `browse`: each is a network round trip,
+// and a plain command runs on the window's own thread, which froze the
+// phone app for the whole of an SMB sign-in.
+#[tauri::command(async)]
 fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, String> {
     let connection = state.journal.connection_by_name(&name).map_err(describe)?;
     let found = probe_view(&connection, &secrets());
@@ -1524,7 +1533,7 @@ fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, Str
 ///
 /// With the password typed into the form, or, when editing and none was
 /// typed, the one already in the keychain. Nothing is written anywhere.
-#[tauri::command]
+#[tauri::command(async)]
 fn test_settings(form: ConnectionForm, secret: Option<String>) -> Result<ProbeView, String> {
     let settings = form.checked()?;
     let connection = Connection {
@@ -1667,6 +1676,7 @@ fn connection_uses(name: String, state: State<'_, App>) -> Result<UsesView, Stri
 /// `"retired"` when History still names it and so it was put away instead.
 #[tauri::command]
 fn remove_connection(name: String, state: State<'_, App>) -> Result<&'static str, String> {
+    state.previews.forget(&name);
     let removal = match state.journal.remove_connection(&name) {
         Ok(removal) => removal,
         // The window asks `connection_uses` first and names them; this is the
@@ -1861,9 +1871,9 @@ fn directories_home() -> Option<PathBuf> {
 /// `path` is a composite location — `/Users/me/Videos` or `nas:inbox/2026` —
 /// read by the same parser the command line uses, so a pane and a link spec
 /// cannot disagree about what a string means.
-#[tauri::command]
-fn browse(path: String, state: State<'_, App>) -> Result<Listing, String> {
-    listing_for(&path, &state.journal)
+#[tauri::command(async)]
+fn browse(path: String, hidden: Option<bool>, state: State<'_, App>) -> Result<Listing, String> {
+    listing_for(&path, hidden.unwrap_or(false), &state.journal)
 }
 
 /// The body of [`browse`], without the `State` wrapper.
@@ -1871,7 +1881,7 @@ fn browse(path: String, state: State<'_, App>) -> Result<Listing, String> {
 /// Split out so it can be tested: a `#[tauri::command]` needs an `AppHandle` to
 /// call, and this is the function where a mistake about what a location string
 /// means actually shows up.
-fn listing_for(path: &str, journal: &Journal) -> Result<Listing, String> {
+fn listing_for(path: &str, hidden: bool, journal: &Journal) -> Result<Listing, String> {
     let end = ends::parse_end(path, None, journal).map_err(describe)?;
     // Canonical rather than whatever was typed: `nas:inbox/` and `nas:inbox`
     // are the same place, and every child built below hangs off this one
@@ -1901,7 +1911,7 @@ fn listing_for(path: &str, journal: &Journal) -> Result<Listing, String> {
                 name,
             }
         })
-        .filter(|entry| !entry.name.starts_with('.'))
+        .filter(|entry| hidden || !entry.name.starts_with('.'))
         .collect();
 
     // Folders first, then by name, which is what every file browser does and
@@ -3071,6 +3081,7 @@ fn new_app(journal: Journal, watcher: Arc<watching::Watching>) -> App {
         scan: dupes::Scan::default(),
         watcher,
         thumbs: cache_dir().and_then(|dir| Thumbs::at(&dir.join("thumbnails")).ok()),
+        previews: previews::Previews::new(cache_dir().as_deref()),
         queue: RunQueue::new(),
         running_job: Mutex::new(None),
         next_job: AtomicU64::new(0),
@@ -3128,10 +3139,23 @@ pub fn run() {
         // megabyte of JSON on every redraw, and this is a file on disk being
         // asked for by name. Read through the app's state because a phone
         // only has its cache folder once `setup` has run.
-        .register_uri_scheme_protocol("thumb", |ctx, request| {
-            let state = ctx.app_handle().try_state::<App>();
-            let thumbs = state.as_ref().and_then(|app| app.thumbs.as_ref());
-            serve_picture(thumbs, request.uri().path())
+        //
+        // `/f?p=…` is a picture of any file, made on demand, which can take a
+        // network read; it is answered on a blocking thread so the window's
+        // own thread never waits on a NAS.
+        .register_asynchronous_uri_scheme_protocol("thumb", |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            let path = request.uri().path().to_owned();
+            let query = request.uri().query().map(str::to_owned);
+            tauri::async_runtime::spawn_blocking(move || {
+                let response = if let ("/f", Some(query)) = (path.as_str(), query) {
+                    previews::serve(&app, &query)
+                } else {
+                    let state = app.try_state::<App>();
+                    serve_picture(state.as_ref().and_then(|app| app.thumbs.as_ref()), &path)
+                };
+                responder.respond(response);
+            });
         })
         // Deliberately no close handler. The window and the run are the same
         // thing until slice 10 puts the engine in a daemon, and pretending
@@ -3168,6 +3192,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            network::discover,
+            previews::fetch_copy,
+            network::connection_shares,
             freeup::free_up_start,
             freeup::free_up_findings,
             volumes::volumes,
@@ -3491,7 +3518,7 @@ mod tests {
         std::fs::write(home.path().join("a.mp4"), b"x").unwrap();
         let journal = journal_over(home.path());
 
-        let listing = listing_for("nas:", &journal).unwrap();
+        let listing = listing_for("nas:", false, &journal).unwrap();
 
         assert_eq!(listing.path, "nas:", "the root writes as a bare name");
         assert_eq!(
@@ -3513,21 +3540,45 @@ mod tests {
 
         // Down two levels, taking each child's own path as the next location,
         // which is exactly what a double-click in the pane does.
-        let first_child = |at: &str| listing_for(at, &journal).unwrap().entries[0].path.clone();
+        let first_child = |at: &str| {
+            listing_for(at, false, &journal).unwrap().entries[0]
+                .path
+                .clone()
+        };
         let inbox = first_child("nas:");
         assert_eq!(inbox, "nas:inbox");
         let year = first_child(&inbox);
         assert_eq!(year, "nas:inbox/2026");
 
-        let deep = listing_for(&year, &journal).unwrap();
+        let deep = listing_for(&year, false, &journal).unwrap();
         assert_eq!(deep.entries[0].path, "nas:inbox/2026/holiday.mp4");
 
         // And back up, one Up-button click at a time, to the root and no
         // further.
         assert_eq!(deep.parent.as_deref(), Some("nas:inbox"));
-        let up = listing_for(deep.parent.as_deref().unwrap(), &journal).unwrap();
+        let up = listing_for(deep.parent.as_deref().unwrap(), false, &journal).unwrap();
         assert_eq!(up.parent.as_deref(), Some("nas:"));
-        assert_eq!(listing_for("nas:", &journal).unwrap().parent, None);
+        assert_eq!(listing_for("nas:", false, &journal).unwrap().parent, None);
+    }
+
+    #[test]
+    fn hidden_files_are_listed_only_when_asked_for() {
+        let home = tempfile::tempdir().unwrap();
+        std::fs::write(home.path().join(".nomedia"), b"").unwrap();
+        std::fs::write(home.path().join("a.jpg"), b"x").unwrap();
+        let journal = Journal::open_in_memory().unwrap();
+        let at = home.path().display().to_string();
+
+        let names = |hidden| -> Vec<String> {
+            listing_for(&at, hidden, &journal)
+                .unwrap()
+                .entries
+                .into_iter()
+                .map(|e| e.name)
+                .collect()
+        };
+        assert_eq!(names(false), ["a.jpg"]);
+        assert_eq!(names(true), [".nomedia", "a.jpg"]);
     }
 
     #[test]
@@ -3539,7 +3590,7 @@ mod tests {
         std::fs::write(home.path().join("a.mp4"), b"x").unwrap();
         let journal = Journal::open_in_memory().unwrap();
 
-        let listing = listing_for(&home.path().display().to_string(), &journal).unwrap();
+        let listing = listing_for(&home.path().display().to_string(), false, &journal).unwrap();
         assert_eq!(
             listing.entries[0].path,
             home.path().join("a.mp4").display().to_string()
@@ -3601,7 +3652,7 @@ mod tests {
         // directory literally named `nsa:inbox`, would both be worse than
         // saying the name is unknown.
         let journal = Journal::open_in_memory().unwrap();
-        let error = listing_for("nsa:inbox", &journal).unwrap_err();
+        let error = listing_for("nsa:inbox", false, &journal).unwrap_err();
         assert!(error.contains("nsa"), "the message names the typo: {error}");
     }
 

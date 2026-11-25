@@ -135,7 +135,10 @@ mod tests {
     #[test]
     fn no_storage_folder_means_no_cards() {
         let root = tempfile::tempdir().unwrap();
-        assert_eq!(removable_under(&root.path().join("missing")), Vec::<PathBuf>::new());
+        assert_eq!(
+            removable_under(&root.path().join("missing")),
+            Vec::<PathBuf>::new()
+        );
     }
 
     #[test]

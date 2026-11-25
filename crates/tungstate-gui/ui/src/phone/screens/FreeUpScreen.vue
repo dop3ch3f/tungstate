@@ -20,6 +20,7 @@ import { useFreeUp } from "../state/useFreeUp";
 import { useWindows } from "../state/useWindows";
 import PScreen from "../ui/PScreen.vue";
 import PTile from "../ui/PTile.vue";
+import PThumb from "../ui/PThumb.vue";
 import PButton from "../ui/PButton.vue";
 import PSheet from "../ui/PSheet.vue";
 
@@ -35,6 +36,11 @@ onMounted(() => {
 });
 
 const sheet = ref<"filter" | null>(null);
+const VIEWS = [
+  { id: "list", label: "List", art: "list" },
+  { id: "detailed", label: "Detailed list", art: "detail" },
+  { id: "tiles", label: "Tiles", art: "grid" },
+] as const;
 const targets = computed(() => conns.all.value.filter((c) => c.scheme !== "fs"));
 /** Choosing the folder: window 2 is up, with the findings on the clipboard. */
 const choosing = computed(() => !!board.clip.value?.land);
@@ -59,8 +65,6 @@ const opened = ref<Set<number>>(new Set());
 const rowsOf = (year: number, items: PhotoAsset[]) => (opened.value.has(year) ? items : items.slice(0, FIRST));
 const openYear = (year: number) => (opened.value = new Set([...opened.value, year]));
 
-const ART = { photo: "photo", video: "video", screenshot: "photo" } as const;
-const TINT = { photo: "var(--raw-kind-image)", video: "var(--raw-kind-video)", screenshot: "var(--raw-kind-doc)" } as const;
 const sub = (a: PhotoAsset) => [bytes(a.size), when(a.takenMs), a.favourite ? "Favourite" : null].filter(Boolean).join(" · ");
 
 /** Hand the findings to the clipboard and open window 2 on a connection. */
@@ -129,8 +133,7 @@ async function land(destination: string) {
           <button class="chip" @click="sheet = 'filter'">{{ kindLabel }} ▾</button>
         </div>
         <div class="seg" role="group" aria-label="View">
-          <button :class="{ on: w.win.value.view === 'list' }" aria-label="List" @click="w.setView('list')"><Pixels of="list" :size="18" /></button>
-          <button :class="{ on: w.win.value.view === 'grid' }" aria-label="Grid" @click="w.setView('grid')"><Pixels of="grid" :size="18" /></button>
+          <button v-for="v in VIEWS" :key="v.id" :class="{ on: w.win.value.view === v.id }" :aria-label="v.label" :aria-pressed="w.win.value.view === v.id" @click="w.setView(v.id)"><Pixels :of="v.art" :size="18" /></button>
         </div>
       </div>
 
@@ -141,10 +144,10 @@ async function land(destination: string) {
           <b class="grow">{{ g.year }} · {{ g.ticked === g.items.length ? g.items.length.toLocaleString() : `${g.ticked.toLocaleString()} of ${g.items.length.toLocaleString()}` }}</b>
           <span class="num">{{ bytes(g.tickedBytes) }}</span>
         </button>
-        <div :class="{ grid: w.win.value.view === 'grid' }">
+        <div :class="{ grid: w.win.value.view === 'tiles', detailed: w.win.value.view === 'detailed' }">
           <button v-for="a in rowsOf(g.year, g.items)" :key="a.id" class="item" @click="lib.toggle(a.id)">
             <span class="check" :class="{ all: !lib.unticked.value.has(a.id) }" aria-hidden="true">✓</span>
-            <PTile :art="ART[a.kind]" :tint="TINT[a.kind]" :size="w.win.value.view === 'grid' ? 56 : 44" />
+            <PThumb :name="a.name" :path="a.id" :size="w.win.value.view === 'detailed' ? 66 : 36" :fill="w.win.value.view === 'tiles'" />
             <span class="text"><b>{{ a.name }}</b><span class="quiet">{{ sub(a) }}</span></span>
           </button>
         </div>
@@ -217,10 +220,11 @@ async function land(destination: string) {
 .check { width: 30px; height: 30px; flex: none; display: grid; place-items: center; font-weight: 900; color: transparent; background: var(--panel); border: 2px solid var(--edge); border-radius: 6px; }
 .check.all, .check.some { color: #ffffff; background: var(--tint-drain); }
 .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; padding: 6px; border-top: 2px solid var(--edge); }
-.grid .item { position: relative; flex-direction: column; gap: 6px; min-height: 0; padding: 10px 4px; text-align: center; border: 2px solid var(--edge); border-radius: 8px; }
+.grid .item { position: relative; flex-direction: column; align-items: stretch; gap: 6px; min-height: 0; padding: 0; text-align: left; border: 0; background: none; }
+.detailed .item { min-height: 86px; }
 .grid .text b { font-size: 12px; }
 .grid .quiet { display: none; }
-.grid .check { position: absolute; top: 6px; left: 6px; width: 26px; height: 26px; }
+.grid .check { position: absolute; top: 6px; left: 6px; z-index: 1; width: 26px; height: 26px; }
 .more { width: 100%; min-height: 48px; font: inherit; font-size: 15px; font-weight: 800; color: var(--text); background: var(--panel); border: 0; border-top: 2px solid var(--edge); }
 .label { font-size: 15px; font-weight: 800; }
 .says { margin: 0 2px; font-size: 14px; line-height: 1.4; color: var(--text-quiet); }

@@ -6,10 +6,15 @@
 
 /** The address of one small picture. */
 export function picture(name: string): string {
-  // Windows serves custom schemes over http on a made-up host; everywhere else
-  // uses the scheme directly. This is Tauri's own arrangement, not ours.
-  const encoded = encodeURIComponent(name);
-  return navigator.userAgent.includes("Windows")
-    ? `http://thumb.localhost/${encoded}`
-    : `thumb://localhost/${encoded}`;
+  return `${base()}/${encodeURIComponent(name)}`;
 }
+
+/** A picture of any file, made when first asked for: `edge` is its longest
+ *  side in pixels, 256 for a list and up to 1600 for the viewer. */
+export function filePicture(path: string, edge = 256): string {
+  return `${base()}/f?p=${encodeURIComponent(path)}&s=${edge}`;
+}
+
+// Windows and Android serve custom schemes over http on a made-up host;
+// macOS, Linux and iOS use the scheme directly. Tauri's arrangement, not ours.
+const base = () => (/Windows|Android/.test(navigator.userAgent) ? "http://thumb.localhost" : "thumb://localhost");

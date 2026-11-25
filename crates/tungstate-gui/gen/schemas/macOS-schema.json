@@ -2283,10 +2283,10 @@
           "markdownDescription": "Denies the save command without any pre-configured scope."
         },
         {
-          "description": "Read what is in the photo library and on shared storage, and ask for access to both.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`\n- `allow-files-access`\n- `allow-ask-files`\n- `allow-categories`\n- `allow-category-files`\n- `allow-share`\n- `allow-open`",
+          "description": "Read what is in the photo library and on shared storage, and ask for access to both.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`\n- `allow-files-access`\n- `allow-ask-files`\n- `allow-categories`\n- `allow-category-files`\n- `allow-share`\n- `allow-open`\n- `allow-insets`",
           "type": "string",
           "const": "photos:default",
-          "markdownDescription": "Read what is in the photo library and on shared storage, and ask for access to both.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`\n- `allow-files-access`\n- `allow-ask-files`\n- `allow-categories`\n- `allow-category-files`\n- `allow-share`\n- `allow-open`"
+          "markdownDescription": "Read what is in the photo library and on shared storage, and ask for access to both.\n#### This default permission set includes:\n\n- `allow-access`\n- `allow-ask`\n- `allow-summary`\n- `allow-files-access`\n- `allow-ask-files`\n- `allow-categories`\n- `allow-category-files`\n- `allow-share`\n- `allow-open`\n- `allow-insets`"
         },
         {
           "description": "Enables the access command without any pre-configured scope.",
@@ -2323,6 +2323,12 @@
           "type": "string",
           "const": "photos:allow-files-access",
           "markdownDescription": "Enables the files_access command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the insets command without any pre-configured scope.",
+          "type": "string",
+          "const": "photos:allow-insets",
+          "markdownDescription": "Enables the insets command without any pre-configured scope."
         },
         {
           "description": "Enables the open command without any pre-configured scope.",
@@ -2377,6 +2383,12 @@
           "type": "string",
           "const": "photos:deny-files-access",
           "markdownDescription": "Denies the files_access command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the insets command without any pre-configured scope.",
+          "type": "string",
+          "const": "photos:deny-insets",
+          "markdownDescription": "Denies the insets command without any pre-configured scope."
         },
         {
           "description": "Denies the open command without any pre-configured scope.",

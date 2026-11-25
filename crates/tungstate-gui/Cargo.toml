@@ -41,6 +41,8 @@ tauri-plugin-dialog = { workspace = true }
 # there is no library, so the app is built the same way everywhere.
 tauri-plugin-photos = { path = "../tauri-plugin-photos" }
 tracing = { workspace = true }
+mdns-sd = { workspace = true }
+if-addrs = { workspace = true }
 tracing-subscriber = { workspace = true }
 
 # statvfs, for how full each volume is; safe, so `unsafe_code = "forbid"` holds.

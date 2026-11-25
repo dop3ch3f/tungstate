@@ -295,3 +295,20 @@ fn a_listing_says_what_a_stat_would() {
     }
     assert_eq!(seen, 3, "a.jpg, 2024 and 2024/b.mp4");
 }
+
+#[test]
+fn the_server_lists_its_disk_shares_and_hides_the_dollar_ones() {
+    let shares = tungstate_backend_smb::list_shares(&settings(""), "nas").expect("shares");
+    assert!(shares.contains(&share()), "{shares:?}");
+    assert!(shares.iter().all(|s| !s.ends_with('$')), "{shares:?}");
+}
+
+#[test]
+fn listing_shares_with_a_wrong_password_says_so() {
+    let mut wrong = settings("");
+    wrong.password = "not-it".into();
+    assert!(matches!(
+        tungstate_backend_smb::list_shares(&wrong, "nas"),
+        Err(BackendError::Auth { .. })
+    ));
+}

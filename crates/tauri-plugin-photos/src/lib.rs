@@ -60,7 +60,8 @@ pub fn init<R: Runtime>() -> TauriPlugin<R> {
             commands::categories,
             commands::category_files,
             commands::share,
-            commands::open
+            commands::open,
+            commands::insets
         ])
         .setup(|app, api| {
             #[cfg(mobile)]

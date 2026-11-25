@@ -10,6 +10,10 @@ import { usePhoneNav } from "../nav";
 import { CATEGORIES } from "../lib/look";
 import { connectionOf, nameOf, parentOf, topOf } from "../lib/paths";
 import { useStorage } from "../state/useStorage";
+import { useDiscovery } from "../state/useDiscovery";
+import { offersLine } from "../lib/discovery";
+import type { FoundServer } from "../../engine/types";
+import PThumb from "../ui/PThumb.vue";
 import { useWindows } from "../state/useWindows";
 import PButton from "../ui/PButton.vue";
 import PTile from "../ui/PTile.vue";
@@ -19,10 +23,17 @@ const store = useStorage();
 const conns = useConnections();
 const w = useWindows();
 const nav = usePhoneNav();
+const net = useDiscovery();
 onMounted(() => {
   void store.load();
   void conns.load();
+  if (!net.looked.value) void net.look();
 });
+
+function add(found: FoundServer) {
+  net.adding.value = found;
+  nav.go("connections");
+}
 
 const reachable = computed(() => conns.all.value.filter((c) => c.scheme !== "fs"));
 const used = (v: { total: number; free: number }) => (v.total ? Math.round(((v.total - v.free) / v.total) * 100) : 0);
@@ -93,11 +104,25 @@ function within(path: string): string {
         <button class="conn add" @click="nav.go('connections')">+ Add</button>
       </div>
 
+      <template v-if="net.fresh.value.length">
+        <div class="gh">
+          <h2>On your network</h2>
+          <span class="quiet">{{ net.looking.value ? "Looking…" : `${net.fresh.value.length} found` }}</span>
+        </div>
+        <div class="list found">
+          <button v-for="f in net.fresh.value" :key="f.address" class="row tight" @click="add(f)">
+            <PTile art="nas" :tint="f.name ? 'var(--tint-connections)' : '#a5a79d'" light :size="34" />
+            <span class="text"><b>{{ f.name ?? f.address }}</b><span class="quiet">{{ offersLine(f) }} · {{ f.name ? f.address : "gave no name" }}</span></span>
+            <span class="addpill">Add</span>
+          </button>
+        </div>
+      </template>
+
       <template v-if="store.recent.value.length">
         <h2>Recent</h2>
         <div class="list">
           <button v-for="p in store.recent.value" :key="p" class="row tight" @click="w.go({ kind: 'folder', path: p })">
-            <PTile art="folder" tint="var(--raw-kind-folder)" />
+            <PThumb :name="titleOf(p)" :path="p" is-dir :size="34" />
             <span class="text"><b>{{ titleOf(p) }}</b><span class="quiet">{{ within(p) }}</span></span>
             <span class="chev" aria-hidden="true">›</span>
           </button>
@@ -137,6 +162,10 @@ h2 { margin: 16px 0 8px; font-size: 15px; font-weight: 800; }
 .cat b { font-size: 14px; }
 .cat .quiet { margin-top: -3px; font-size: 13px; }
 .conns { display: flex; gap: 8px; }
+.gh { display: flex; align-items: baseline; justify-content: space-between; }
+.found .row { border-top-style: dashed; }
+.found .row:first-child { border-top: 0; }
+.addpill { flex: none; display: grid; place-items: center; height: 40px; padding: 0 14px; font-size: 15px; font-weight: 800; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; box-shadow: 3px 3px 0 var(--edge); }
 .conn { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; height: 52px; padding: 0 12px 0 8px; overflow: hidden; font: inherit; font-size: 15px; font-weight: 800; white-space: nowrap; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; box-shadow: 3px 3px 0 var(--edge); }
 .conn.add { flex: none; justify-content: center; padding: 0 14px; }
 .conn:active { transform: translate(3px, 3px); box-shadow: none; }

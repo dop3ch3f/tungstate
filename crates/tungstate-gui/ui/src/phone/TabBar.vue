@@ -5,16 +5,20 @@
 import Pixels from "../ui/Pixels.vue";
 import type { Art } from "../lib/pixels";
 import { usePhoneNav, type Tab } from "./nav";
+import { isAndroid } from "./platform";
 
 const nav = usePhoneNav();
 
-const TABS: { id: Tab; art: Art; label: string }[] = [
+const ALL: { id: Tab; art: Art; label: string }[] = [
   { id: "files", art: "folder", label: "Files" },
   { id: "free", art: "drain", label: "Free up" },
   { id: "dupes", art: "dupes", label: "Duplicates" },
   { id: "organise", art: "organise", label: "Organise" },
   { id: "connections", art: "connections", label: "Connections" },
 ];
+// Duplicates and Organise walk the phone's folders, which an iPhone app
+// cannot see; they show where they work, on Android.
+const TABS = isAndroid() ? ALL : ALL.filter((t) => t.id !== "dupes" && t.id !== "organise");
 </script>
 
 <template>

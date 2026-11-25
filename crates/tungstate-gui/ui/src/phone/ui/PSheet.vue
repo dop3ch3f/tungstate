@@ -1,8 +1,12 @@
 <!-- A bottom sheet over a dimmed screen: a short choice or a question.
      Tapping the dim closes it, as every phone's sheets do. -->
 <script setup lang="ts">
+import { useBack } from "../lib/back";
+
 defineProps<{ title: string; says?: string }>();
-defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: [] }>();
+// Android's back closes the sheet first, before anything under it moves.
+useBack(() => (emit("close"), true));
 </script>
 
 <template>

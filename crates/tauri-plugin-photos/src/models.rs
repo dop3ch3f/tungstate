@@ -117,6 +117,14 @@ pub enum Category {
     Apps,
 }
 
+/// How much of the screen the system's bars cover, in CSS pixels: the web
+/// view draws under them on Android and is told nothing about them.
+#[derive(Debug, Clone, Copy, Default, Deserialize, Serialize)]
+pub struct Insets {
+    pub top: f64,
+    pub bottom: f64,
+}
+
 /// Files on shared storage, for sharing or opening in another app.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct PathsArgs {

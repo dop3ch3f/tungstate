@@ -9,6 +9,7 @@ const COMMANDS: &[&str] = &[
     "category_files",
     "share",
     "open",
+    "insets",
 ];
 
 fn main() {

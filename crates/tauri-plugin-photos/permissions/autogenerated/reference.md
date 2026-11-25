@@ -13,6 +13,7 @@ Read what is in the photo library and on shared storage, and ask for access to b
 - `allow-category-files`
 - `allow-share`
 - `allow-open`
+- `allow-insets`
 
 ## Permission Table
 
@@ -175,6 +176,32 @@ Enables the files_access command without any pre-configured scope.
 <td>
 
 Denies the files_access command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`photos:allow-insets`
+
+</td>
+<td>
+
+Enables the insets command without any pre-configured scope.
+
+</td>
+</tr>
+
+<tr>
+<td>
+
+`photos:deny-insets`
+
+</td>
+<td>
+
+Denies the insets command without any pre-configured scope.
 
 </td>
 </tr>

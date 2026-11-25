@@ -93,6 +93,24 @@ impl<R: Runtime> Photos<R> {
 
     /// # Errors
     /// Always [`Error::NoLibrary`].
+    pub fn multicast(&self, _on: bool) -> Result<()> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always: a desktop window has no system bars over it.
+    pub fn insets(&self) -> Result<crate::Insets> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always: there is no phone here to make pictures with.
+    pub fn thumbnail(&self, _path: &str, _size: u32, _out: &Path) -> Result<()> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always: there is no screen lock to hold off here.
     pub fn keep_awake(&self, _on: bool) -> Result<()> {
         Err(Error::NoLibrary)
     }

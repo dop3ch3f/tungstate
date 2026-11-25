@@ -11,7 +11,7 @@ export type Art =
   // The phone's file manager (docs/mobile/approved-files/).
   | "video" | "music" | "doc" | "download" | "apps" | "sd" | "phone" | "search" | "more"
   | "copy" | "move" | "trash" | "rename" | "share" | "new-folder" | "list" | "grid" | "nas"
-  | "cloud" | "organise" | "clipboard"
+  | "cloud" | "organise" | "clipboard" | "detail" | "info" | "wifi"
   | "no-folders" | "no-runs" | "no-pairs" | "no-connections" | "no-archives" | "nothing-found"
   | "no-history" | "no-syncs" | "in-step" | "conflict";
 
@@ -276,6 +276,38 @@ const SECTIONS: Record<string, string[]> = {
     "xx.xxxxx",
     "........",
     "xx.xxxxx",
+    "........",
+  ],
+  // A big preview beside two lines: the detailed list, told apart from the
+  // plain list's small squares at a glance.
+  "detail": [
+    "xxx.xxxx",
+    "xxx.....",
+    "xxx.xxx.",
+    "........",
+    "xxx.xxxx",
+    "xxx.....",
+    "xxx.xxx.",
+    "........",
+  ],
+  "info": [
+    "...xx...",
+    "...xx...",
+    "........",
+    "..xxx...",
+    "...xx...",
+    "...xx...",
+    "...xx...",
+    "..xxxx..",
+  ],
+  "wifi": [
+    "........",
+    ".xxxxxx.",
+    "x......x",
+    "..xxxx..",
+    ".x....x.",
+    "...xx...",
+    "...xx...",
     "........",
   ],
   "grid": [

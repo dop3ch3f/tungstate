@@ -321,10 +321,31 @@ fn place(target: &str, journal: &Journal) -> Result<Place, String> {
 /// opening every file here would cost a request each over a network for
 /// nothing. Looking for files that are nearly the same does use the media
 /// type, and only ever runs on this machine, where reading it is cheap.
-fn look(backend: &dyn Backend, sniff: bool) -> Result<tungstate_core::Snapshot, String> {
-    let probe = tungstate_core::policy::Policy::parse(tungstate_core::learn::PROBE)
+/// The rules a scan walks by.
+///
+/// On a phone, also leaving out `Android/data` and `Android/obb`, every app's
+/// private folders, which no other app may read, All files access or not:
+/// the walk stops at the first folder it cannot read, so without this "the
+/// whole phone" could never be scanned. And anything hidden: apps keep
+/// identical marker files (`.database_uuid`, `.nomedia`) in many folders,
+/// and offering to clear those would break the apps.
+fn probe_for(phone: bool) -> tungstate_core::policy::Policy {
+    let text = if phone {
+        std::borrow::Cow::Owned(tungstate_core::learn::PROBE.replacen(
+            "\"*.crdownload\"]",
+            "\"*.crdownload\", \"Android/data\", \"Android/obb\", \".*\"]",
+            1,
+        ))
+    } else {
+        std::borrow::Cow::Borrowed(tungstate_core::learn::PROBE)
+    };
+    tungstate_core::policy::Policy::parse(&text)
         .expect("the probe policy parses")
-        .policy;
+        .policy
+}
+
+fn look(backend: &dyn Backend, sniff: bool) -> Result<tungstate_core::Snapshot, String> {
+    let probe = probe_for(cfg!(target_os = "android"));
     let tier = if sniff {
         probe.required_tier()
     } else {
@@ -883,6 +904,33 @@ mod tests {
 
     fn scanned(root: &str, journal: &Journal, scanning: &Scan, similar: bool) -> FoundView {
         scan(root, similar, false, journal, scanning, None, &mut |_| {}).expect("the scan runs")
+    }
+
+    #[test]
+    fn a_phone_scan_leaves_out_every_apps_private_folders() {
+        let phone = probe_for(true);
+        let ignored = |path: &str| {
+            phone
+                .folder
+                .ignore
+                .first_match_including_ancestors(path)
+                .is_some()
+        };
+        assert!(ignored("Android/data/com.example/cache/a.jpg"));
+        assert!(ignored("Android/obb/com.example/main.obb"));
+        assert!(!ignored("Android/media/com.whatsapp/WhatsApp/Media/a.jpg"));
+        assert!(!ignored("DCIM/Camera/a.jpg"));
+        assert!(ignored("DCIM/.thumbnails/1.jpg"));
+        assert!(ignored("Pictures/.database_uuid"));
+        assert!(ignored(".tungstate-quarantine/DCIM/a.jpg"));
+        let desktop = probe_for(false);
+        assert!(
+            desktop
+                .folder
+                .ignore
+                .first_match_including_ancestors("Android/data/x")
+                .is_none()
+        );
     }
 
     #[test]

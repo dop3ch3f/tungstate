@@ -3,7 +3,7 @@
 
 use tauri::{AppHandle, Runtime, command};
 
-use crate::{Access, Categories, Category, Filter, PhotosExt, Result, StoredFile, Summary};
+use crate::{Access, Categories, Category, Filter, Insets, PhotosExt, Result, StoredFile, Summary};
 
 #[command]
 pub(crate) async fn share<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Result<()> {
@@ -13,6 +13,11 @@ pub(crate) async fn share<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> 
 #[command]
 pub(crate) async fn open<R: Runtime>(app: AppHandle<R>, path: String) -> Result<()> {
     app.photos().open(path)
+}
+
+#[command]
+pub(crate) async fn insets<R: Runtime>(app: AppHandle<R>) -> Result<Insets> {
+    app.photos().insets()
 }
 
 #[command]

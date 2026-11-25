@@ -162,6 +162,47 @@ mockIPC((cmd, args) => {
       if (answer === "wait") return new Promise(() => {});
       return { removed: answer === "no" || answer === "old" ? 0 : checked, supported: answer !== "old" } satisfies T.Removed;
     }
+    // Discovery: Area51 announces itself; another box only answers a knock.
+    case "discover": {
+      const found: T.FoundServer[] = [
+        { address: "192.168.31.71", name: "Area51", host: "Area51.local", offers: [{ kind: "ftp", port: 21 }, { kind: "smb", port: 445 }] },
+        { address: "192.168.31.40", name: null, host: null, offers: [{ kind: "smb", port: 445 }] },
+      ];
+      setTimeout(() => found.forEach((f) => void emit("discover://found", f)), 20);
+      return found;
+    }
+    case "connection_shares": return ["Backup", "homes", "Media", "Photos"];
+    case "fetch_copy": return "/data/cache/opened/x/file";
+    case "plugin:photos|insets": throw new Error("not a phone");
+    // Duplicates: two groups in the camera folder.
+    case "past_cleanups": case "past_tidies": case "recent_scans": return [];
+    case "duplicate_action": return null;
+    case "find_duplicates": {
+      const cam = `${SD}/DCIM/Camera`;
+      const copy = (path: string, keep: boolean, size = 4_400_000) => ({ path, name: path.split("/").pop()!, size, mtime: null, keep, alike: null, thumb: null });
+      return {
+        root: String(a.target), files: 412, extra_files: 3, reclaimable: 9_000_000, unsure: 0, networked: false, can_trash: false, looked_alike: true, online_only: 0, linked: [], unchecked: [],
+        rows: [
+          { id: "a", kind: "pictures", claim: "identical", folder: false, reclaimable: 8_800_000, sure: true, files: 0, copies: [copy(`${cam}/IMG_20261102_0912.jpg`, true), copy(`${SD}/Download/IMG_20261102_0912.jpg`, false), copy(`${SD}/Pictures/IMG_20261102_0912.jpg`, false)] },
+          { id: "b", kind: "video", claim: "identical", folder: false, reclaimable: 100_000_000, sure: true, files: 0, copies: [copy(`${cam}/VID_20261030_2112.mp4`, true, 100_000_000), copy(`${SD}/Movies/VID_20261030_2112.mp4`, false, 100_000_000)] },
+        ],
+      };
+    }
+    // Organise: Download has no rules yet; three layouts tried on paper.
+    case "folder_has_rules": return false;
+    case "compare_folder": return [
+      { name: "downloads", summary: "By year, then by the app it came from, then by kind", loads: true, settles: true, files: 1204, of: 1310, bytes: 4 * GB, created: 23, removed: 0, example: { from: "Download/IMG-20260411-WA0003.jpg", to: "2026/WhatsApp/Images/jpg/IMG-20260411-WA0003.jpg" } },
+      { name: "by-type", summary: "By kind, then by file type", loads: true, settles: true, files: 1204, of: 1310, bytes: 4 * GB, created: 9, removed: 0, example: { from: "Download/report.pdf", to: "Documents/pdf/report.pdf" } },
+    ];
+    case "govern_folder": case "give_rules": return null;
+    case "folder_preview": return {
+      folder: "Download", before: [], after: [], left_alone: [], files: 1204, of: 1310, bytes: 4 * GB, large: false, settles: true, waiting: 0, longest_wait: 0, tidy: true, undoable: null, copies: null, online_only: 0,
+      moves: [
+        ...Array.from({ length: 312 }, (_, i) => ({ from: `x${i}.jpg`, to: `2026/WhatsApp/Images/jpg/x${i}.jpg`, why: "" })),
+        ...Array.from({ length: 188 }, (_, i) => ({ from: `r${i}.pdf`, to: `2026/Documents/pdf/r${i}.pdf`, why: "" })),
+        ...Array.from({ length: 96 }, (_, i) => ({ from: `v${i}.mp4`, to: `2025/Videos/mp4/v${i}.mp4`, why: "" })),
+      ],
+    };
     default: throw new Error(`phone mock has no answer for ${cmd}`);
   }
 }, { shouldMockEvents: true });
@@ -179,7 +220,9 @@ const tab = params.get("tab") as Tab | null;
 if (tab) usePhoneNav().go(tab);
 const opening = params.get("open");
 if (opening) useWindows().go(opening.startsWith("category:") ? { kind: "category", category: opening.slice(9) as T.Category } : { kind: "folder", path: opening });
-if (params.get("view") === "grid") useWindows().setView("grid");
+// `?view=list|detailed|tiles`.
+const view = params.get("view");
+if (view === "list" || view === "detailed" || view === "tiles") useWindows().setView(view);
 // `?second=PATH`: a second window open there, with the first still in front.
 const second = params.get("second");
 if (second) {

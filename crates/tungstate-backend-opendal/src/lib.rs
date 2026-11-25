@@ -327,6 +327,30 @@ fn operator_for(connection: &Connection, secrets: &dyn SecretStore) -> Result<(O
     }
 }
 
+/// The shares an SMB server offers to this user, sorted, hidden ones left
+/// out: for picking a share when adding a connection, rather than typing it.
+///
+/// # Errors
+/// [`BackendError::Auth`](tungstate_backend::BackendError::Auth) for a refused
+/// user or password; otherwise the server could not be reached or listed.
+#[cfg(feature = "smb")]
+pub fn smb_shares(
+    host: &str,
+    port: Option<u16>,
+    username: &str,
+    password: &str,
+) -> Result<Vec<String>> {
+    let settings = tungstate_backend_smb::Settings {
+        host: host.trim().to_string(),
+        port,
+        root: String::new(),
+        username: username.to_string(),
+        password: password.to_string(),
+        require_encryption: false,
+    };
+    Ok(tungstate_backend_smb::list_shares(&settings, host.trim())?)
+}
+
 /// A share reached directly, signed in to before this returns.
 #[cfg(feature = "smb")]
 fn smb_backend(

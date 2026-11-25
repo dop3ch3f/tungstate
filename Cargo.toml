@@ -17,6 +17,10 @@ thiserror = "2.0"
 rusqlite = { version = "0.40", features = ["bundled"] }
 directories = "6"
 blake3 = "1.8"
+# Finding file servers on the network (mDNS), with no async runtime of its own.
+mdns-sd = { version = "0.22", default-features = false }
+# This device's own addresses, for the local port knock; the version mdns-sd uses.
+if-addrs = "0.15"
 trash = "5.2"
 # A safe wrapper for one syscall, `statfs`: the workspace forbids `unsafe`,
 # and asking whether a folder is on a share is worth one small dependency.
