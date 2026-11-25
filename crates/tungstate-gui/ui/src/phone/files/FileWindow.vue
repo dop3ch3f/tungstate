@@ -20,7 +20,7 @@ const shelf = makeShelf<Entry>();
 import { computed, nextTick, onMounted, onUnmounted, ref, shallowRef, watch } from "vue";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { files, phone, transfers } from "../../engine/commands";
-import type { Fetching } from "../../engine/types";
+import type { Fetching, StoredFile } from "../../engine/types";
 import { bytes, kind, plural, when } from "../../lib/format";
 import Pixels from "../../ui/Pixels.vue";
 import { useBack } from "../lib/back";
@@ -71,6 +71,8 @@ const scroll = useScroll(box);
  *  flash placeholders on its way in. */
 const slow = ref(false);
 let slowTimer: ReturnType<typeof setTimeout> | undefined;
+/** A category's first screenful, with room for a quick flick. */
+const FIRST = 200;
 const shelfKey = (at: Place) => `${placeKey(at)}|${w.hidden.value ? "all" : "plain"}`;
 
 function restoreScroll(at: Place) {
@@ -89,6 +91,7 @@ let asked = 0;
  *  in place, keeping the scroll where it is. */
 async function load(at: Place, again = false) {
   const mine = ++asked;
+  let drewEarly = false;
   const key = shelfKey(at);
   const known = again ? undefined : shelf.get(key);
   if (!again) {
@@ -108,7 +111,25 @@ async function load(at: Place, again = false) {
       got = (await transfers.browse(at.path, w.hidden.value)).entries;
       store.visited(at.path);
     } else if (at.kind === "category") {
-      got = (await phone.categoryFiles(at.category)).map((f) => ({ name: f.name, path: f.path, is_dir: false, size: f.size, modified: f.modifiedMs }));
+      const asEntries = (list: StoredFile[]) => list.map((f): Entry => ({ name: f.name, path: f.path, is_dir: false, size: f.size, modified: f.modifiedMs }));
+      // A big category (Downloads can hold 100k files) takes seconds to list
+      // in full; its first screenful, in the order on screen, comes in about
+      // one. Draw that, then swap in the whole list behind it.
+      let whole: Entry[] | null = null;
+      if (!known && !again) {
+        const early = asEntries(await phone.categoryFiles(at.category, FIRST, w.win.value.sort));
+        // Gone elsewhere already: the full list would only hold up the next.
+        if (mine !== asked) return;
+        // Fewer than asked for is every one of them.
+        if (early.length < FIRST) whole = early;
+        else if (mine === asked) {
+          entries.value = early;
+          slow.value = true;
+          drewEarly = true;
+          restoreScroll(at);
+        }
+      }
+      got = whole ?? asEntries(await phone.categoryFiles(at.category));
     }
     if (mine === asked) {
       entries.value = got;
@@ -124,7 +145,8 @@ async function load(at: Place, again = false) {
       loading.value = false;
       slow.value = false;
       clearTimeout(slowTimer);
-      if (again || known) void nextTick(scroll.measure);
+      // Already placed: moving the scroll now would yank someone mid-flick.
+      if (again || known || drewEarly) void nextTick(scroll.measure);
       else restoreScroll(at);
     }
   }

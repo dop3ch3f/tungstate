@@ -842,6 +842,9 @@ export interface Fetching {
 export type Category = "images" | "videos" | "audio" | "documents" | "downloads" | "apps";
 export type Categories = Record<Category, Tally>;
 
+/** The order a category's first few files are picked in. */
+export type Order = "newest" | "oldest" | "name" | "largest";
+
 /** A file on the phone's shared storage, by its real path. */
 export interface StoredFile {
   path: string;

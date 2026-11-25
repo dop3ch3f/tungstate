@@ -197,7 +197,9 @@ export const phone = {
   /** Opens the system's page for it; answers once the person is back. */
   askFiles: () => invoke<T.PhotoAccess>("plugin:photos|ask_files"),
   categories: () => invoke<T.Categories>("plugin:photos|categories"),
-  categoryFiles: (category: T.Category) => invoke<T.StoredFile[]>("plugin:photos|category_files", { category }),
+  /** Every file in a category, or with `first`, only that many in `order`. */
+  categoryFiles: (category: T.Category, first?: number, order?: T.Order) =>
+    invoke<T.StoredFile[]>("plugin:photos|category_files", { category, first, order }),
   /** The system's share sheet, for files on this phone. */
   share: (paths: string[]) => invoke<void>("plugin:photos|share", { paths }),
   /** Opens a file on this phone in the app that handles its kind. */

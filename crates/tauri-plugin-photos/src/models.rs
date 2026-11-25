@@ -131,9 +131,25 @@ pub struct PathsArgs {
     pub paths: Vec<String>,
 }
 
+/// The order a category's first few files are picked in, matching the
+/// window's sort so the first screenful is the one the full list starts with.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Order {
+    #[default]
+    Newest,
+    Oldest,
+    Name,
+    Largest,
+}
+
 #[derive(Debug, Clone, Copy, Deserialize, Serialize)]
 pub struct CategoryArgs {
     pub category: Category,
+    /// Only this many, picked in `order`; every file when absent.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub first: Option<u32>,
+    pub order: Order,
 }
 
 /// A file on the phone's shared storage, by its real path, which the

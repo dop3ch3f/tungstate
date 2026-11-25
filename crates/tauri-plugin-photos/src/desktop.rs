@@ -4,7 +4,7 @@ use serde::de::DeserializeOwned;
 use tauri::{AppHandle, Runtime, plugin::PluginApi};
 
 use crate::{
-    Access, Asset, Categories, Category, Error, Filter, Removed, Result, StoredFile, Summary,
+    Access, Asset, Categories, Category, Error, Filter, Order, Removed, Result, StoredFile, Summary,
 };
 
 pub fn init<R: Runtime, C: DeserializeOwned>(
@@ -75,7 +75,12 @@ impl<R: Runtime> Photos<R> {
 
     /// # Errors
     /// Always [`Error::NoLibrary`].
-    pub fn category_files(&self, _category: Category) -> Result<Vec<StoredFile>> {
+    pub fn category_files(
+        &self,
+        _category: Category,
+        _first: Option<u32>,
+        _order: Order,
+    ) -> Result<Vec<StoredFile>> {
         Err(Error::NoLibrary)
     }
 

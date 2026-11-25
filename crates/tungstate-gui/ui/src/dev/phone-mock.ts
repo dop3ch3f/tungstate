@@ -114,8 +114,10 @@ mockIPC((cmd, args) => {
     case "plugin:photos|ask_files": filesAccess = "full"; return filesAccess;
     case "plugin:photos|categories":
       return { images: tally(12.4, 4120), videos: tally(31, 212), audio: tally(2.2, 480), documents: tally(0.84, 96), downloads: tally(4.1, 318), apps: tally(9.6, 14) } satisfies T.Categories;
-    case "plugin:photos|category_files":
-      return (TREE[`${SD}/DCIM/Camera`] ?? []).filter((e) => !e.is_dir).map((e) => ({ path: e.path, name: e.name, size: e.size, modifiedMs: e.modified ?? 0 })) satisfies T.StoredFile[];
+    case "plugin:photos|category_files": {
+      const all = (TREE[`${SD}/DCIM/Camera`] ?? []).filter((e) => !e.is_dir).map((e) => ({ path: e.path, name: e.name, size: e.size, modifiedMs: e.modified ?? 0 })) satisfies T.StoredFile[];
+      return typeof a.first === "number" ? all.slice(0, a.first) : all;
+    }
     case "plugin:photos|open": case "plugin:photos|share": return null;
     case "free_up_findings": return FINDINGS;
     case "make_folder": return `${String(a.inside)}/${String(a.called)}`;

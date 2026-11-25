@@ -3,7 +3,9 @@
 
 use tauri::{AppHandle, Runtime, command};
 
-use crate::{Access, Categories, Category, Filter, Insets, PhotosExt, Result, StoredFile, Summary};
+use crate::{
+    Access, Categories, Category, Filter, Insets, Order, PhotosExt, Result, StoredFile, Summary,
+};
 
 #[command]
 pub(crate) async fn share<R: Runtime>(app: AppHandle<R>, paths: Vec<String>) -> Result<()> {
@@ -54,6 +56,9 @@ pub(crate) async fn categories<R: Runtime>(app: AppHandle<R>) -> Result<Categori
 pub(crate) async fn category_files<R: Runtime>(
     app: AppHandle<R>,
     category: Category,
+    first: Option<u32>,
+    order: Option<Order>,
 ) -> Result<Vec<StoredFile>> {
-    app.photos().category_files(category)
+    app.photos()
+        .category_files(category, first, order.unwrap_or_default())
 }

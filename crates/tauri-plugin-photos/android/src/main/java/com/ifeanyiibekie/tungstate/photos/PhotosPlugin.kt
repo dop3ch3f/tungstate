@@ -63,6 +63,10 @@ class RemoveArgs {
 class CategoryArgs {
   /** "images", "videos", "audio", "documents", "downloads" or "apps". */
   var category: String = "images"
+  /** Only this many, picked in `order`; 0 for every one. */
+  var first: Int = 0
+  /** "newest", "oldest", "name" or "largest", as the window sorts. */
+  var order: String = "newest"
 }
 
 @InvokeArg
@@ -87,6 +91,14 @@ private class Narrow(val where: String, val args: List<String> = emptyList())
 
 /** One file in a category, by its real path. */
 private class Stored(val path: String, val name: String, val size: Long, val modified: Long)
+
+/** The window's sorts as the index's `ORDER BY`. */
+private val ORDERS = mapOf(
+  "newest" to "${MediaStore.MediaColumns.DATE_MODIFIED} DESC",
+  "oldest" to "${MediaStore.MediaColumns.DATE_MODIFIED} ASC",
+  "name" to "${MediaStore.MediaColumns.DISPLAY_NAME} COLLATE NOCASE ASC",
+  "largest" to "${MediaStore.MediaColumns.SIZE} DESC",
+)
 
 /** Endings that make a file a document when the index gave no type. */
 private val DOCUMENT_ENDINGS = listOf(".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".ods", ".txt", ".csv", ".rtf", ".epub", ".md")
@@ -350,15 +362,25 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
     }
   }
 
-  /** Every file in one category, newest first, by its real path. */
+  /**
+   * Every file in one category, newest first, by its real path; or only the
+   * `first` few in `order`. Downloads can hold 100k files and take seconds to
+   * list in full, while its first screenful comes back in about one, so the
+   * window asks for that first and draws it while the rest comes.
+   */
   @Command
   fun categoryFiles(invoke: Invoke) {
     val args = invoke.parseArgs(CategoryArgs::class.java)
     val narrow = categoryFilters[args.category] ?: return invoke.reject("there is no category called ${args.category}")
     offMain(invoke, "could not list what is on the phone", lists) {
       val found = mutableListOf<Stored>()
-      files(listOf(narrow)) { file, kinds -> if (args.category in kinds) found.add(file) }
-      found.sortByDescending { it.modified }
+      if (args.first > 0) {
+        val order = ORDERS[args.order] ?: ORDERS.getValue("newest")
+        files(listOf(narrow), order, args.first) { file, kinds -> if (args.category in kinds) found.add(file) }
+      } else {
+        files(listOf(narrow)) { file, kinds -> if (args.category in kinds) found.add(file) }
+        found.sortByDescending { it.modified }
+      }
       val list = JSArray()
       for (file in found) {
         val one = JSObject()
@@ -414,7 +436,7 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
    * `DATA` is the real path; deprecated for reading files, but still filled
    * in, and the engine needs a path rather than a content address.
    */
-  private fun files(narrow: Collection<Narrow>, visit: (Stored, List<String>) -> Unit) {
+  private fun files(narrow: Collection<Narrow>, order: String? = null, limit: Int = 0, visit: (Stored, List<String>) -> Unit) {
     // `format` 12289 is MTP's "association": a folder. Leaving them out here
     // spares a disk check per folder below; one the index left untyped still
     // gets it. The column is real but its constant is hidden from apps.
@@ -428,7 +450,8 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
       MediaStore.MediaColumns.DATE_MODIFIED, MediaStore.MediaColumns.MIME_TYPE, type,
     )
     val downloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS).path + "/"
-    activity.contentResolver.query(MediaStore.Files.getContentUri("external"), projection, where, args, null)?.use { rows ->
+    var seen = 0
+    activity.contentResolver.query(MediaStore.Files.getContentUri("external"), projection, where, args, order)?.use { rows ->
       val pathAt = rows.getColumnIndexOrThrow(data)
       val nameAt = rows.getColumnIndexOrThrow(MediaStore.MediaColumns.DISPLAY_NAME)
       val sizeAt = rows.getColumnIndexOrThrow(MediaStore.MediaColumns.SIZE)
@@ -458,6 +481,11 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
         if (kinds.isEmpty()) continue
         val modified = if (rows.isNull(modifiedAt)) File(path).lastModified() else rows.getLong(modifiedAt) * 1000
         visit(Stored(path, name, size, modified), kinds)
+        // Stopping here rather than with the index's own LIMIT: that counts
+        // rows before the checks above, so a short answer could not be told
+        // from a complete one. Rows cross over only as they are read, so the
+        // rest are never sent.
+        if (limit > 0 && ++seen >= limit) break
       }
     }
   }

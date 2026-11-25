@@ -7,8 +7,8 @@ use tauri::{
 };
 
 use crate::{
-    Access, Asset, Categories, Category, CategoryArgs, Filter, Insets, PathsArgs, Removed, Result,
-    StoredFile, Summary,
+    Access, Asset, Categories, Category, CategoryArgs, Filter, Insets, Order, PathsArgs, Removed,
+    Result, StoredFile, Summary,
 };
 
 #[cfg(target_os = "ios")]
@@ -147,14 +147,26 @@ impl<R: Runtime> Photos<R> {
         Ok(self.0.run_mobile_plugin("categories", ())?)
     }
 
-    /// Every file in one category, by its real path.
+    /// Every file in one category, by its real path, or only the `first`
+    /// few in `order`: a big category takes seconds to list in full, and its
+    /// first screenful can be drawn long before.
     ///
     /// # Errors
     /// The phone's code failed.
-    pub fn category_files(&self, category: Category) -> Result<Vec<StoredFile>> {
+    pub fn category_files(
+        &self,
+        category: Category,
+        first: Option<u32>,
+        order: Order,
+    ) -> Result<Vec<StoredFile>> {
+        let args = CategoryArgs {
+            category,
+            first,
+            order,
+        };
         Ok(self
             .0
-            .run_mobile_plugin::<Files>("categoryFiles", CategoryArgs { category })?
+            .run_mobile_plugin::<Files>("categoryFiles", args)?
             .files)
     }
 
