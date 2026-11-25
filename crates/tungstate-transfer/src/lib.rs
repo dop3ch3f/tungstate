@@ -1555,8 +1555,7 @@ impl Transfer<'_> {
             .into_owned();
         let extension = destination
             .extension()
-            .map(|e| format!(".{}", e.to_string_lossy()))
-            .unwrap_or_default();
+            .map_or_else(String::new, |e| format!(".{}", e.to_string_lossy()));
 
         let mut claimed = lock(&self.claimed);
         for suffix in 2..10_000 {

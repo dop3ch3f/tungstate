@@ -447,15 +447,15 @@ fn summarise(path: &Path) -> Option<ArchiveSummary> {
             .and_then(Value::as_array)
             .map_or(0, Vec::len)
     };
-    let started: Vec<i64> = document
-        .get("ops")
-        .and_then(Value::as_array)
-        .map(|ops| {
-            ops.iter()
-                .filter_map(|op| op.get("started_at").and_then(Value::as_i64))
-                .collect()
-        })
-        .unwrap_or_default();
+    let started: Vec<i64> =
+        document
+            .get("ops")
+            .and_then(Value::as_array)
+            .map_or_else(Vec::new, |ops| {
+                ops.iter()
+                    .filter_map(|op| op.get("started_at").and_then(Value::as_i64))
+                    .collect()
+            });
 
     Some(ArchiveSummary {
         export_version: document

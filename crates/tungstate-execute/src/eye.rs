@@ -254,8 +254,7 @@ impl<'a> Eye<'a> {
         // this returns, whatever happened.
         let suffix = path
             .rsplit_once('.')
-            .map(|(_, extension)| format!(".{extension}"))
-            .unwrap_or_default();
+            .map_or_else(String::new, |(_, extension)| format!(".{extension}"));
         let mut local = tempfile::Builder::new()
             .suffix(&suffix)
             .tempfile()

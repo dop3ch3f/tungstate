@@ -154,8 +154,7 @@ impl Drop for Pass<'_> {
 fn ending(path: &str) -> String {
     Path::new(path)
         .extension()
-        .map(|e| e.to_string_lossy().to_lowercase())
-        .unwrap_or_default()
+        .map_or_else(Default::default, |e| e.to_string_lossy().to_lowercase())
 }
 
 fn is_picture(path: &str) -> bool {

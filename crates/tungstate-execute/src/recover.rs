@@ -79,8 +79,7 @@ fn resolve_where(
         let describe = op
             .source
             .as_ref()
-            .map(|l| l.path.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
+            .map_or_else(String::new, |l| l.path.to_string_lossy().replace('\\', "/"));
 
         let outcome = match resolution {
             Resolution::Committed => Outcome::Committed { hash: None },

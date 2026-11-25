@@ -622,8 +622,7 @@ pub fn listing(backend: &dyn tungstate_backend::Backend) -> Result<String, Strin
             let name = entry
                 .path
                 .file_name()
-                .map(|n| n.to_string_lossy().to_string())
-                .unwrap_or_default();
+                .map_or_else(Default::default, |n| n.to_string_lossy().to_string());
             if tungstate_core::snapshot::is_reserved(&path) || is_partial(&name) {
                 continue;
             }

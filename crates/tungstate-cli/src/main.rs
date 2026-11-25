@@ -672,8 +672,7 @@ fn render(op: &Op, journal: &Journal) -> String {
     let note = op
         .note
         .as_deref()
-        .map(|n| format!(" ({n})"))
-        .unwrap_or_default();
+        .map_or_else(Default::default, |n| format!(" ({n})"));
     format!("{:>4} {status:<11} {movement}{note}", op.id.0)
 }
 

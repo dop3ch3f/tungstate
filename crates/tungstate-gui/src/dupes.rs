@@ -110,8 +110,7 @@ pub fn kind_of(path: &str, folder: bool) -> Kind {
     let name = path.rsplit_once('/').map_or(path, |(_, name)| name);
     let extension = name
         .rsplit_once('.')
-        .map(|(_, ext)| ext.to_ascii_lowercase())
-        .unwrap_or_default();
+        .map_or_else(Default::default, |(_, ext)| ext.to_ascii_lowercase());
     if extension == "app" {
         return Kind::Applications;
     }

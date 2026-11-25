@@ -232,10 +232,9 @@ impl Matcher {
     /// The names of the regex's named captures, which templates may use.
     #[must_use]
     pub fn capture_names(&self) -> Vec<String> {
-        self.regex
-            .as_ref()
-            .map(|re| re.capture_names().flatten().map(str::to_string).collect())
-            .unwrap_or_default()
+        self.regex.as_ref().map_or_else(Vec::new, |re| {
+            re.capture_names().flatten().map(str::to_string).collect()
+        })
     }
 
     /// Test a file, stopping at the first constraint that fails.

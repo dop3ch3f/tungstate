@@ -508,8 +508,7 @@ fn list(journal: &Journal) -> ExitCode {
                 let as_who = connection
                     .username
                     .as_deref()
-                    .map(|u| format!(" as {u}"))
-                    .unwrap_or_default();
+                    .map_or_else(Default::default, |u| format!(" as {u}"));
                 // Named on every line, not just when adding. "Which of my
                 // connections is still sending passwords in the clear?" should
                 // be answerable by looking.

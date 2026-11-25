@@ -88,12 +88,14 @@ impl Watching {
     /// What the window draws.
     #[must_use]
     pub fn view(&self, on: bool) -> WatchView {
-        let (watching, sweeping) = self.counts.lock().map(|held| *held).unwrap_or_default();
+        let (watching, sweeping) = self
+            .counts
+            .lock()
+            .map_or_else(|_| Default::default(), |held| *held);
         let mut recent = self
             .seen
             .lock()
-            .map(|held| held.clone())
-            .unwrap_or_default();
+            .map_or_else(|_| Vec::default(), |held| held.clone());
         recent.reverse();
         WatchView {
             on,

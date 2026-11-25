@@ -1275,11 +1275,10 @@ fn place_of(connection: &Connection) -> String {
             let at = connection
                 .options
                 .get(tungstate_journal::option::ENDPOINT)
-                .map(|endpoint| {
+                .map_or_else(Default::default, |endpoint| {
                     let bare = endpoint.split("://").nth(1).unwrap_or(endpoint);
                     format!(" at {}", bare.trim_end_matches('/'))
-                })
-                .unwrap_or_default();
+                });
             format!("bucket {bucket}{at}{}", inside(&connection.root))
         }
         Scheme::Smb | Scheme::Ftp | Scheme::Ftps | Scheme::Sftp => {

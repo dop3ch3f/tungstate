@@ -243,8 +243,7 @@ pub fn undo(opened: &Opened, journal: &Journal, plan: PlanId) -> Result<Undone> 
         let from = op
             .source
             .as_ref()
-            .map(|l| slashed(&l.path))
-            .unwrap_or_default();
+            .map_or_else(Default::default, |l| slashed(&l.path));
         let result = match op.destination.as_ref().map(|l| slashed(&l.path)) {
             Some(to) => Path::new(&to)
                 .parent()

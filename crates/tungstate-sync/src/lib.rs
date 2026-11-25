@@ -928,8 +928,9 @@ impl Runner<'_> {
             .members
             .iter()
             .find(|m| m.id == leg.from)
-            .map(|m| m.files.iter().map(|(p, n)| (p.as_str(), n.mtime)).collect())
-            .unwrap_or_default();
+            .map_or_else(Default::default, |m| {
+                m.files.iter().map(|(p, n)| (p.as_str(), n.mtime)).collect()
+            });
         let mut landed = BTreeSet::new();
         let mut times_kept = 0;
         for op in self.journal.landed(link.id, since)? {

@@ -232,8 +232,7 @@ fn class_of(file: &Attributes) -> Option<&str> {
 fn ext_of(file: &Attributes) -> String {
     file.name
         .rsplit_once('.')
-        .map(|(_, e)| e.to_ascii_lowercase())
-        .unwrap_or_default()
+        .map_or_else(String::new, |(_, e)| e.to_ascii_lowercase())
 }
 
 /// Whether a segment reads as a size band this tool would have written.

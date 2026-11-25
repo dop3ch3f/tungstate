@@ -230,11 +230,13 @@ fn compile_folder(raw: raw::Folder) -> Result<Folder, PolicyError> {
         };
     Ok(Folder {
         name: raw.name.into_inner(),
-        mode: raw.mode.map(Spanned::into_inner).unwrap_or_default(),
+        mode: raw.mode.map_or_else(Default::default, Spanned::into_inner),
         inbox: raw.inbox.map(Spanned::into_inner),
         ignore: globs("ignore", raw.ignore)?,
         opaque: globs("opaque", raw.opaque)?,
-        symlinks: raw.symlinks.map(Spanned::into_inner).unwrap_or_default(),
+        symlinks: raw
+            .symlinks
+            .map_or_else(Default::default, Spanned::into_inner),
     })
 }
 
