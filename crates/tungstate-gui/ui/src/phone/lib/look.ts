@@ -5,6 +5,7 @@
 import type { Category } from "../../engine/types";
 import type { Art } from "../../lib/pixels";
 import { kind } from "../../lib/format";
+import { connectionOf, topOf, type Top } from "./paths";
 
 const TINT: Record<string, string> = {
   Folder: "var(--raw-kind-folder)",
@@ -41,6 +42,40 @@ export const CATEGORIES: { id: Category; label: string; art: Art; tint: string }
   { id: "downloads", label: "Downloads", art: "download", tint: "var(--raw-kind-folder)" },
   { id: "apps", label: "Apps", art: "apps", tint: "var(--raw-kind-archive)" },
 ];
+
+/** A place's mark on its colour square: a tab, a storage row, a connection. */
+export interface Look {
+  art: Art;
+  tint: string;
+  /** White ink, on the darker colours. */
+  light: boolean;
+}
+
+export const HOME_LOOK: Look = { art: "home", tint: "var(--tint-home)", light: false };
+export const PHONE_LOOK: Look = { art: "phone", tint: "var(--tint-home)", light: false };
+export const CARD_LOOK: Look = { art: "sd", tint: "#a5a79d", light: false };
+
+/** Each kind of connection in a desktop section colour of its own, so two
+ *  tabs showing a "Photos" on different places are told apart at a glance. */
+const SCHEME_TINT: Record<string, string> = {
+  smb: "var(--tint-connections)",
+  sftp: "var(--tint-drain)",
+  webdav: "var(--tint-folder)",
+  ftp: "var(--tint-sync)",
+  ftps: "var(--tint-sync)",
+  s3: "var(--tint-dupes)",
+};
+export const connectionLook = (scheme: string | undefined): Look =>
+  ({ art: "nas", tint: (scheme && SCHEME_TINT[scheme]) || "var(--tint-connections)", light: true });
+
+/** The mark of whatever a folder is on: its connection's kind, a card, or
+ *  this phone. */
+export function folderLook(path: string, volumes: (Top & { removable: boolean })[], schemeOf: (connection: string) => string | undefined): Look {
+  const conn = connectionOf(path);
+  if (conn !== null) return connectionLook(schemeOf(conn));
+  const top = topOf(path, volumes);
+  return top && "removable" in top && top.removable ? CARD_LOOK : PHONE_LOOK;
+}
 
 export const CATEGORY_LABEL = Object.fromEntries(CATEGORIES.map((c) => [c.id, c.label])) as Record<Category, string>;
 

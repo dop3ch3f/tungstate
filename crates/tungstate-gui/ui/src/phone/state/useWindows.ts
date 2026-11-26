@@ -1,11 +1,11 @@
 // The file windows, as tabs along the top the way ES File Explorer has them:
 // each storage and connection in its own, copy in one, paste in another.
-// Each holds where it is, how it lists, and what is ticked there.
-// Module-level, so the tab bar can step aside while a window is selecting.
+// Each holds where it is, how it lists, and what is ticked there. The first
+// is home: it never closes, and only the phone's own storage opens in it.
+// Module-level, so every screen sees the same tabs.
 
 import { computed, reactive, ref } from "vue";
 import type { Category } from "../../engine/types";
-import { connectionOf } from "../lib/paths";
 import { storedView, type View } from "../lib/views";
 
 /** Where a window is: Files home, a folder, or one category tile's files. */
@@ -49,7 +49,7 @@ function setHidden(on: boolean) {
 const active = ref(0);
 
 const win = computed(() => wins.value[active.value]!);
-/** The window is choosing files, so the tab bar gives way to the actions. */
+/** The window is choosing files, so the bottom tabs give way to the actions. */
 const selecting = computed(() => win.value.picked.size > 0);
 
 function go(place: Place) {
@@ -71,26 +71,36 @@ function clearPicks() {
   win.value.picked = new Set();
 }
 
-/** Whether a window is somewhere inside `top`: a volume's folder, or a
- *  connection (`Area51:`), anywhere down either. */
+/** The tab that is always there, first in the strip. */
+export const HOME = 0;
+
+/** Whether a window is somewhere inside `top`: a folder (a volume, or one on
+ *  a connection), or a whole connection (`Area51:`), anywhere down it. */
 function within(at: Place, top: string): boolean {
   if (at.kind !== "folder") return false;
-  const conn = connectionOf(top);
-  if (conn !== null) return connectionOf(at.path) === conn;
   const root = top.replace(/\/+$/, "");
-  return at.path === root || at.path.startsWith(`${root}/`);
+  // `Area51:` is followed directly by its folders, `Area51:Photos`.
+  return at.path === root || at.path.startsWith(root.endsWith(":") ? root : `${root}/`);
 }
 
-/** Opens a storage or a connection in its own tab: the tab already in it if
- *  there is one, else this tab when it is on Files home (a blank tab, as a
- *  browser's new tab page is), else a new tab, else (all open) this one. */
+/** Opens somewhere off the phone's own storage (a connection, a card) in a
+ *  tab of its own, so home stays home. A blank tab opened with + takes it, as
+ *  a browser's new tab page does, even where another tab is already there:
+ *  two tabs on one place is how to copy between two of its folders. From
+ *  home or a tab in use: the tab already in that place, else a new tab, else
+ *  (all open) the last one gives way, never home. */
 function openTab(place: Place) {
+  if (active.value !== HOME && win.value.place.kind === "home") return go(place);
   const top = place.kind === "folder" ? place.path : null;
-  const there = top === null ? -1 : wins.value.findIndex((x) => within(x.place, top));
+  const there = top === null ? -1 : wins.value.findIndex((x, i) => i !== HOME && within(x.place, top));
   if (there >= 0) return void (active.value = there);
-  if (win.value.place.kind === "home" || wins.value.length >= MAX) return go(place);
-  wins.value = [...wins.value, fresh(place)];
-  active.value = wins.value.length - 1;
+  if (wins.value.length < MAX) {
+    wins.value = [...wins.value, fresh(place)];
+    active.value = wins.value.length - 1;
+    return;
+  }
+  if (active.value === HOME) active.value = wins.value.length - 1;
+  go(place);
 }
 
 /** Sends every tab inside `top` back to it: after a connection's folder
@@ -111,7 +121,7 @@ function newTab() {
 const second = (place: Place = { kind: "home" }) => openTab(place);
 
 function close(index: number) {
-  if (wins.value.length === 1 || index < 0 || index >= wins.value.length) return;
+  if (index === HOME || index < 0 || index >= wins.value.length) return;
   wins.value = wins.value.filter((_, i) => i !== index);
   // A tab before the current one going shifts the current one down by one.
   if (index < active.value) active.value -= 1;

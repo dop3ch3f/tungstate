@@ -23,6 +23,7 @@ import PTile from "../ui/PTile.vue";
 import PThumb from "../ui/PThumb.vue";
 import PButton from "../ui/PButton.vue";
 import PSheet from "../ui/PSheet.vue";
+import PTrouble from "../ui/PTrouble.vue";
 
 const lib = usePhotos();
 const run = useFreeUp();
@@ -109,7 +110,7 @@ async function land(destination: string) {
     <FileWindow v-else />
   </template>
 
-  <PScreen v-else title="Free up space">
+  <PScreen v-else title="Free up space" :tile="{ art: 'drain', tint: 'var(--tint-drain)', light: true }">
     <div v-if="lib.access.value === 'ask'" class="card">
       <PTile art="drain" tint="var(--tint-drain)" light :size="48" />
       <b>Let Tungstate see your photos</b>
@@ -157,8 +158,8 @@ async function land(destination: string) {
       </div>
     </template>
 
-    <p v-if="lib.problem.value" class="line bad">{{ lib.problem.value }}</p>
-    <p v-if="run.problem.value" class="line bad">{{ run.problem.value }}</p>
+    <PTrouble v-if="lib.problem.value" :error="lib.problem.value" />
+    <PTrouble v-if="run.problem.value" :error="run.problem.value" />
 
     <PSheet v-if="sheet === 'filter'" title="What to look for" @close="sheet = null">
       <b class="label">Kind</b>
@@ -196,7 +197,6 @@ async function land(destination: string) {
 .card b { font-size: 19px; }
 .card p { margin: 0; font-size: 16px; line-height: 1.4; color: var(--text-quiet); }
 .line { margin: -6px 2px 12px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
-.bad { color: var(--bad); font-weight: 700; }
 .bar { display: flex; align-items: center; gap: 8px; margin-bottom: 14px; }
 /* The chips scroll; the list/grid switch stays in reach beside them. */
 .chips { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; overflow-x: auto; scrollbar-width: none; }

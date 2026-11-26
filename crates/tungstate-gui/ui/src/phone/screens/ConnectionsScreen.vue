@@ -17,6 +17,7 @@ import { usePhoneNav } from "../nav";
 import { useWindows } from "../state/useWindows";
 import PScreen from "../ui/PScreen.vue";
 import PTile from "../ui/PTile.vue";
+import { connectionLook } from "../lib/look";
 import PButton from "../ui/PButton.vue";
 import PSheet from "../ui/PSheet.vue";
 import PFolderPicker from "../ui/PFolderPicker.vue";
@@ -210,19 +211,19 @@ async function added(name: string) {
     </template>
   </PScreen>
 
-  <PScreen v-else title="Connections">
+  <PScreen v-else title="Connections" :tile="{ art: 'connections', tint: 'var(--tint-connections)', light: true }">
     <template #corner>
       <button class="iconbtn" aria-label="Add a connection" @click="addByHand">+</button>
     </template>
-    <p v-if="conns.problem.value" class="line bad">{{ conns.problem.value }}</p>
-    <p v-if="trouble" class="line bad">{{ trouble }}</p>
+    <PTrouble v-if="conns.problem.value" :error="conns.problem.value" />
+    <PTrouble v-if="trouble" :error="trouble" />
     <p v-if="said" class="line">{{ said }}</p>
     <PButton v-if="folderless" class="inline" quiet @press="chooseFolder(folderless)">Choose a folder</PButton>
     <PTrouble v-if="failed" :error="failed.error" :where="failed.where" />
     <div v-if="reachable.length" class="list">
       <div v-for="c in reachable" :key="c.name" class="row">
         <button class="open" @click="open(c)">
-          <PTile art="nas" tint="var(--tint-connections)" light :size="40" />
+          <PTile v-bind="connectionLook(c.scheme)" :size="40" />
           <span class="text">
             <b>{{ c.name }}</b>
             <span class="quiet"><i class="dot" :class="status(c).state" aria-hidden="true"></i>{{ status(c).text }}</span>
@@ -287,7 +288,6 @@ async function added(name: string) {
 .dots { flex: none; width: 52px; height: 72px; display: grid; place-items: center; color: var(--text); background: none; border: 0; }
 .iconbtn { flex: none; width: 44px; height: 44px; font: inherit; font-size: 24px; font-weight: 800; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; box-shadow: 3px 3px 0 var(--edge); }
 .line { margin: 4px 2px 14px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
-.bad { color: var(--bad); font-weight: 700; }
 .gh { display: flex; align-items: center; justify-content: space-between; margin: 22px 0 8px; }
 .gh h2 { margin: 0; font-size: 15px; font-weight: 800; }
 .smallbtn { height: 36px; padding: 0 12px; font: inherit; font-size: 14px; font-weight: 800; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; box-shadow: 3px 3px 0 var(--edge); }

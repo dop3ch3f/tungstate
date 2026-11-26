@@ -7,6 +7,10 @@ export interface LedgerRow {
   size: number;
   state: string;
   done: number;
+  /** Bytes read back from where it went, while checking. */
+  checked?: number;
+  /** Why it failed, or was set aside, in the engine's words. */
+  detail?: string | null;
 }
 
 /** Reached the far side and was compared there: the only proof a Move
@@ -52,4 +56,46 @@ export function unfinished(chosen: string[], rows: LedgerRow[], nameOf: (p: stri
     if (!mine.length) return true;
     return open.some((r) => r.path === name || r.path.startsWith(`${name}/`));
   });
+}
+
+/** How a file in the list is marked. A total map, so a state the engine adds
+ *  later still gets a known mark (as `lib/tone.ts` does for the desktop). */
+export type Mark = "waiting" | "sending" | "checking" | "done" | "same" | "held" | "failed";
+const MARK: Record<string, Mark> = {
+  waiting: "waiting",
+  live: "sending",
+  checking: "checking",
+  transferred: "done",
+  verified: "done",
+  "already-present": "same",
+  already_present: "same",
+  skipped: "same",
+  quarantined: "held",
+  cancelled: "held",
+  failed: "failed",
+};
+export const markOf = (state: string): Mark => MARK[state] ?? "same";
+
+/** A file on its way: it has a bar instead of a word. */
+export const isMoving = (state: string): boolean => state === "live" || state === "checking";
+
+/** What one file's line says, in the list under a Copy or Move. */
+export function rowWord(r: LedgerRow, op: "copy" | "move"): string {
+  switch (markOf(r.state)) {
+    case "waiting": return "Waiting";
+    case "sending": return "Sending";
+    case "checking": return "Checking it arrived";
+    case "done": return op === "move" ? "Moved and checked" : "Copied and checked";
+    case "same": return r.state === "skipped" ? "Left where it was" : "Already there";
+    case "held": return r.state === "cancelled" ? "Not sent" : "Set aside";
+    case "failed": return "Failed";
+  }
+}
+
+/** How far along a moving file is: sending counts bytes sent, checking
+ *  counts bytes read back, as the desktop's ledger does. */
+export function percentOf(r: LedgerRow): number {
+  if (!r.size) return 0;
+  const part = r.state === "checking" ? (r.checked ?? 0) : r.done;
+  return Math.min(100, Math.floor((part / r.size) * 100));
 }

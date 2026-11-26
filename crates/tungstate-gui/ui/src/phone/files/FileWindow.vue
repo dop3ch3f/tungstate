@@ -36,6 +36,7 @@ import ClipBar from "./ClipBar.vue";
 import Viewer from "./Viewer.vue";
 import PSheet from "../ui/PSheet.vue";
 import PThumb from "../ui/PThumb.vue";
+import PTrouble from "../ui/PTrouble.vue";
 
 const w = useWindows();
 const store = useStorage();
@@ -46,13 +47,11 @@ const loading = ref(false);
 const trouble = ref<string | null>(null);
 const said = ref<string | null>(null);
 const search = ref<string | null>(null);
-type Sheet = "sort" | "more" | "pickmore" | "name" | "delete" | "move" | "info";
+type Sheet = "sort" | "more" | "pickmore" | "name" | "delete" | "info";
 const sheet = ref<Sheet | null>(null);
 /** The name sheet: making a folder, or renaming the one ticked. */
 const naming = ref<{ mode: "new" | "rename"; value: string } | null>(null);
 const busy = ref(false);
-/** What Copy or Move was pressed for, while the two-window sheet is up. */
-const pending = ref<Op>("move");
 /** The one file the Info and Delete sheets are about, from the viewer. */
 const about = ref<Entry | null>(null);
 /** The viewer, open on these photos at this one. */
@@ -302,27 +301,10 @@ async function openElsewhere(e: Entry) {
 }
 
 // ── actions ──────────────────────────────────────────────────────────────
-/** The other tabs open on a folder: each is somewhere to send to. */
-const others = computed(() =>
-  w.wins.value.flatMap((x, index) => (index !== w.active.value && x.place.kind === "folder" ? [{ index, folder: x.place.path }] : [])),
-);
-
 function startClip(op: Op, list = pickedEntries.value) {
   const sum = list.reduce((n, e) => n + (e.is_dir ? 0 : e.size), 0);
   board.hold({ op, what: what(list), bytes: sum, from: title.value, paths: list.map((e) => e.path) });
   w.clearPicks();
-}
-
-function copyOrMove(op: Op) {
-  pending.value = op;
-  if (others.value.length) sheet.value = "move";
-  else startClip(op);
-}
-
-async function sendToOther(to: string) {
-  sheet.value = null;
-  startClip(pending.value);
-  await pasteInto(to);
 }
 
 async function pasteInto(to: string) {
@@ -523,7 +505,7 @@ const progress = (e: Entry) => (fetching.value?.path === e.path ? fetching.value
     >
       <div class="pull" :style="{ height: `${pull}px` }" aria-hidden="true"><span v-if="pull > 20">{{ pull >= 60 ? "Let go to refresh" : "Pull to refresh" }}</span></div>
       <p v-if="said" class="line">{{ said }}</p>
-      <p v-if="trouble" class="line bad">{{ trouble }}</p>
+      <PTrouble v-if="trouble" :error="trouble" />
       <p v-else-if="!loading && !shown.length" class="line">{{ search ? "Nothing here has that in its name." : place.kind === "category" ? "Nothing of this kind on this phone." : "This folder is empty." }}</p>
       <div v-if="loading && slow && !entries.length" class="ghosts" :class="view" aria-hidden="true">
         <div v-for="i in ghosts" :key="i" class="ghost" :style="{ height: `${rowHeight}px` }">
@@ -579,8 +561,8 @@ const progress = (e: Entry) => (fetching.value?.path === e.path ? fetching.value
 
     <!-- Ticking: the actions take the tab bar's place. -->
     <nav v-if="w.selecting.value" class="actions">
-      <button @click="copyOrMove('copy')"><Pixels of="copy" :size="24" /><span>Copy</span></button>
-      <button @click="copyOrMove('move')"><Pixels of="move" :size="24" /><span>Move</span></button>
+      <button @click="startClip('copy')"><Pixels of="copy" :size="24" /><span>Copy</span></button>
+      <button @click="startClip('move')"><Pixels of="move" :size="24" /><span>Move</span></button>
       <button @click="shareEntries(pickedEntries)"><Pixels of="share" :size="24" /><span>Share</span></button>
       <button @click="sheet = 'pickmore'"><Pixels of="more" :size="24" /><span>More</span></button>
       <button class="danger" @click="sheet = 'delete'"><Pixels of="trash" :size="24" /><span>Delete</span></button>
@@ -649,24 +631,6 @@ const progress = (e: Entry) => (fetching.value?.path === e.path ? fetching.value
       <PButton tint="var(--bad)" :busy="busy" @press="remove">Delete {{ what(doomed) }}</PButton>
       <PButton quiet @press="closeSheet">{{ doomed.length === 1 ? "Keep it" : "Keep them" }}</PButton>
     </PSheet>
-    <PSheet
-      v-if="sheet === 'move'"
-      :title="`${pending === 'move' ? 'Move' : 'Copy'} ${what(pickedEntries)}`"
-      :says="pending === 'move' ? 'Each is sent, read back and checked before the original is removed.' : 'Each copy is read back and checked.'"
-      @close="sheet = null"
-    >
-      <button v-for="(o, i) in others" :key="o.index" class="opt" :class="{ main: i === 0 }" @click="sendToOther(o.folder)">
-        <span class="num"><Pixels :of="connectionOf(o.folder) === null ? 'phone' : 'nas'" :size="20" /></span>
-        <span class="grow"><b>{{ pending === "move" ? "Move" : "Copy" }} to {{ placeName(o.folder, store.tops.value) }}</b><span class="q">The tab you have open there</span></span>
-        <span class="chev" aria-hidden="true">›</span>
-      </button>
-      <button class="opt" @click="sheet = null; startClip(pending)">
-        <span class="num"><Pixels of="clipboard" :size="20" /></span>
-        <span class="grow"><b>Choose another place</b><span class="q">Browse anywhere, then tap {{ pending === "move" ? "Move here" : "Copy here" }}</span></span>
-        <span class="chev" aria-hidden="true">›</span>
-      </button>
-      <PButton quiet @press="sheet = null">Cancel</PButton>
-    </PSheet>
   </section>
 </template>
 
@@ -702,7 +666,6 @@ h1 { margin: 0; font-size: 32px; line-height: 1.08; font-weight: 800; letter-spa
 .body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 16px; -webkit-overflow-scrolling: touch; overscroll-behavior-y: contain; }
 .pull { display: grid; place-items: end center; overflow: hidden; font-size: 14px; font-weight: 700; color: var(--text-quiet); }
 .line { margin: 4px 2px 12px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
-.bad { color: var(--bad); font-weight: 700; }
 .rows { position: relative; }
 .rows.list .slice, .rows.detailed .slice { background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; overflow: hidden; }
 .slice { will-change: transform; }
@@ -763,11 +726,4 @@ h1 { margin: 0; font-size: 32px; line-height: 1.08; font-weight: 800; letter-spa
 .pair { display: flex; gap: 12px; }
 .pair > * { flex: 1; }
 .name-input { height: 52px; padding: 0 14px; font: inherit; font-size: 17px; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
-.opt { display: flex; align-items: center; gap: 12px; min-height: 72px; padding: 12px 14px; font: inherit; text-align: left; color: var(--text); background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; box-shadow: 4px 4px 0 var(--edge); }
-.opt b { display: block; font-size: 16px; }
-.opt .q { font-size: 14px; color: var(--text-quiet); }
-.opt.main { color: #ffffff; background: var(--tint-drain); }
-.opt.main .q { color: #dfe6ff; }
-.opt:disabled { opacity: 0.55; }
-.num { width: 40px; height: 40px; flex: none; display: grid; place-items: center; font-size: 16px; font-weight: 900; color: var(--text); background: #ffffff; border: 2px solid var(--edge); border-radius: 8px; }
 </style>

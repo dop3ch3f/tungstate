@@ -1,16 +1,20 @@
-<!-- A Copy or Move from the clipboard, running: how far, and three plain
-     counts. Matches docs/mobile/approved-files/moving.png. "Keep browsing"
-     leaves it running behind a bar above the tabs; Pause and Stop both
-     finish the file in hand first, so nothing is left half sent. -->
+<!-- A Copy or Move from the clipboard, running: how far overall, then every
+     file with where it is, the way the desktop's Transfer lists them. The
+     file being sent has its own moving bar, and the list keeps it in view
+     until you scroll it yourself. "Keep browsing" leaves it running behind a
+     bar above the tabs; Pause and Stop both finish the file in hand first,
+     so nothing is left half sent. -->
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { bytes, duration, plural } from "../../lib/format";
 import { useTransfer } from "../../state/useTransfer";
 import { nameOf } from "../lib/paths";
-import { tally, unfinished } from "../lib/progress";
+import { isMoving, markOf, percentOf, rowWord, tally, unfinished } from "../lib/progress";
+import { rowsInView, useScroll } from "../lib/virtual";
 import { useClipboard } from "../state/useClipboard";
 import PButton from "../ui/PButton.vue";
 import PScene from "../ui/PScene.vue";
+import PTrouble from "../ui/PTrouble.vue";
 
 defineEmits<{ hide: [] }>();
 
@@ -57,6 +61,35 @@ const title = computed(() => {
 
 const rest = computed(() => (ended.value?.summary?.cancelled ? unfinished(run.value.paths, rows.value, nameOf) : []));
 
+// ── the file list ───────────────────────────────────────────────────────
+/** Every line is this tall, bar or word, so which lines are on screen is
+ *  arithmetic and a 10,000-photo Free up scrolls as freely as 20 files. */
+const LINE = 60;
+const box = ref<HTMLElement | null>(null);
+const scroll = useScroll(box);
+const span = computed(() => rowsInView(scroll.top.value, scroll.height.value, LINE, rows.value.length));
+const drawn = computed(() => rows.value.slice(span.value[0], span.value[1]));
+// A lookup, not an interpolated class: `check-css.mjs` must see every mark.
+const MARK = { waiting: "m-waiting", sending: "m-sending", checking: "m-checking", done: "m-done", same: "m-same", held: "m-held", failed: "m-failed" } as const;
+const GLYPH = { waiting: "", sending: "›", checking: "›", done: "✓", same: "=", held: "–", failed: "✕" } as const;
+
+/** Why each file failed. The engine says so in the run's summary, not on the
+ *  file's own line, so a failed line looks its reason up here. */
+const why = computed(() => new Map((ended.value?.summary?.failures ?? []).map((f) => [f.path, f.reason])));
+const reasonOf = (r: { path: string; detail: string | null }) => r.detail ?? why.value.get(r.path) ?? null;
+/** The reasons behind the failure bar's Details, a few of them. */
+const reasons = computed(() => (ended.value?.summary?.failures ?? []).slice(0, 5).map((f) => `${nameOf(f.path) || f.path}: ${f.reason}`).join("\n"));
+
+// Follows the file being sent, one line of what just finished above it,
+// unless a finger has been on the list in the last few seconds.
+let touched = 0;
+const hands = () => (touched = Date.now());
+const busyAt = computed(() => rows.value.findIndex((r) => isMoving(r.state)));
+watch(busyAt, (at) => {
+  if (at < 0 || !box.value || Date.now() - touched < 4000) return;
+  box.value.scrollTop = Math.max(0, (at - 1) * LINE);
+});
+
 async function again() {
   paused.value = false;
   try {
@@ -75,42 +108,51 @@ function pause() {
 <template>
   <section class="screen">
     <button v-if="!ended" class="keep" @click="$emit('hide')">‹ Keep browsing</button>
-    <div class="body">
+    <div class="top">
       <h1>{{ title }}</h1>
       <p class="quiet lead">To {{ run.to }}</p>
 
       <template v-if="!ended">
-        <PScene of="send" class="art" />
-        <div class="centre">
-          <div class="big">{{ bytes(n.bytes) }}</div>
-          <div class="quiet">{{ queued ? "Waiting for the transfer before it to finish" : left === null ? `of ${bytes(n.total)}` : `of ${bytes(n.total)} · about ${duration(left)} left` }}</div>
+        <PScene of="send" :moving="live" class="art" />
+        <div class="sum">
+          <b class="big">{{ bytes(n.bytes) }}</b>
+          <span class="quiet">{{ queued ? "Waiting for the transfer before it to finish" : left === null ? `of ${bytes(n.total)}` : `of ${bytes(n.total)} · about ${duration(left)} left` }}</span>
         </div>
-        <div class="blocks" aria-hidden="true"><i v-for="b in BLOCKS" :key="b" :class="{ on: b <= filled }"></i></div>
+        <div class="blocks" aria-hidden="true"><i v-for="b in BLOCKS" :key="b" :class="{ on: b <= filled, lead: live && b === filled + 1 }"></i></div>
       </template>
+      <PScene v-else-if="n.checked && !n.failed && !ended.summary?.cancelled" of="done" class="art small" />
 
-      <div class="stats">
-        <div><b>{{ n.sent.toLocaleString() }}</b><span>sent</span></div>
-        <div><b>{{ n.checked.toLocaleString() }}</b><span>checked</span></div>
-        <div v-if="moving"><b>{{ n.checked.toLocaleString() }}</b><span>off the phone</span></div>
-        <div v-else-if="n.failed"><b>{{ n.failed.toLocaleString() }}</b><span>failed</span></div>
+      <div class="counts">
+        <span><b>{{ n.sent.toLocaleString() }}</b> of {{ n.count.toLocaleString() }} sent</span>
+        <span><b>{{ n.checked.toLocaleString() }}</b> checked</span>
+        <span v-if="n.failed" class="failed"><b>{{ n.failed.toLocaleString() }}</b> failed</span>
       </div>
 
-      <p v-if="!ended" class="quiet centre">
-        {{ moving ? "Each original is removed only after its copy is read back and matches." : "Each copy is read back and checked." }}
-        Keep Tungstate open until this finishes.
-      </p>
-      <template v-else>
-        <PScene v-if="n.checked && !n.failed && !ended.summary?.cancelled" of="done" class="art" />
-        <p v-if="ended.problem" class="bad">{{ ended.problem }}</p>
+      <template v-if="ended">
+        <PTrouble v-if="ended.problem" :error="ended.problem" :where="run.to" />
+        <PTrouble v-if="n.failed" :error="`${plural(n.failed, 'file')} could not be ${moving ? 'moved' : 'copied'}, and ${n.failed === 1 ? 'stays' : 'stay'} where ${n.failed === 1 ? 'it was' : 'they were'}.`" :detail="reasons || undefined" />
         <p v-if="ended.summary?.cancelled" class="quiet">
           {{ rest.length ? `${plural(rest.length, "item")} not ${moving ? "moved" : "copied"} yet ${rest.length === 1 ? "stays where it was" : "stay where they were"}.` : "Everything chosen was done before it stopped." }}
         </p>
-        <p v-if="n.failed" class="bad">{{ plural(n.failed, "file") }} could not be {{ moving ? "moved, and stay" : "copied, and stay" }} where they were.</p>
-        <ul v-if="ended.summary?.failures.length" class="fails">
-          <li v-for="f in ended.summary.failures.slice(0, 3)" :key="f.path">{{ f.path }}: {{ f.reason }}</li>
-        </ul>
       </template>
-      <p v-if="t.problem.value" class="bad">{{ t.problem.value }}</p>
+      <PTrouble v-if="t.problem.value" :error="t.problem.value" :where="run.to" />
+    </div>
+
+    <div v-show="rows.length" ref="box" class="files" @touchstart.passive="hands" @wheel.passive="hands">
+      <div class="spacer" :style="{ height: `${rows.length * LINE}px` }">
+        <ul class="slice" :style="{ transform: `translateY(${span[0] * LINE}px)` }">
+          <li v-for="(r, i) in drawn" :key="`${span[0] + i}:${r.path}`" class="file" :class="{ going: isMoving(r.state) }">
+            <span class="mark" :class="MARK[markOf(r.state)]" aria-hidden="true">{{ GLYPH[markOf(r.state)] }}</span>
+            <span class="name">{{ nameOf(r.path) || r.path }}</span>
+            <span class="size">{{ bytes(r.size) }}</span>
+            <span v-if="isMoving(r.state)" class="meter">
+              <span class="bar" :class="{ checking: r.state === 'checking' }" role="progressbar" :aria-valuenow="percentOf(r)" aria-valuemin="0" aria-valuemax="100"><i :style="{ width: `${percentOf(r)}%` }"></i></span>
+              <span class="pc">{{ rowWord(r, run.op) }} <b>{{ percentOf(r) }}%</b></span>
+            </span>
+            <span v-else class="word" :class="{ failed: markOf(r.state) === 'failed' }">{{ rowWord(r, run.op) }}<template v-if="reasonOf(r)">: {{ reasonOf(r) }}</template></span>
+          </li>
+        </ul>
+      </div>
     </div>
 
     <div class="act">
@@ -129,24 +171,68 @@ function pause() {
 <style scoped>
 .screen { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 .keep { align-self: flex-start; min-height: 44px; margin: 0 20px; padding: 0; font: inherit; font-size: 17px; font-weight: 700; color: var(--text); background: none; border: 0; }
-.body { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; padding: 4px 20px 16px; }
-h1 { margin: 0; font-size: 32px; line-height: 1.08; font-weight: 800; letter-spacing: -0.6px; }
-.lead { margin: -10px 0 0; }
+.top { flex: none; display: flex; flex-direction: column; gap: 12px; padding: 4px 20px 12px; }
+h1 { margin: 0; font-size: 28px; line-height: 1.08; font-weight: 800; letter-spacing: -0.5px; }
+.lead { margin: -8px 0 0; }
 .quiet { font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
-.centre { text-align: center; }
-.centre .quiet { margin-top: 8px; }
-.big { font-size: 64px; font-weight: 800; letter-spacing: -1.5px; line-height: 0.95; }
-.art { margin-top: 6px; }
-.blocks { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; height: 34px; }
+.top > p.quiet { margin: 0; }
+.art { width: 200px; height: 100px; }
+.art.small { width: 140px; height: 70px; }
+.sum { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.big { font-size: 40px; font-weight: 800; letter-spacing: -1px; line-height: 1; }
+.blocks { display: grid; grid-template-columns: repeat(20, 1fr); gap: 3px; height: 26px; }
 .blocks i { border: 2px solid var(--edge); border-radius: 3px; background: var(--panel); }
 .blocks i.on { background: var(--tint-drain); }
-.stats { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
-.stats div { padding: 12px; border-right: 2px solid var(--edge); }
-.stats div:last-child { border-right: 0; }
-.stats b { display: block; font-size: 22px; font-weight: 800; }
-.stats span { font-size: 14px; color: var(--text-quiet); }
-.bad { margin: 0; font-size: 15px; font-weight: 700; color: var(--bad); }
-.fails { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.4; color: var(--text-quiet); }
+/* The next block to fill blinks, in whole steps like the pixels. */
+.blocks i.lead { animation: blink 1s steps(1) infinite; }
+@keyframes blink { 50% { background: var(--tint-drain); } }
+.counts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 15px; color: var(--text-quiet); }
+.counts b { font-size: 17px; font-weight: 800; color: var(--text); }
+.counts .failed b { color: var(--bad); }
+
+/* The files: one list, every line one height (LINE). */
+.files { flex: 1; min-height: 0; overflow-y: auto; margin: 0 20px; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
+.spacer { position: relative; }
+.slice { margin: 0; padding: 0; list-style: none; will-change: transform; }
+.file { box-sizing: border-box; height: 60px; display: grid; grid-template-columns: 24px minmax(0, 1fr) auto; grid-template-rows: auto auto; align-content: center; column-gap: 10px; row-gap: 4px; padding: 0 12px; border-top: 2px solid var(--rule); }
+.file:first-child { border-top: 0; }
+/* A file on its way is raised, as on the desktop's Transfer. */
+.file.going { background: var(--surface-raised); }
+.mark { grid-row: 1 / 3; align-self: center; width: 22px; height: 22px; display: grid; place-items: center; font-size: 13px; font-weight: 900; line-height: 1; border: 2px solid var(--edge); border-radius: 5px; }
+.m-waiting { border-color: var(--text-faint); }
+.m-sending { color: var(--accent-ink); background: var(--accent); animation: beat 0.9s steps(2) infinite; }
+.m-checking { color: var(--warn-ink); background: var(--ok); animation: beat 0.9s steps(2) infinite; }
+.m-done { color: var(--warn-ink); background: var(--ok); }
+.m-same { color: var(--text); background: var(--surface-hover); }
+.m-held { color: var(--warn-ink); background: var(--hold); }
+.m-failed { color: var(--warn-ink); background: var(--bad); }
+@keyframes beat { 50% { opacity: 0.55; } }
+.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 15px; font-weight: 700; }
+.size { font-size: 13px; color: var(--text-faint); white-space: nowrap; }
+.word { grid-column: 2 / -1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; color: var(--text-quiet); }
+.word.failed { color: var(--bad); font-weight: 700; }
+.meter { grid-column: 2 / -1; display: flex; align-items: center; gap: 10px; }
+.bar { flex: 1; height: 10px; background: var(--surface); border: 2px solid var(--edge); border-radius: 3px; overflow: hidden; }
+/* Stripes that travel along the filled part, as on the desktop: the file is
+   moving even while its number has not changed. */
+.bar i {
+  display: block;
+  height: 100%;
+  background-color: var(--accent);
+  background-image: repeating-linear-gradient(-45deg, transparent 0 6px, color-mix(in srgb, var(--accent-ink) 28%, transparent) 6px 12px);
+  background-size: 17px 100%;
+  animation: travel 0.9s linear infinite;
+  transition: width 0.3s ease-out;
+}
+/* Checking reads it back from where it went: "it arrived" green, so it is
+   not mistaken for a copy going backwards. */
+.bar.checking i { background-color: var(--ok); }
+@keyframes travel { to { background-position: 17px 0; } }
+.pc { flex: none; font-size: 13px; color: var(--text-quiet); white-space: nowrap; }
+.pc b { color: var(--text); }
+@media (prefers-reduced-motion: reduce) {
+  .bar i, .m-sending, .m-checking, .blocks i.lead { animation: none; }
+}
 .act { flex: none; padding: 10px 20px 12px; }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .col { display: flex; flex-direction: column; gap: 12px; }

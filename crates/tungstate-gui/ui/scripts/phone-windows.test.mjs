@@ -1,6 +1,7 @@
-// The phone's window tabs: where a storage or connection opens, and what
-// closing one leaves in front. The store is module-level, so each test starts
-// from one tab on Files home; node runs a file's tests one after another.
+// The phone's window tabs: home stays home, where a connection or card opens,
+// and what closing one leaves in front. The store is module-level, so each
+// test starts from the home tab alone on Files home; node runs a file's tests
+// one after another.
 import { test, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 
@@ -18,74 +19,99 @@ beforeEach(() => {
   w.go({ kind: "home" });
 });
 
-test("a storage opened from a blank tab takes that tab", () => {
-  w.openTab(folder("/storage/emulated/0"));
-  assert.deepEqual(places(), ["/storage/emulated/0"]);
+test("a connection opened from home gets its own tab, and home stays home", () => {
+  w.openTab(folder("Area51:"));
+  assert.deepEqual(places(), ["home", "Area51:"]);
+  assert.equal(w.active.value, 1);
 });
 
-test("each storage and connection gets a tab of its own", () => {
-  w.openTab(folder("/storage/emulated/0"));
-  w.openTab(folder("Area51:"));
-  assert.deepEqual(places(), ["/storage/emulated/0", "Area51:"]);
-  assert.equal(w.active.value, 1);
+test("home itself goes into the phone's storage", () => {
+  w.go(folder("/storage/emulated/0"));
+  w.openTab(folder("FTP-Photos:"));
+  assert.deepEqual(places(), ["/storage/emulated/0", "FTP-Photos:"]);
 });
 
 test("opening a place already in a tab goes back to that tab, where it was", () => {
-  w.openTab(folder("/storage/emulated/0"));
-  w.go(folder("/storage/emulated/0/DCIM"));
   w.openTab(folder("Area51:"));
   w.go(folder("Area51:Photos/2026"));
-  w.openTab(folder("/storage/emulated/0"));
-  assert.equal(w.active.value, 0);
-  assert.equal(w.win.value.place.path, "/storage/emulated/0/DCIM", "left where it was");
+  w.switchTo(0);
+  w.openTab(folder("FTP-Photos:"));
+  w.switchTo(0);
   w.openTab(folder("Area51:"));
   assert.equal(w.active.value, 1);
-  assert.equal(w.wins.value.length, 2);
+  assert.equal(w.win.value.place.path, "Area51:Photos/2026", "left where it was");
+  assert.equal(w.wins.value.length, 3);
 });
 
-test("a card is not mistaken for internal storage by a shared prefix", () => {
-  w.openTab(folder("/storage/emulated/0"));
-  w.openTab(folder("/storage/emulated/01"));
-  assert.equal(w.wins.value.length, 2);
-});
-
-test("with every tab open, a new place opens in the current one", () => {
-  w.openTab(folder("/a"));
-  for (const p of ["/b", "/c", "/d", "/e"]) w.openTab(folder(p));
-  assert.equal(w.wins.value.length, w.max);
+test("a blank tab from + takes what is opened in it, even a place open elsewhere", () => {
   w.openTab(folder("Area51:"));
+  w.newTab();
+  w.openTab(folder("Area51:"));
+  assert.deepEqual(places(), ["home", "Area51:", "Area51:"], "two tabs on one place, to copy between its folders");
+  assert.equal(w.active.value, 2);
+});
+
+test("a folder deep in a connection reuses only a tab already in that folder", () => {
+  w.openTab(folder("Area51:"));
+  w.switchTo(0);
+  w.openTab(folder("Area51:Photos"));
+  assert.equal(w.wins.value.length, 3, "Area51's top is not inside Photos");
+  w.switchTo(0);
+  w.openTab(folder("Area51:Photos"));
+  assert.equal(w.active.value, 2);
+  assert.equal(w.wins.value.length, 3);
+});
+
+test("a card is not mistaken for another volume by a shared prefix", () => {
+  w.openTab(folder("/storage/1A2B"));
+  w.switchTo(0);
+  w.openTab(folder("/storage/1A2B-3C"));
+  assert.equal(w.wins.value.length, 3);
+});
+
+test("with every tab open, the last one gives way, never home", () => {
+  for (const p of ["A:", "B:", "C:", "D:"]) {
+    w.switchTo(0);
+    w.openTab(folder(p));
+  }
   assert.equal(w.wins.value.length, w.max);
-  assert.equal(w.win.value.place.path, "Area51:");
+  w.switchTo(0);
+  w.openTab(folder("E:"));
+  assert.deepEqual(places(), ["home", "A:", "B:", "C:", "E:"]);
+  assert.equal(w.active.value, 4);
+  w.switchTo(2);
+  w.openTab(folder("F:"));
+  assert.equal(places()[2], "F:", "from a tab in use, that tab gives way");
   w.newTab();
   assert.equal(w.wins.value.length, w.max, "+ does nothing when full");
 });
 
 test("+ opens Files home in a new tab", () => {
-  w.openTab(folder("/a"));
+  w.openTab(folder("A:"));
   w.newTab();
-  assert.deepEqual(places(), ["/a", "home"]);
-  assert.equal(w.active.value, 1);
+  assert.deepEqual(places(), ["home", "A:", "home"]);
+  assert.equal(w.active.value, 2);
 });
 
 test("closing a tab before the current one keeps the same tab in front", () => {
-  w.openTab(folder("/a"));
-  w.openTab(folder("/b"));
-  w.openTab(folder("/c"));
-  w.switchTo(1);
-  w.close(0);
-  assert.equal(w.win.value.place.path, "/b");
-  w.switchTo(1);
+  for (const p of ["A:", "B:", "C:"]) {
+    w.switchTo(0);
+    w.openTab(folder(p));
+  }
+  w.switchTo(2);
+  w.close(1);
+  assert.equal(w.win.value.place.path, "B:");
+  w.switchTo(2);
   w.close(w.active.value);
-  assert.equal(w.win.value.place.path, "/b", "closing the last tab shows the one before");
+  assert.equal(w.win.value.place.path, "B:", "closing the last tab shows the one before");
   w.close(0);
-  assert.equal(w.wins.value.length, 1, "the last tab never closes");
+  assert.equal(w.wins.value.length, 2, "home never closes");
 });
 
 test("after a connection's folder changes, its tabs go back to its top", () => {
+  w.go(folder("/storage/emulated/0/DCIM"));
   w.openTab(folder("Area51:"));
   w.go(folder("Area51:Photos/2026"));
-  w.openTab(folder("/storage/emulated/0"));
-  w.go(folder("/storage/emulated/0/DCIM"));
   w.rehome("Area51:");
-  assert.deepEqual(places(), ["Area51:", "/storage/emulated/0/DCIM"], "other tabs stay where they are");
+  assert.deepEqual(places(), ["/storage/emulated/0/DCIM", "Area51:"], "other tabs stay where they are");
 });

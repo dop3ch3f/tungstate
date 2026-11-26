@@ -93,9 +93,12 @@ function playTransfer(req: T.TransferRequest) {
     await emit("transfer://job", job);
     await emit("transfer://planned", files);
     const finish = how === "run" ? Math.ceil(files.length / 2) : how === "paused" ? 1 : files.length;
-    for (const f of files.slice(0, finish)) {
+    // `?fail`: the second file fails. As in the engine, its reason comes in
+    // the run's summary, not on the file's own event.
+    for (const [i, f] of files.slice(0, finish).entries()) {
       await emit("transfer://started", { path: f.path, size: f.size });
-      await emit("transfer://finished", { path: f.path, outcome: "transferred", detail: null });
+      const failed = params.has("fail") && i === 1;
+      await emit("transfer://finished", { path: f.path, outcome: failed ? "failed" : "transferred", detail: null });
     }
     if (how === "run" && files[finish]) {
       await emit("transfer://started", { path: files[finish].path, size: files[finish].size });
@@ -103,7 +106,7 @@ function playTransfer(req: T.TransferRequest) {
       if (params.has("identical")) await emit("transfer://identical", { path: files[finish].path, size: files[finish].size });
     }
     if (how !== "run") {
-      await emit("transfer://done", { job: 7, transferred: finish, already_present: 0, skipped: 0, quarantined: 0, failed: 0, bytes: 0, recovered: 0, pruned: 0, cancelled: how === "paused", destination_lost: false, failures: [] });
+      await emit("transfer://done", { job: 7, transferred: finish, already_present: 0, skipped: 0, quarantined: 0, failed: 0, bytes: 0, recovered: 0, pruned: 0, cancelled: how === "paused", destination_lost: false, failures: params.has("fail") && files[1] ? [{ path: files[1].path, reason: "the server closed the connection part-way" }] : [] });
     }
   }, 30);
 }

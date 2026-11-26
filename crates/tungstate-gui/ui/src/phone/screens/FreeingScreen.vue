@@ -12,6 +12,7 @@ import { usePhotos } from "../state/usePhotos";
 import PScreen from "../ui/PScreen.vue";
 import PButton from "../ui/PButton.vue";
 import PScene from "../ui/PScene.vue";
+import PTrouble from "../ui/PTrouble.vue";
 
 const run = useFreeUp();
 const lib = usePhotos();
@@ -69,7 +70,7 @@ function done() {
   <PScreen :title="title">
     <div class="stack">
       <template v-if="run.phase.value !== 'done'">
-        <PScene of="send" class="art" />
+        <PScene of="send" moving class="art" />
         <div class="centre">
           <div class="big">{{ bytes(run.tick.value?.bytes ?? 0) }}</div>
           <div class="quiet">{{ sub }}</div>
@@ -126,8 +127,8 @@ function done() {
           {{ plural(run.ran.value.kept, "other stays", "others stay") }} on this phone: {{ run.ran.value.kept === 1 ? "it was" : "they were" }} not checked on {{ run.asked.value?.connection }}{{ run.ran.value.stopped ? " before you stopped" : "" }}.
         </p>
         <p v-if="run.ran.value?.reason && run.ran.value.kept" class="quiet">{{ run.ran.value.kept === 1 ? "Why" : "Why the first stayed" }}: {{ run.ran.value.reason }}.</p>
-        <p v-if="run.ran.value?.checked && run.ran.value?.problem" class="bad">{{ run.ran.value.problem }}</p>
-        <p v-if="run.problem.value" class="bad">{{ run.problem.value }}</p>
+        <PTrouble v-if="run.ran.value?.checked && run.ran.value?.problem" :error="run.ran.value.problem" />
+        <PTrouble v-if="run.problem.value" :error="run.problem.value" />
       </template>
     </div>
 
@@ -169,7 +170,6 @@ function done() {
 .wait { margin-top: 8px; font-size: 20px; font-weight: 800; }
 .plain { color: var(--text); background: var(--panel); }
 .box { padding: 16px; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
-.bad { margin: 0; font-size: 15px; font-weight: 700; color: var(--bad); }
 .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
 .col { display: flex; flex-direction: column; gap: 12px; }
 </style>

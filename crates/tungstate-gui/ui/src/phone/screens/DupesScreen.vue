@@ -18,6 +18,7 @@ import PPlaces from "../ui/PPlaces.vue";
 import PScreen from "../ui/PScreen.vue";
 import PSheet from "../ui/PSheet.vue";
 import PThumb from "../ui/PThumb.vue";
+import PTrouble from "../ui/PTrouble.vue";
 
 const d = useDupes();
 const store = useStorage();
@@ -130,8 +131,8 @@ const progressLine = computed(() => {
 
 <template>
   <!-- Choosing where. -->
-  <PScreen v-if="d.phase.value === 'start'" title="Duplicates">
-    <p v-if="d.problem.value" class="line bad">{{ d.problem.value }}</p>
+  <PScreen v-if="d.phase.value === 'start'" title="Duplicates" :tile="{ art: 'dupes', tint: 'var(--tint-dupes)', light: true }">
+    <PTrouble v-if="d.problem.value" :error="d.problem.value" />
     <p v-if="said" class="line">{{ said }}</p>
     <p v-if="d.putBackCount.value !== null" class="line good">Put {{ plural(d.putBackCount.value, "file") }} back where they were.</p>
     <h2>Look in</h2>
@@ -175,7 +176,7 @@ const progressLine = computed(() => {
     <p v-if="groups.length" class="line">{{ bytes(tickedBytes) }}. ★ is the copy that stays. Tap a copy to change what's cleared.</p>
     <p v-else class="line">Nothing in {{ where ? placeName(where, store.tops.value) : "there" }} is a copy of anything else.</p>
     <p v-if="said" class="line">{{ said }}</p>
-    <p v-if="d.problem.value" class="line bad">{{ d.problem.value }}</p>
+    <PTrouble v-if="d.problem.value" :error="d.problem.value" />
     <div v-for="row in groups.slice(0, shown)" :key="row.id" class="list group">
       <div class="gh"><b>{{ row.copies.find((c) => c.keep)?.name ?? row.copies[0]?.name }}</b><span class="num">{{ claimLine(row) }}</span></div>
       <button v-for="c in row.copies" :key="c.path" class="copy" :class="{ sel: ticked.has(c.path), kept: !ticked.has(c.path) }" @click="toggle(row, c)">
@@ -196,7 +197,7 @@ const progressLine = computed(() => {
   <PScreen v-else title="Cleared" back="Duplicates" @back="d.again()">
     <p class="line good">{{ plural(d.cleared.value?.files ?? 0, "copy", "copies") }}, {{ bytes(d.cleared.value?.bytes ?? 0) }}, are in the holding folder.</p>
     <p v-if="d.cleared.value?.dropped" class="line">{{ plural(d.cleared.value.dropped, "group") }} turned out not to be identical when checked, so they were left alone.</p>
-    <p v-if="d.cleared.value?.failed.length" class="line bad">{{ plural(d.cleared.value.failed.length, "file") }} could not be moved: {{ d.cleared.value.failed.slice(0, 3).join(", ") }}</p>
+    <PTrouble v-if="d.cleared.value?.failed.length" :error="`${plural(d.cleared.value.failed.length, 'file')} could not be moved: ${d.cleared.value.failed.slice(0, 3).join(', ')}`" />
     <p class="line">Empty the holding folder from Duplicates to free the space for good.</p>
     <template #act>
       <div class="pair">
@@ -213,7 +214,6 @@ h2:first-of-type { margin-top: 0; }
 .line { margin: 0 2px 12px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
 .path { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .good { color: var(--ok); font-weight: 700; }
-.bad { color: var(--bad); font-weight: 700; }
 .list { overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
 .toggle { display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 12px 14px; font: inherit; text-align: left; color: var(--text); }
 .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; }

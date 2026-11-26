@@ -1,6 +1,7 @@
-<!-- The clipboard, riding along while you browse to where it goes: what is
-     held, and "Move here" once a folder that can take it is open. Shown on
-     Files home too, so a held Move is never out of sight. -->
+<!-- The clipboard, riding along in every tab while you go to where it goes:
+     what is held, and "Copy here" or "Move here" once a folder that can take
+     it is open, in any tab, even another on the same storage. Shown on Files
+     home too, so a held Move is never out of sight. -->
 <script setup lang="ts">
 import { computed } from "vue";
 import { bytes } from "../../lib/format";
@@ -20,7 +21,7 @@ const fromHere = computed(() => {
 const line = computed(() => {
   const held = board.clip.value!;
   if (!props.folder) return "Open a folder to put them in";
-  return fromHere.value ? "They are in this folder; open another" : `${bytes(held.bytes)} from ${held.from}`;
+  return fromHere.value ? "Go to another tab or folder to put them there" : `${bytes(held.bytes)} from ${held.from}`;
 });
 </script>
 

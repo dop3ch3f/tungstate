@@ -1,6 +1,7 @@
 <!-- Files home: the phone's storage first, then its files by kind, your
-     connections, and where you were lately. A storage or a connection opens
-     in a tab of its own; a kind of file or a recent folder opens in this one.
+     connections, and where you were lately. The phone's own storage and its
+     kinds of file open in this tab; a connection or a card opens in a tab of
+     its own, so the home tab is never taken over.
      Matches docs/mobile/approved-files/home.png. Until All files access is
      on, it asks for that instead: without it there is nothing to show. -->
 <script setup lang="ts">
@@ -8,7 +9,7 @@ import { computed, onMounted } from "vue";
 import { bytes } from "../../lib/format";
 import { useConnections } from "../../state/useConnections";
 import { usePhoneNav } from "../nav";
-import { CATEGORIES } from "../lib/look";
+import { CARD_LOOK, CATEGORIES, HOME_LOOK, PHONE_LOOK, connectionLook } from "../lib/look";
 import { connectionOf, nameOf, parentOf, topOf } from "../lib/paths";
 import { useStorage } from "../state/useStorage";
 import { useDiscovery } from "../state/useDiscovery";
@@ -19,6 +20,7 @@ import { useWindows } from "../state/useWindows";
 import PButton from "../ui/PButton.vue";
 import PTile from "../ui/PTile.vue";
 import ClipBar from "./ClipBar.vue";
+import PTrouble from "../ui/PTrouble.vue";
 
 const store = useStorage();
 const conns = useConnections();
@@ -35,6 +37,14 @@ function add(found: FoundServer) {
   net.adding.value = found;
   nav.go("connections");
 }
+
+/** Off the phone's own storage: a connection, or a removable card. */
+function elsewhere(path: string): boolean {
+  if (connectionOf(path) !== null) return true;
+  const top = topOf(path, store.volumes.value);
+  return !!top && "removable" in top && top.removable;
+}
+const open = (path: string) => (elsewhere(path) ? w.openTab : w.go)({ kind: "folder", path });
 
 const reachable = computed(() => conns.all.value.filter((c) => c.scheme !== "fs"));
 const used = (v: { total: number; free: number }) => (v.total ? Math.round(((v.total - v.free) / v.total) * 100) : 0);
@@ -59,10 +69,11 @@ function within(path: string): string {
 <template>
   <section class="home">
     <div class="head">
+      <PTile v-bind="HOME_LOOK" :size="38" />
       <h1>Files</h1>
     </div>
     <div class="body">
-      <p v-if="store.problem.value" class="line bad">{{ store.problem.value }}</p>
+      <PTrouble v-if="store.problem.value" :error="store.problem.value" />
 
       <div v-if="store.access.value && store.access.value !== 'full'" class="card">
         <PTile art="folder" tint="var(--tint-home)" :size="48" />
@@ -75,8 +86,8 @@ function within(path: string): string {
       </div>
 
       <div v-if="store.volumes.value.length" class="list">
-        <button v-for="v in store.volumes.value" :key="v.path" class="row" @click="w.openTab({ kind: 'folder', path: v.path })">
-          <PTile :art="v.removable ? 'sd' : 'phone'" :tint="v.removable ? '#a5a79d' : 'var(--tint-home)'" :size="40" />
+        <button v-for="v in store.volumes.value" :key="v.path" class="row" @click="open(v.path)">
+          <PTile v-bind="v.removable ? CARD_LOOK : PHONE_LOOK" :size="40" />
           <span class="text">
             <b>{{ v.label }}</b>
             <span v-if="v.total" class="meter" aria-hidden="true"><i :style="{ width: `${used(v)}%` }"></i></span>
@@ -99,8 +110,8 @@ function within(path: string): string {
 
       <h2>Connections</h2>
       <div class="conns">
-        <button v-for="c in reachable" :key="c.name" class="conn" @click="w.openTab({ kind: 'folder', path: `${c.name}:` })">
-          <PTile art="nas" tint="var(--tint-connections)" light :size="32" />{{ c.name }}
+        <button v-for="c in reachable" :key="c.name" class="conn" @click="open(`${c.name}:`)">
+          <PTile v-bind="connectionLook(c.scheme)" :size="32" />{{ c.name }}
         </button>
         <button class="conn add" @click="nav.go('connections')">+ Add</button>
       </div>
@@ -122,7 +133,7 @@ function within(path: string): string {
       <template v-if="store.recent.value.length">
         <h2>Recent</h2>
         <div class="list">
-          <button v-for="p in store.recent.value" :key="p" class="row tight" @click="w.go({ kind: 'folder', path: p })">
+          <button v-for="p in store.recent.value" :key="p" class="row tight" @click="open(p)">
             <PThumb :name="titleOf(p)" :path="p" is-dir :size="34" />
             <span class="text"><b>{{ titleOf(p) }}</b><span class="quiet">{{ within(p) }}</span></span>
             <span class="chev" aria-hidden="true">›</span>
@@ -136,12 +147,10 @@ function within(path: string): string {
 
 <style scoped>
 .home { flex: 1; min-height: 0; display: flex; flex-direction: column; }
-.head { flex: none; display: flex; align-items: center; justify-content: space-between; padding: 10px 20px 12px; }
+.head { flex: none; display: flex; align-items: center; gap: 12px; padding: 10px 20px 12px; }
 h1 { margin: 0; font-size: 32px; line-height: 1.08; font-weight: 800; letter-spacing: -0.6px; }
 h2 { margin: 16px 0 8px; font-size: 15px; font-weight: 800; }
 .body { flex: 1; min-height: 0; overflow-y: auto; padding: 0 20px 20px; }
-.line { margin: 4px 2px 12px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
-.bad { color: var(--bad); font-weight: 700; }
 .quiet { font-size: 14px; color: var(--text-quiet); }
 .card { display: flex; flex-direction: column; gap: 12px; margin-bottom: 14px; padding: 18px; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
 .card b { font-size: 19px; }

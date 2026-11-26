@@ -15,6 +15,7 @@ import { nameOf } from "../lib/paths";
 import PButton from "../ui/PButton.vue";
 import PPlaces from "../ui/PPlaces.vue";
 import PScreen from "../ui/PScreen.vue";
+import PTrouble from "../ui/PTrouble.vue";
 
 type Phase = "start" | "layouts" | "preview" | "running" | "done";
 const phase = ref<Phase>("start");
@@ -116,8 +117,8 @@ const exampleOf = (o: Outcome) => (o.example ? `${nameOf(o.example.from)} → ${
 </script>
 
 <template>
-  <PScreen v-if="phase === 'start'" title="Organise">
-    <p v-if="problem" class="line bad">{{ problem }}</p>
+  <PScreen v-if="phase === 'start'" title="Organise" :tile="{ art: 'organise', tint: 'var(--tint-folder)', light: true }">
+    <PTrouble v-if="problem" :error="problem" />
     <p v-if="said" class="line good">{{ said }}</p>
     <h2>Folder</h2>
     <PPlaces v-model="root" wanted="organise" />
@@ -138,7 +139,7 @@ const exampleOf = (o: Outcome) => (o.example ? `${nameOf(o.example.from)} → ${
 
   <PScreen v-else-if="phase === 'layouts'" title="How to sort it" :back="name" @back="phase = 'start'">
     <p class="line">Each way, tried on {{ name }} without moving anything.</p>
-    <p v-if="problem" class="line bad">{{ problem }}</p>
+    <PTrouble v-if="problem" :error="problem" />
     <div class="list">
       <button v-for="o in outcomes" :key="o.name" class="pick" :class="{ on: layout === o.name }" @click="layout = o.name">
         <span class="radio" :class="{ on: layout === o.name }" aria-hidden="true"></span>
@@ -156,7 +157,7 @@ const exampleOf = (o: Outcome) => (o.example ? `${nameOf(o.example.from)} → ${
   </PScreen>
 
   <PScreen v-else-if="phase === 'preview' && preview" :title="name" :back="outcomes.length ? 'How to sort it' : 'Organise'" @back="phase = outcomes.length ? 'layouts' : 'start'">
-    <p v-if="problem" class="line bad">{{ problem }}</p>
+    <PTrouble v-if="problem" :error="problem" />
     <template v-if="preview.files">
       <p class="line">{{ plural(preview.files, "loose file") }}, {{ bytes(preview.bytes) }}, would go into these folders.</p>
       <div class="list">
@@ -170,7 +171,7 @@ const exampleOf = (o: Outcome) => (o.example ? `${nameOf(o.example.from)} → ${
       <p class="line note">Only files inside {{ name }} move. Put back undoes all of it.</p>
     </template>
     <p v-else class="line">{{ name }} is already organised. Nothing would move.</p>
-    <p v-if="!preview.settles" class="line bad">These rules would keep moving the same files, so Tungstate won't run them.</p>
+    <PTrouble v-if="!preview.settles" error="These rules would keep moving the same files, so Tungstate won't run them." />
     <template #act>
       <PButton tint="var(--tint-folder)" :busy="busy" :disabled="!preview.files || !preview.settles" @press="run">Organise {{ plural(preview.files, "file") }}</PButton>
     </template>
@@ -183,7 +184,7 @@ const exampleOf = (o: Outcome) => (o.example ? `${nameOf(o.example.from)} → ${
   <PScreen v-else title="Organised" back="Organise" @back="phase = 'start'">
     <p class="line good">{{ done?.already_tidy ? `${name} was already organised.` : `Moved ${plural(done?.moved ?? 0, "file")} into folders in ${name}.` }}</p>
     <p v-if="done?.skipped" class="line">{{ plural(done.skipped, "file") }} changed while Tungstate looked, so it was left where it was.</p>
-    <p v-if="done?.failed" class="line bad">{{ plural(done.failed, "file") }} could not be moved.</p>
+    <PTrouble v-if="done?.failed" :error="`${plural(done.failed, 'file')} could not be moved.`" />
     <template #act>
       <div class="pair">
         <PButton v-if="plan !== null && root" quiet :busy="busy" @press="putBack(root, plan!)">Put back</PButton>
@@ -199,7 +200,6 @@ h2:first-of-type { margin-top: 0; }
 .line { margin: 0 2px 12px; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
 .note { margin-top: 12px; }
 .good { color: var(--ok); font-weight: 700; }
-.bad { color: var(--bad); font-weight: 700; }
 .list { overflow: hidden; background: var(--panel); border: 2px solid var(--edge); border-radius: 8px; }
 .row { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-top: 2px solid var(--edge); }
 .row:first-child { border-top: 0; }

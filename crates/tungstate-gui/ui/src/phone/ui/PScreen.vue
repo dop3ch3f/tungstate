@@ -1,7 +1,12 @@
 <!-- One phone screen: an optional back link, a large title, a scrolling body,
-     and the main action pinned in the thumb zone above the tabs. -->
+     and the main action pinned in the thumb zone above the tabs. A section's
+     first screen carries its colour square by the title, as the desktop's
+     windows do in their title bars. -->
 <script setup lang="ts">
-defineProps<{ title: string; back?: string }>();
+import type { Look } from "../lib/look";
+import PTile from "./PTile.vue";
+
+defineProps<{ title: string; back?: string; tile?: Look }>();
 defineEmits<{ back: [] }>();
 </script>
 
@@ -10,6 +15,7 @@ defineEmits<{ back: [] }>();
     <div class="top">
       <button v-if="back" class="back" @click="$emit('back')">‹ {{ back }}</button>
       <div class="head">
+        <PTile v-if="tile" v-bind="tile" :size="38" />
         <h1>{{ title }}</h1>
         <slot name="corner" />
       </div>
@@ -33,7 +39,7 @@ defineEmits<{ back: [] }>();
   border: 0;
 }
 .head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 4px 0 14px; }
-h1 { font-size: 32px; line-height: 1.08; font-weight: 800; letter-spacing: -0.6px; margin: 0; overflow-wrap: anywhere; }
+h1 { flex: 1; font-size: 32px; line-height: 1.08; font-weight: 800; letter-spacing: -0.6px; margin: 0; overflow-wrap: anywhere; }
 .body { flex: 1; min-height: 0; overflow-y: auto; padding: 2px 20px 20px; -webkit-overflow-scrolling: touch; }
 .act { flex: none; padding: 10px 20px 12px; }
 </style>

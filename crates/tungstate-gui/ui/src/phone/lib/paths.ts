@@ -47,10 +47,10 @@ export interface Top {
 
 /** The deepest top holding `path`, so `/storage/emulated/0/DCIM` is under
  *  Internal storage and not under `/`. A connection is its own top. */
-export function topOf(path: string, tops: Top[]): Top | null {
+export function topOf<T extends Top>(path: string, tops: T[]): T | Top | null {
   const conn = connectionOf(path);
   if (conn !== null) return { label: conn, path: `${conn}:` };
-  let best: Top | null = null;
+  let best: T | null = null;
   for (const t of tops) {
     const root = t.path.replace(/\/+$/, "");
     if ((path === root || path.startsWith(`${root}/`)) && (!best || root.length > best.path.length)) best = t;
