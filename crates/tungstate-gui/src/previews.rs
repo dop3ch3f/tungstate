@@ -78,8 +78,8 @@ impl Previews {
         }
     }
 
-    /// Forgets the open backend for a connection, after its password changes
-    /// or it is removed.
+    /// Forgets the open backend for a connection, after its settings or
+    /// password change or it is removed.
     pub fn forget(&self, connection: &str) {
         if let Ok(mut open) = self.backends.lock() {
             open.remove(connection);

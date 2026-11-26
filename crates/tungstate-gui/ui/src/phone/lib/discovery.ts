@@ -34,12 +34,23 @@ export function portFor(found: FoundServer, kind: FoundKind): number | null {
 /** A connection name from what the server calls itself, fitted to the name
  *  rule (letters, numbers, - and _; two or more), and not one already taken. */
 export function nameFor(found: FoundServer, taken: string[]): string {
-  const fitted = (found.name ?? "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/[^A-Za-z0-9_-]/g, "")
-    .slice(0, 40);
-  const base = fitted.length >= 2 ? fitted : `NAS-${found.address.split(".").pop()}`;
+  const fitted = fit(found.name ?? "");
+  return untaken(fitted.length >= 2 ? fitted : `NAS-${found.address.split(".").pop()}`, taken);
+}
+
+/** A name for one folder on a server, `Area51-Photos`: a server can hold a
+ *  connection per folder, told apart by the folder. `/` adds nothing. */
+export function nameForFolder(server: string, folder: string, taken: string[]): string {
+  const leaf = fit(folder.replace(/\/+$/, "").split("/").pop() ?? "");
+  const base = fit(server) || "FTP";
+  return untaken(leaf ? `${base}-${leaf}`.slice(0, 40) : base, taken);
+}
+
+/** Text fitted to the name rule's letters: letters, numbers, - and _. */
+const fit = (raw: string) => raw.trim().replace(/\s+/g, "-").replace(/[^A-Za-z0-9_-]/g, "").slice(0, 40);
+
+/** `base`, or `base-2`, `base-3`… the first one nobody has, ignoring case. */
+function untaken(base: string, taken: string[]): string {
   const lower = new Set(taken.map((t) => t.toLowerCase()));
   if (!lower.has(base.toLowerCase())) return base;
   for (let n = 2; ; n++) if (!lower.has(`${base}-${n}`.toLowerCase())) return `${base}-${n}`;

@@ -149,6 +149,10 @@ export const connections = {
    *  connection's own password is used. */
   testSettings: (form: T.ConnectionForm, secret: string | null) =>
     invoke<T.Probe>("test_settings", { form, secret }),
+  /** The folders inside `path` on settings not saved yet, by name. Without a
+   *  secret, a saved connection's own password is used. Only lists. */
+  folders: (form: T.ConnectionForm, secret: string | null, path: string) =>
+    invoke<string[]>("settings_folders", { form, secret, path }),
   /** What would stop these settings working, one sentence each. */
   problems: (form: T.ConnectionForm) => invoke<string[]>("settings_problems", { form }),
   uses: (name: string) => invoke<T.ConnectionUses>("connection_uses", { name }),

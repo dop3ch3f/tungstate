@@ -1,27 +1,35 @@
 <!-- Add a connection. From a server found on the network, the kind, address
      and name are filled in and only the username and password are typed; by
      hand, a kind is chosen first. An SMB server lists its shares once signed
-     in to, so a share is picked rather than typed. FTP and SMB can sign in as
-     a guest where the server allows it. Nothing is saved until it has worked.
+     in to, so a share is picked rather than typed. FTP picks its folder the
+     same way, once signed in, since the server's own `/` rarely takes files;
+     each folder can be its own connection. FTP and SMB can sign in as a
+     guest where the server allows it. Nothing is saved until it has worked.
      The settings are built the way the desktop's form builds them, so a
      connection means the same thing on both.
 
      Not on the phone yet: SFTP sign-in with a key file, since a phone has
      no file path to point at. -->
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
+import { computed, ref, shallowRef, watch } from "vue";
 import { connections, network } from "../../engine/commands";
-import type { ConnectionForm, FoundServer, Probe } from "../../engine/types";
+import type { Connection, ConnectionForm, FoundServer, Probe } from "../../engine/types";
 import { KINDS, type Kind } from "../../lib/kinds";
 import { plural } from "../../lib/format";
 import { useConnections } from "../../state/useConnections";
-import { kindsOf, nameFor, portFor, type FoundKind } from "../lib/discovery";
+import { kindsOf, nameFor, nameForFolder, portFor, type FoundKind } from "../lib/discovery";
 import { useBack } from "../lib/back";
 import PScreen from "../ui/PScreen.vue";
 import PRow from "../ui/PRow.vue";
 import PButton from "../ui/PButton.vue";
+import PFolderPicker from "../ui/PFolderPicker.vue";
+import PTrouble from "../ui/PTrouble.vue";
 
-const props = defineProps<{ found?: FoundServer | null }>();
+const props = defineProps<{
+  found?: FoundServer | null;
+  /** A saved connection to add another folder of: same server and login. */
+  like?: Connection | null;
+}>();
 const emit = defineEmits<{ cancel: []; saved: [name: string] }>();
 const conns = useConnections();
 
@@ -35,6 +43,7 @@ const TAG: Record<FoundKind, string> = { smb: "SMB", sftp: "SFTP", webdav: "WebD
 const kind = ref<Kind | null>(null);
 const foundKind = ref<FoundKind | null>(null);
 const info = computed(() => CHOICES.find((k) => k.id === kind.value) ?? null);
+const isFtp = computed(() => kind.value === "ftp" || kind.value === "ftps");
 
 const name = ref("");
 const host = ref("");
@@ -54,6 +63,14 @@ const hostKey = ref("");
 const shares = ref<string[] | null>(null);
 /** The server would not list its shares, so the share is typed instead. */
 const typeShare = ref(false);
+/** FTP, signed in: choosing the folder, which starts at the server's top. */
+const browsing = ref(false);
+const folder = ref("/");
+const firstFolders = shallowRef<string[] | null>(null);
+/** The name last filled in for the person; a name they typed is kept. */
+const autoName = ref("");
+/** The server's part of an FTP connection's name, before the folder's. */
+let serverName = "";
 
 const busy = ref(false);
 const probe = ref<Probe | null>(null);
@@ -67,14 +84,14 @@ const typed = (e: Event) => (e.target as HTMLInputElement).value;
 const DEFAULT_NAME: Record<string, string> = { smb: "NAS", sftp: "NAS", webdav: "WebDAV", s3: "Bucket", ftp: "FTP", ftps: "FTP" };
 function choose(k: Kind) {
   kind.value = k;
-  name.value = DEFAULT_NAME[k] ?? "";
+  name.value = autoName.value = DEFAULT_NAME[k] ?? "";
 }
 
 /** Fills the form from a found server, for one of the kinds it offers. */
 function fromFound(f: FoundServer, k: FoundKind) {
   foundKind.value = k;
   kind.value = k === "webdavs" ? "webdav" : k;
-  name.value = nameFor(f, conns.all.value.map((c) => c.name));
+  name.value = autoName.value = nameFor(f, conns.all.value.map((c) => c.name));
   const p = portFor(f, k);
   host.value = f.address;
   port.value = p === null ? "" : String(p);
@@ -86,6 +103,16 @@ function fromFound(f: FoundServer, k: FoundKind) {
   typeShare.value = false;
 }
 watch(() => props.found, (f) => f && fromFound(f, kindsOf(f)[0]!), { immediate: true });
+// Another folder on a saved server: its address and login, but its password
+// is typed again, since each connection keeps its own in the keystore.
+watch(() => props.like, (c) => {
+  if (!c) return;
+  kind.value = c.scheme as Kind;
+  host.value = c.host ?? "";
+  port.value = c.port === null ? "" : String(c.port);
+  username.value = c.username ?? "";
+  name.value = autoName.value = c.name.split("-")[0] || c.name;
+}, { immediate: true });
 const offered = computed(() => (props.found ? [...new Map(kindsOf(props.found).map((k) => [TAG[k], k])).values()] : []));
 
 const canGuest = computed(() => kind.value === "smb" || kind.value === "ftp");
@@ -135,8 +162,9 @@ watch([kind, host, port, username, secret, guest, endpoint, bucket, region], () 
   probe.value = null;
   trouble.value = null;
   shares.value = null;
+  browsing.value = false;
 });
-watch([share, root, hostKey, name], () => {
+watch([share, root, hostKey, name, folder], () => {
   probe.value = null;
   trouble.value = null;
 });
@@ -171,6 +199,33 @@ async function listShares() {
   }
 }
 
+/** Signs in to an FTP server and lists its top, to choose a folder from. */
+async function openFolders() {
+  busy.value = true;
+  trouble.value = null;
+  try {
+    if (await refused()) return;
+    firstFolders.value = await connections.folders(form(), pass.value || null, "/");
+    serverName = name.value.trim();
+    folder.value = "/";
+    browsing.value = true;
+  } catch (e) {
+    trouble.value = String(e);
+  } finally {
+    busy.value = false;
+  }
+}
+
+/** The folder is chosen: name the connection after it, unless the person
+ *  named it themselves, then check and save. */
+async function useFolder() {
+  root.value = folder.value;
+  if (name.value.trim() === autoName.value) {
+    name.value = autoName.value = nameForFolder(serverName, folder.value, conns.all.value.map((c) => c.name));
+  }
+  await signIn();
+}
+
 /** Checks the settings work, then saves them. One press, as ES does. */
 async function signIn() {
   busy.value = true;
@@ -179,6 +234,12 @@ async function signIn() {
     probe.value = await connections.testSettings(form(), pass.value || null);
     // An SFTP server nobody has trusted yet: ask before going on.
     if (probe.value.server) return;
+    // Every send to it would fail at the first file; say so now, not then.
+    if (isFtp.value && probe.value.accepts_files === false) {
+      trouble.value = `${root.value} refuses files`;
+      probe.value = null;
+      return;
+    }
     await connections.add(form(), pass.value || null);
     emit("saved", form().name);
   } catch (e) {
@@ -196,6 +257,11 @@ async function trust() {
 
 /** The one main button: what pressing it does next. */
 const step = computed<{ label: string; run: () => void; ok: boolean }>(() => {
+  if (isFtp.value && !browsing.value) return { label: busy.value ? "Signing in…" : "Sign in", run: openFolders, ok: ready.value };
+  if (isFtp.value) {
+    const leaf = folder.value.replace(/\/+$/, "").split("/").pop();
+    return { label: busy.value ? "Checking…" : leaf ? `Use ${leaf}` : "Use the server's top", run: useFolder, ok: ready.value };
+  }
   if (kind.value === "smb" && shares.value === null && !typeShare.value) {
     return { label: busy.value ? "Signing in…" : "Sign in", run: listShares, ok: ready.value };
   }
@@ -203,10 +269,18 @@ const step = computed<{ label: string; run: () => void; ok: boolean }>(() => {
   return { label: busy.value ? "Checking…" : `Save${where}`, run: signIn, ok: ready.value && !needsShare.value };
 });
 
-const back = () => (props.found || !kind.value ? emit("cancel") : (kind.value = null));
+function back() {
+  if (browsing.value) return void (browsing.value = false);
+  if (props.found || props.like || !kind.value) return emit("cancel");
+  kind.value = null;
+}
 // Android's back steps out of the form, as its own back link does.
 useBack(() => (back(), true));
-const title = computed(() => (props.found ? `Add ${props.found.name ?? props.found.address}` : info.value?.label ?? "Add a connection"));
+const title = computed(() => {
+  if (browsing.value) return "Choose a folder";
+  if (props.like) return "Add another folder";
+  return props.found ? `Add ${props.found.name ?? props.found.address}` : info.value?.label ?? "Add a connection";
+});
 const NAME_HINT = "Letters, numbers, - and _; at least two.";
 const ftpWarning = computed(() => {
   if (kind.value !== "ftp") return null;
@@ -224,9 +298,9 @@ const ftpWarning = computed(() => {
     </div>
   </PScreen>
 
-  <PScreen v-else :title="title" :back="found ? 'Connections' : 'Kinds'" @back="back">
-    <p v-if="found" class="line">Found on your network.</p>
-    <div v-if="offered.length > 1" class="seg" role="group" aria-label="Kind">
+  <PScreen v-else :title="title" :back="browsing ? 'Sign-in' : found || like ? 'Connections' : 'Kinds'" @back="back">
+    <p v-if="found && !browsing" class="line">Found on your network.</p>
+    <div v-if="offered.length > 1 && !browsing" class="seg" role="group" aria-label="Kind">
       <button v-for="k in offered" :key="k" :class="{ on: foundKind === k }" @click="fromFound(found!, k)">{{ TAG[k] }}</button>
     </div>
 
@@ -240,6 +314,14 @@ const ftpWarning = computed(() => {
       </div>
       <div class="fields gap">
         <label class="field"><span>Folder inside it <em>optional</em></span><input :value="root" autocapitalize="off" autocorrect="off" spellcheck="false" @input="root = typed($event)" /></label>
+        <label class="field"><span>Name in Tungstate <em>{{ NAME_HINT }}</em></span><input :value="name" autocapitalize="off" autocorrect="off" spellcheck="false" @input="name = typed($event)" /></label>
+      </div>
+    </template>
+
+    <!-- The folder step: signed in to FTP, now choose where it opens. -->
+    <template v-else-if="isFtp && browsing">
+      <PFolderPicker v-model="folder" :form="form()" :secret="pass || null" :where="host.trim() || 'the server'" :first="firstFolders" />
+      <div class="fields gap">
         <label class="field"><span>Name in Tungstate <em>{{ NAME_HINT }}</em></span><input :value="name" autocapitalize="off" autocorrect="off" spellcheck="false" @input="name = typed($event)" /></label>
       </div>
     </template>
@@ -274,12 +356,12 @@ const ftpWarning = computed(() => {
       </template>
 
       <label v-if="kind === 'smb' && typeShare" class="field"><span>Share</span><input :value="share" placeholder="Media" autocapitalize="off" autocorrect="off" spellcheck="false" @input="share = typed($event)" /></label>
-      <label v-if="kind !== 'smb'" class="field"><span>Folder <em>optional</em></span><input :value="root" autocapitalize="off" autocorrect="off" spellcheck="false" @input="root = typed($event)" /></label>
-      <label v-if="!found || kind !== 'smb'" class="field"><span>Name in Tungstate <em>{{ NAME_HINT }}</em></span><input :value="name" autocapitalize="off" autocorrect="off" spellcheck="false" @input="name = typed($event)" /></label>
+      <label v-if="kind !== 'smb' && !isFtp" class="field"><span>Folder <em>optional</em></span><input :value="root" autocapitalize="off" autocorrect="off" spellcheck="false" @input="root = typed($event)" /></label>
+      <label v-if="(!found || kind !== 'smb') && !isFtp" class="field"><span>Name in Tungstate <em>{{ NAME_HINT }}</em></span><input :value="name" autocapitalize="off" autocorrect="off" spellcheck="false" @input="name = typed($event)" /></label>
     </div>
 
-    <p v-if="ftpWarning" class="note">{{ ftpWarning }}</p>
-    <p v-else-if="!found" class="about">{{ info.line }}</p>
+    <p v-if="ftpWarning && !browsing" class="note">{{ ftpWarning }}</p>
+    <p v-else-if="!found && !browsing" class="about">{{ info.line }}</p>
 
     <template #act>
       <div v-if="probe?.server" class="trust">
@@ -288,11 +370,13 @@ const ftpWarning = computed(() => {
         <p>It identifies itself as <code>{{ probe.server.fingerprint }}</code>. Compare it with what your server shows before trusting it.</p>
         <PButton quiet @press="trust">Trust this server</PButton>
       </div>
-      <p v-else-if="trouble" class="line bad">{{ trouble }}</p>
+      <PTrouble v-else-if="trouble" :error="trouble" :where="host.trim() || name.trim() || 'the server'" />
       <p v-else-if="probe" class="line good">
         Reached it. {{ plural(probe.entries, "item") }} there{{ probe.accepts_files === false ? ", but it won't accept new files with these details." : "." }}
       </p>
       <p v-else-if="kind === 'smb' && shares === null && !typeShare" class="line">Tungstate lists the server's shares once you're signed in.</p>
+      <p v-else-if="isFtp && !browsing" class="line">Once you're signed in, you choose the folder it opens in.</p>
+      <p v-else-if="isFtp" class="line">For another folder on this server, add it again.</p>
       <p v-else class="line">Your password stays in this phone's keystore.</p>
       <PButton v-if="!probe?.server" tint="var(--tint-connections)" :busy="busy" :disabled="!step.ok" @press="step.run">{{ step.label }}</PButton>
     </template>
@@ -347,7 +431,6 @@ const ftpWarning = computed(() => {
 .about { margin: 14px 2px 0; font-size: 15px; line-height: 1.4; color: var(--text-quiet); }
 .note { margin: 14px 0 0; padding: 14px 16px; font-size: 15px; line-height: 1.4; background: var(--warn-bar); border: 2px solid var(--edge); border-radius: 8px; }
 .good { color: var(--ok); font-weight: 700; }
-.bad { color: var(--bad); font-weight: 700; }
 .trust { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; padding: 14px 16px; background: var(--warn-bar); border: 2px solid var(--edge); border-radius: 8px; }
 .trust b { font-size: 16px; }
 .trust p { margin: 0; font-size: 15px; line-height: 1.4; }

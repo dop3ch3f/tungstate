@@ -29,7 +29,18 @@ const area51: T.Connection = {
   root: "PlexMediaServer", options: {}, encrypted: false, networked: true, rootless: null, clear: null,
   place: "area51.local › PlexMediaServer", last_check: { at: Date.now() - 3_600_000, ok: true, note: "" },
 };
-let saved: T.Connection[] = params.has("none") ? [] : [area51];
+// `?ftp`: also an FTP connection saved before folders were chosen.
+const oldFtp: T.Connection = {
+  ...area51, name: "Area51-FTP", scheme: "ftp", root: "", place: "area51.local",
+  last_check: { at: Date.now() - 60_000, ok: false, note: "/ lists but refuses files" },
+};
+let saved: T.Connection[] = params.has("none") ? [] : params.has("ftp") ? [area51, oldFtp] : [area51];
+/** An FTP server's folders, as `settings_folders` lists them. */
+const FTP_TREE: Record<string, string[]> = {
+  "/": ["bin", "etc", "home", "srv", "usr", "var"],
+  "/home": ["kennedy", "media"],
+  "/home/kennedy": ["Backups", "Phone", "Photos"],
+};
 let checked = 0;
 let photoAccess: T.PhotoAccess = (params.get("photos") as T.PhotoAccess | null) ?? "full";
 
@@ -129,6 +140,7 @@ mockIPC((cmd, args) => {
     case "resolve_identical": return null;
     case "start_transfer": playTransfer(a.request as T.TransferRequest); return { started: true, waiting: 0, job: 7 } satisfies T.Accepted;
     case "settings_problems": return [];
+    case "settings_folders": return FTP_TREE[String(a.path)] ?? [];
     case "test_settings": return { entries: 3, root: "PlexMediaServer", names: ["Media", "Phone", "Backups"], accepts_files: true, server: null } satisfies T.Probe;
     case "add_connection": {
       const f = a.form as T.ConnectionForm;
@@ -234,6 +246,8 @@ if (second) {
   useWindows().second({ kind: "folder", path: second });
   useWindows().switchTo(0);
 }
+// `?tabs=PATH|PATH…`: more tabs, each opened as a storage or connection is.
+for (const path of (params.get("tabs") ?? "").split("|").filter(Boolean)) useWindows().openTab({ kind: "folder", path });
 createApp(PhoneApp).mount("#app");
 
 const settle = () => new Promise((r) => setTimeout(r, 120));
@@ -241,7 +255,8 @@ const settle = () => new Promise((r) => setTimeout(r, 120));
 // mount, and a tap sent before it exists photographs the wrong screen.
 async function find(label: string): Promise<HTMLButtonElement | undefined> {
   for (let i = 0; i < 40; i++) {
-    const hit = Array.from(document.querySelectorAll("button")).find((b) => b.textContent?.includes(label));
+    // By its words, or by its name for one that is only an icon (⋯).
+    const hit = Array.from(document.querySelectorAll("button")).find((b) => b.getAttribute("aria-label") === label || b.textContent?.includes(label));
     if (hit) return hit;
     await settle();
   }

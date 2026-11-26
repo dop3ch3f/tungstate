@@ -1,9 +1,11 @@
-// The file windows: one, or two to swipe between, as ES File Explorer has.
+// The file windows, as tabs along the top the way ES File Explorer has them:
+// each storage and connection in its own, copy in one, paste in another.
 // Each holds where it is, how it lists, and what is ticked there.
 // Module-level, so the tab bar can step aside while a window is selecting.
 
 import { computed, reactive, ref } from "vue";
 import type { Category } from "../../engine/types";
+import { connectionOf } from "../lib/paths";
 import { storedView, type View } from "../lib/views";
 
 /** Where a window is: Files home, a folder, or one category tile's files. */
@@ -26,9 +28,9 @@ export interface Win {
   scrolled: Map<string, number>;
 }
 
-/** Two at most: a phone screen shows one, and the second is for a copy or a
- *  move between two places, which is the only reason ES users open more. */
-const MAX = 2;
+/** Enough for this phone, a card and a few connections; past that the strip
+ *  stops fitting a phone's width and the tabs stop being findable. */
+const MAX = 5;
 const VIEW_KEY = "tungstate.phone.view";
 const HIDDEN_KEY = "tungstate.phone.hidden";
 
@@ -69,16 +71,50 @@ function clearPicks() {
   win.value.picked = new Set();
 }
 
-/** Opens the second window, or switches to it if it is open. */
-function second(place: Place = { kind: "home" }) {
-  if (wins.value.length < MAX) wins.value = [...wins.value, fresh(place)];
-  else wins.value[1]!.place = place;
+/** Whether a window is somewhere inside `top`: a volume's folder, or a
+ *  connection (`Area51:`), anywhere down either. */
+function within(at: Place, top: string): boolean {
+  if (at.kind !== "folder") return false;
+  const conn = connectionOf(top);
+  if (conn !== null) return connectionOf(at.path) === conn;
+  const root = top.replace(/\/+$/, "");
+  return at.path === root || at.path.startsWith(`${root}/`);
+}
+
+/** Opens a storage or a connection in its own tab: the tab already in it if
+ *  there is one, else this tab when it is on Files home (a blank tab, as a
+ *  browser's new tab page is), else a new tab, else (all open) this one. */
+function openTab(place: Place) {
+  const top = place.kind === "folder" ? place.path : null;
+  const there = top === null ? -1 : wins.value.findIndex((x) => within(x.place, top));
+  if (there >= 0) return void (active.value = there);
+  if (win.value.place.kind === "home" || wins.value.length >= MAX) return go(place);
+  wins.value = [...wins.value, fresh(place)];
   active.value = wins.value.length - 1;
 }
 
+/** Sends every tab inside `top` back to it: after a connection's folder
+ *  changes, the folders those tabs were in mean something else. */
+function rehome(top: string) {
+  for (const x of wins.value) if (within(x.place, top)) x.place = { kind: "folder", path: top };
+}
+
+/** A new tab on Files home, as ES's "+" opens one. */
+function newTab() {
+  if (wins.value.length >= MAX) return;
+  wins.value = [...wins.value, fresh()];
+  active.value = wins.value.length - 1;
+}
+
+/** Older name for opening a place in a tab of its own; Free up and the
+ *  screenshot harness call it. */
+const second = (place: Place = { kind: "home" }) => openTab(place);
+
 function close(index: number) {
-  if (wins.value.length === 1) return;
+  if (wins.value.length === 1 || index < 0 || index >= wins.value.length) return;
   wins.value = wins.value.filter((_, i) => i !== index);
+  // A tab before the current one going shifts the current one down by one.
+  if (index < active.value) active.value -= 1;
   active.value = Math.min(active.value, wins.value.length - 1);
 }
 
@@ -93,5 +129,5 @@ function setView(view: View) {
 }
 
 export function useWindows() {
-  return { wins, active, win, selecting, hidden, setHidden, go, toggle, pickAll, clearPicks, second, close, switchTo, setView, max: MAX };
+  return { wins, active, win, selecting, hidden, setHidden, go, toggle, pickAll, clearPicks, openTab, newTab, rehome, second, close, switchTo, setView, max: MAX };
 }

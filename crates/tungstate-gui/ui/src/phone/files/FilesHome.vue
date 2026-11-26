@@ -1,5 +1,6 @@
 <!-- Files home: the phone's storage first, then its files by kind, your
-     connections, and where you were lately. Every tile opens a file window.
+     connections, and where you were lately. A storage or a connection opens
+     in a tab of its own; a kind of file or a recent folder opens in this one.
      Matches docs/mobile/approved-files/home.png. Until All files access is
      on, it asks for that instead: without it there is nothing to show. -->
 <script setup lang="ts">
@@ -74,7 +75,7 @@ function within(path: string): string {
       </div>
 
       <div v-if="store.volumes.value.length" class="list">
-        <button v-for="v in store.volumes.value" :key="v.path" class="row" @click="w.go({ kind: 'folder', path: v.path })">
+        <button v-for="v in store.volumes.value" :key="v.path" class="row" @click="w.openTab({ kind: 'folder', path: v.path })">
           <PTile :art="v.removable ? 'sd' : 'phone'" :tint="v.removable ? '#a5a79d' : 'var(--tint-home)'" :size="40" />
           <span class="text">
             <b>{{ v.label }}</b>
@@ -98,7 +99,7 @@ function within(path: string): string {
 
       <h2>Connections</h2>
       <div class="conns">
-        <button v-for="c in reachable" :key="c.name" class="conn" @click="w.go({ kind: 'folder', path: `${c.name}:` })">
+        <button v-for="c in reachable" :key="c.name" class="conn" @click="w.openTab({ kind: 'folder', path: `${c.name}:` })">
           <PTile art="nas" tint="var(--tint-connections)" light :size="32" />{{ c.name }}
         </button>
         <button class="conn add" @click="nav.go('connections')">+ Add</button>

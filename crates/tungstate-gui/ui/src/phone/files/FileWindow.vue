@@ -6,7 +6,7 @@
      (fetched first when it is on a connection).
 
      Copy and Move go on the clipboard, which rides along while you browse to
-     where they go; with two windows open, the other window is one tap. -->
+     where they go; with other tabs open on folders, each is one tap. -->
 <script lang="ts">
 import { makeShelf } from "../lib/shelf";
 import type { Entry } from "../../engine/types";
@@ -302,13 +302,10 @@ async function openElsewhere(e: Entry) {
 }
 
 // ── actions ──────────────────────────────────────────────────────────────
-/** The other window's folder, when there is one to send to. */
-const otherIndex = computed(() => (w.wins.value.length > 1 ? 1 - w.active.value : null));
-const otherFolder = computed(() => {
-  const i = otherIndex.value;
-  const at = i === null ? null : w.wins.value[i]!.place;
-  return at?.kind === "folder" ? at.path : null;
-});
+/** The other tabs open on a folder: each is somewhere to send to. */
+const others = computed(() =>
+  w.wins.value.flatMap((x, index) => (index !== w.active.value && x.place.kind === "folder" ? [{ index, folder: x.place.path }] : [])),
+);
 
 function startClip(op: Op, list = pickedEntries.value) {
   const sum = list.reduce((n, e) => n + (e.is_dir ? 0 : e.size), 0);
@@ -318,13 +315,11 @@ function startClip(op: Op, list = pickedEntries.value) {
 
 function copyOrMove(op: Op) {
   pending.value = op;
-  if (otherIndex.value !== null) sheet.value = "move";
+  if (others.value.length) sheet.value = "move";
   else startClip(op);
 }
 
-async function sendToOther() {
-  const to = otherFolder.value;
-  if (!to) return;
+async function sendToOther(to: string) {
   sheet.value = null;
   startClip(pending.value);
   await pasteInto(to);
@@ -437,7 +432,7 @@ const whereOf = (e: Entry) => {
   return up ? placeName(up, store.tops.value) : "";
 };
 
-// Swipe sideways on the list to change window, once there are two.
+// Swipe sideways on the list to change tab, once there are two.
 let from: { x: number; y: number } | null = null;
 function swipeStart(e: PointerEvent) {
   from = { x: e.clientX, y: e.clientY };
@@ -612,8 +607,6 @@ const progress = (e: Entry) => (fetching.value?.path === e.path ? fetching.value
       <div class="options">
         <button v-if="folder" class="option" @click="askName('new')">New folder</button>
         <button v-if="folder" class="option" :class="{ on: w.hidden.value }" @click="w.setHidden(!w.hidden.value); sheet = null">Show hidden files</button>
-        <button v-if="w.wins.value.length < w.max" class="option" @click="sheet = null; w.second()">Open a second window</button>
-        <button v-else class="option" @click="sheet = null; w.close(w.active.value)">Close this window</button>
         <button class="option" @click="sheet = null; reload()">Refresh</button>
       </div>
     </PSheet>
@@ -662,9 +655,9 @@ const progress = (e: Entry) => (fetching.value?.path === e.path ? fetching.value
       :says="pending === 'move' ? 'Each is sent, read back and checked before the original is removed.' : 'Each copy is read back and checked.'"
       @close="sheet = null"
     >
-      <button class="opt main" :disabled="!otherFolder" @click="sendToOther">
-        <span class="num">{{ (otherIndex ?? 0) + 1 }}</span>
-        <span class="grow"><b>{{ pending === "move" ? "Move" : "Copy" }} to window {{ (otherIndex ?? 0) + 1 }}</b><span class="q">{{ otherFolder ? placeName(otherFolder, store.tops.value) : "Open a folder there first" }}</span></span>
+      <button v-for="(o, i) in others" :key="o.index" class="opt" :class="{ main: i === 0 }" @click="sendToOther(o.folder)">
+        <span class="num"><Pixels :of="connectionOf(o.folder) === null ? 'phone' : 'nas'" :size="20" /></span>
+        <span class="grow"><b>{{ pending === "move" ? "Move" : "Copy" }} to {{ placeName(o.folder, store.tops.value) }}</b><span class="q">The tab you have open there</span></span>
         <span class="chev" aria-hidden="true">›</span>
       </button>
       <button class="opt" @click="sheet = null; startClip(pending)">

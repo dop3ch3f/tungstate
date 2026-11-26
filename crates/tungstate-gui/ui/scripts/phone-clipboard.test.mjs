@@ -64,8 +64,6 @@ test("ticking is per window, and a second window opens beside the first", () => 
   assert.equal(w.selecting.value, false, "the new window has nothing ticked");
   w.switchTo(0);
   assert.equal(w.win.value.picked.size, 1);
-  w.second();
-  assert.equal(w.wins.value.length, 2, "never more than two");
   w.close(1);
   assert.equal(w.wins.value.length, 1);
   assert.equal(w.active.value, 0);

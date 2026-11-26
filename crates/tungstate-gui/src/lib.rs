@@ -1440,7 +1440,10 @@ fn update_connection(
     state
         .journal
         .update_connection(&name, &form.checked()?)
-        .map_err(describe)
+        .map_err(describe)?;
+    // The open backend still points where the old settings did.
+    state.previews.forget(&name);
+    Ok(())
 }
 
 /// What would stop these settings working, one sentence each. Empty when
@@ -1534,8 +1537,34 @@ fn test_connection(name: String, state: State<'_, App>) -> Result<ProbeView, Str
 /// typed, the one already in the keychain. Nothing is written anywhere.
 #[tauri::command(async)]
 fn test_settings(form: ConnectionForm, secret: Option<String>) -> Result<ProbeView, String> {
+    let connection = unsaved(&form)?;
+    with_secret(&connection, secret, |store| probe_view(&connection, store))
+}
+
+/// The folders inside `path` on a server whose settings are not saved yet,
+/// sorted by name, for a folder to be chosen before saving.
+///
+/// What the phone's FTP form lists after sign-in: an FTP connection with no
+/// folder starts at the server's own `/`, which rarely takes files, so one
+/// is picked and saved with the connection instead. Only lists; nothing is
+/// written.
+#[tauri::command(async)]
+fn settings_folders(
+    form: ConnectionForm,
+    secret: Option<String>,
+    path: String,
+) -> Result<Vec<String>, String> {
+    let connection = unsaved(&ConnectionForm { root: path, ..form })?;
+    let listed = with_secret(&connection, secret, |store| {
+        tungstate_backend_opendal::probe(&connection, store).map_err(describe)
+    })?;
+    Ok(folder_names(&listed))
+}
+
+/// A connection built from a form, checked but not saved.
+fn unsaved(form: &ConnectionForm) -> Result<Connection, String> {
     let settings = form.checked()?;
-    let connection = Connection {
+    Ok(Connection {
         id: tungstate_journal::ConnectionId(0),
         name: form.name.trim().to_string(),
         scheme: settings.scheme,
@@ -1546,16 +1575,38 @@ fn test_settings(form: ConnectionForm, secret: Option<String>) -> Result<ProbeVi
         options: settings.options,
         created_at: 0,
         last_check: None,
-    };
+    })
+}
+
+/// Runs `go` with the password typed into a form, held in memory only, or,
+/// when none was typed, with the keychain (a saved connection's own).
+fn with_secret<T>(
+    connection: &Connection,
+    secret: Option<String>,
+    go: impl FnOnce(&dyn SecretStore) -> Result<T, String>,
+) -> Result<T, String> {
     match secret.filter(|typed| !typed.is_empty()) {
         Some(typed) => {
             let held = tungstate_secret::MemoryStore::new();
             held.set(&connection_key(&connection.name), &typed)
                 .map_err(describe)?;
-            probe_view(&connection, &held)
+            go(&held)
         }
-        None => probe_view(&connection, &secrets()),
+        None => go(&secrets()),
     }
+}
+
+/// The names of the folders in a listing, sorted as a person reads them.
+fn folder_names(listed: &[tungstate_backend::Entry]) -> Vec<String> {
+    let mut names: Vec<String> = listed
+        .iter()
+        .filter(|entry| entry.meta.is_dir)
+        .filter_map(|entry| entry.path.file_name())
+        .map(|name| name.to_string_lossy().into_owned())
+        .collect();
+    // `sort_by_cached_key` lowercases each name once, not once per comparison.
+    names.sort_by_cached_key(|name| name.to_lowercase());
+    names
 }
 
 /// List a connection's root, and ask whether it takes a file.
@@ -3206,6 +3257,7 @@ pub fn run() {
             remove_from_queue,
             settings_problems,
             test_settings,
+            settings_folders,
             trust_server,
             connection_uses,
             governed,
@@ -3317,6 +3369,41 @@ mod tests {
                 .detail
                 .starts_with(&JournalError::NoStateDir.to_string())
         );
+    }
+
+    /// A form for a folder on this machine: it lists the way a server does,
+    /// through the same factory, without one.
+    fn here() -> ConnectionForm {
+        ConnectionForm {
+            name: "here".to_string(),
+            scheme: "fs".to_string(),
+            host: None,
+            port: None,
+            username: None,
+            root: String::new(),
+            options: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn choosing_a_folder_lists_only_folders_in_name_order() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["photos", "Backups", "music"] {
+            std::fs::create_dir(dir.path().join(name)).unwrap();
+        }
+        std::fs::write(dir.path().join("notes.txt"), b"x").unwrap();
+
+        let got = settings_folders(here(), None, dir.path().display().to_string()).unwrap();
+
+        assert_eq!(got, ["Backups", "music", "photos"]);
+    }
+
+    #[test]
+    fn choosing_a_folder_that_is_not_there_says_so() {
+        let dir = tempfile::tempdir().unwrap();
+        let gone = dir.path().join("gone").display().to_string();
+
+        assert!(settings_folders(here(), None, gone).is_err());
     }
 
     fn leg(source: &str, destination: &str) -> Leg {
