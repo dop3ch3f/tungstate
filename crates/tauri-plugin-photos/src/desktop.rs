@@ -119,4 +119,28 @@ impl<R: Runtime> Photos<R> {
     pub fn keep_awake(&self, _on: bool) -> Result<()> {
         Err(Error::NoLibrary)
     }
+
+    /// # Errors
+    /// Always: a desktop app is not suspended in the background.
+    pub fn run_began(&self, _notice: &crate::Notice) -> Result<()> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always, as [`Photos::run_began`].
+    pub fn run_progress(&self, _notice: &crate::Notice) -> Result<bool> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always, as [`Photos::run_began`].
+    pub fn run_ended(&self) -> Result<()> {
+        Err(Error::NoLibrary)
+    }
+
+    /// # Errors
+    /// Always, as [`Photos::run_began`].
+    pub fn ask_notifications(&self) -> Result<()> {
+        Err(Error::NoLibrary)
+    }
 }

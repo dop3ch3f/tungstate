@@ -934,7 +934,7 @@ const scenes: Record<string, () => unknown> = {
   "drain-stranded": async () => {
     nav.go("drain");
     await tick();
-    t.stranded.value = [{ link: "videos-to-nas", source: `${DEMO}/to-drain`, destination: `${DEMO}/nas/incoming`, files: 2, bytes: 419_430_400, names: ["clip-2.mov", "clip-3.mov"] }];
+    t.stranded.value = [{ link: "videos-to-nas", source: `${DEMO}/to-drain`, destination: `${DEMO}/nas/incoming`, files: 2, bytes: 419_430_400, names: ["clip-2.mov", "clip-3.mov"], removes_originals: true }];
   },
   "drain-stopping": async () => {
     await scenes["drain-run"]!();

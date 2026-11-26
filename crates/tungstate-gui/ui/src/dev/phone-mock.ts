@@ -104,6 +104,8 @@ function playTransfer(req: T.TransferRequest) {
       await emit("transfer://started", { path: files[finish].path, size: files[finish].size });
       await emit("transfer://advanced", { path: files[finish].path, done: files[finish].size / 3, total: files[finish].size });
       if (params.has("identical")) await emit("transfer://identical", { path: files[finish].path, size: files[finish].size });
+      // `?wait`: the Wi-Fi dropped, and the copy waits for the NAS to answer.
+      if (params.has("wait")) await emit("transfer://waiting", { job: 7, since: Date.now() - 40_000 });
     }
     if (how !== "run") {
       await emit("transfer://done", { job: 7, transferred: finish, already_present: 0, skipped: 0, quarantined: 0, failed: 0, bytes: 0, recovered: 0, pruned: 0, cancelled: how === "paused", destination_lost: false, failures: params.has("fail") && files[1] ? [{ path: files[1].path, reason: "the server closed the connection part-way" }] : [] });
@@ -138,7 +140,12 @@ mockIPC((cmd, args) => {
     case "rename_entry": return String(a.path);
     case "delete_entries": return (a.paths as string[]).length;
     case "transfer_queue": return { running: null, waiting: [] } satisfies T.QueueView;
-    case "interrupted": return [];
+    // `?stranded`: a copy the phone closed Tungstate on, part-way.
+    case "interrupted":
+      return params.has("stranded")
+        ? [{ link: "browser-1-0", source: "/storage/emulated/0/DCIM/Camera", destination: "Area51 › Photos", files: 166, bytes: 3_400_000_000, names: ["IMG_2041.jpg"], removes_originals: false }] satisfies T.InterruptedRun[]
+        : [];
+    case "transfer_ledger": return { job: null, rows: [], waiting: null, ended: null } satisfies T.LedgerView;
     case "cancel_run": return null;
     case "resolve_identical": return null;
     case "start_transfer": playTransfer(a.request as T.TransferRequest); return { started: true, waiting: 0, job: 7 } satisfies T.Accepted;

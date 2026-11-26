@@ -125,6 +125,9 @@ export const transfers = {
   resume: (link: string) => invoke<T.Accepted>("resume_interrupted", { link }),
   /** Returns the bytes it freed. */
   discard: (link: string) => invoke<number>("discard_interrupted", { link }),
+  /** The engine's own account of the running transfer, for a window a phone
+   *  paused in the background. */
+  ledger: () => invoke<T.LedgerView>("transfer_ledger"),
 };
 
 export const links = {

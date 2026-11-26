@@ -1268,6 +1268,7 @@ impl Progress for CliProgress {
                 FileOutcome::Skipped(SkipReason::Conflict) => "skipped (name taken)",
                 FileOutcome::Quarantined => "quarantined",
                 FileOutcome::Failed => "FAILED (original left in place)",
+                FileOutcome::Carried => "already sent and checked before the interruption",
             }
         );
     }

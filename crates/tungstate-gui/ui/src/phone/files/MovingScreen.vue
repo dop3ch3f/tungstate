@@ -56,7 +56,10 @@ const title = computed(() => {
   const s = ended.value.summary;
   if (!s) return `${verb} stopped`;
   if (s.cancelled) return paused.value ? "Paused" : "Stopped";
-  return n.value.failed ? `${plural(n.value.checked, "item")} ${moving.value ? "moved" : "copied"}` : `${run.value.what} ${moving.value ? "moved" : "copied"}`;
+  if (n.value.failed) return `${plural(n.value.checked, "item")} ${moving.value ? "moved" : "copied"}`;
+  // Picked up again: its count is of the whole run, not of what was chosen.
+  if (run.value.resumed) return `${moving.value ? "Move" : "Copy"} finished`;
+  return `${run.value.what} ${moving.value ? "moved" : "copied"}`;
 });
 
 const rest = computed(() => (ended.value?.summary?.cancelled ? unfinished(run.value.paths, rows.value, nameOf) : []));
@@ -113,10 +116,13 @@ function pause() {
       <p class="quiet lead">To {{ run.to }}</p>
 
       <template v-if="!ended">
-        <PScene of="send" :moving="live" class="art" />
+        <PScene of="send" :moving="live && !t.waitingSince.value" class="art" />
+        <p v-if="live && t.waitingSince.value" class="waiting" role="status">
+          Waiting for {{ run.to }} to answer. It carries on by itself when the connection is back, even with the screen off.
+        </p>
         <div class="sum">
           <b class="big">{{ bytes(n.bytes) }}</b>
-          <span class="quiet">{{ queued ? "Waiting for the transfer before it to finish" : left === null ? `of ${bytes(n.total)}` : `of ${bytes(n.total)} · about ${duration(left)} left` }}</span>
+          <span class="quiet">{{ queued ? "Waiting for the transfer before it to finish" : !n.count ? "Getting ready…" : left === null ? `of ${bytes(n.total)}` : `of ${bytes(n.total)} · about ${duration(left)} left` }}</span>
         </div>
         <div class="blocks" aria-hidden="true"><i v-for="b in BLOCKS" :key="b" :class="{ on: b <= filled, lead: live && b === filled + 1 }"></i></div>
       </template>
@@ -186,6 +192,8 @@ h1 { margin: 0; font-size: 28px; line-height: 1.08; font-weight: 800; letter-spa
 /* The next block to fill blinks, in whole steps like the pixels. */
 .blocks i.lead { animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { background: var(--tint-drain); } }
+/* Not a failure: nothing is lost, it is only waiting. The warning bar's yellow. */
+.waiting { margin: 0; padding: 10px 12px; font-size: 15px; line-height: 1.4; font-weight: 700; color: var(--warn-ink); background: var(--warn-bar); border: 2px solid var(--warn-ink); border-radius: 8px; }
 .counts { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 15px; color: var(--text-quiet); }
 .counts b { font-size: 17px; font-weight: 800; color: var(--text); }
 .counts .failed b { color: var(--bad); }

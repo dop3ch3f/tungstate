@@ -20,6 +20,8 @@ import { useWindows } from "../state/useWindows";
 import PButton from "../ui/PButton.vue";
 import PTile from "../ui/PTile.vue";
 import ClipBar from "./ClipBar.vue";
+import ResumeCard from "./ResumeCard.vue";
+import { useTransfer } from "../../state/useTransfer";
 import PTrouble from "../ui/PTrouble.vue";
 
 const store = useStorage();
@@ -27,6 +29,7 @@ const conns = useConnections();
 const w = useWindows();
 const nav = usePhoneNav();
 const net = useDiscovery();
+const t = useTransfer();
 onMounted(() => {
   void store.load();
   void conns.load();
@@ -74,6 +77,8 @@ function within(path: string): string {
     </div>
     <div class="body">
       <PTrouble v-if="store.problem.value" :error="store.problem.value" />
+      <!-- Not while a transfer runs: its own unfinished work would be listed. -->
+      <ResumeCard v-if="!t.running.value" />
 
       <div v-if="store.access.value && store.access.value !== 'full'" class="card">
         <PTile art="folder" tint="var(--tint-home)" :size="48" />

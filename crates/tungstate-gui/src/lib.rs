@@ -18,6 +18,8 @@ mod dupes;
 mod fileops;
 mod following;
 mod freeup;
+mod keepalive;
+mod ledger;
 mod network;
 mod previews;
 mod sync;
@@ -42,6 +44,9 @@ use tungstate_journal::{
 };
 use tungstate_secret::{EnvOverride, KeyringStore, SecretStore, connection_key};
 use tungstate_transfer::{IdenticalAction, Stop, Summary, Transfer};
+
+use crate::bridge::lock_ledger;
+use crate::keepalive::Errand;
 
 use bridge::{Answer, ConflictChannel, EventProgress, Reply, WindowResolver};
 
@@ -88,6 +93,11 @@ struct App {
     gate: Mutex<()>,
     /// Free up space on a phone: its run, and what that run proved safe.
     freeup: freeup::FreeUp,
+    /// Every file of the transfer running now, kept beside its events for a
+    /// window shown again after a phone paused it (`transfer_ledger`).
+    ledger: Arc<Mutex<ledger::Ledger>>,
+    /// How the last transfer ended, for a window that missed its `done`.
+    ended: Mutex<Option<Ended>>,
 }
 
 /// Work waiting for a worker, and whether a worker is there to take it.
@@ -467,6 +477,9 @@ struct SummaryView {
     pruned: u64,
     cancelled: bool,
     destination_lost: bool,
+    /// The far side stopped answering, as opposed to turning out to be other
+    /// storage. Always with `destination_lost`.
+    unreachable: bool,
     failures: Vec<FailureView>,
 }
 
@@ -489,6 +502,7 @@ impl From<&Summary> for SummaryView {
             pruned: summary.pruned,
             cancelled: summary.cancelled,
             destination_lost: summary.destination_lost,
+            unreachable: summary.unreachable,
             failures: summary
                 .failures
                 .iter()
@@ -2482,6 +2496,8 @@ struct InterruptedView {
     /// The first few filenames, so the banner can say what rather than only
     /// how many.
     names: Vec<String>,
+    /// A Move rather than a Copy, so it can be called what it was.
+    removes_originals: bool,
 }
 
 #[tauri::command]
@@ -2504,6 +2520,7 @@ fn interrupted(state: State<'_, App>) -> Result<Vec<InterruptedView>, String> {
                         .map(|l| l.path.display().to_string())
                         .take(5)
                         .collect(),
+                    removes_originals: run.link.source_policy != SourcePolicy::Keep,
                 })
                 .collect()
         })
@@ -2792,6 +2809,7 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
     state.cancel.clear();
     let replies = state.conflicts.open();
     let cancel = Arc::clone(&state.cancel);
+    keepalive::ask_to_notify(app);
 
     let worker = app.clone();
     // The engine is synchronous and will block for as long as the drain takes.
@@ -2805,7 +2823,8 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
         // but restarting the app.
         let _guard = RunGuard(worker.clone());
         let mut resolver = WindowResolver::new(worker.clone(), replies, ConflictAction::Quarantine);
-        let mut progress = EventProgress::new(worker.clone());
+        let mut progress =
+            EventProgress::new(worker.clone()).with_ledger(Arc::clone(&state.ledger));
 
         // `next` is what ends the run: it hands back `None` only after it has
         // recorded that this worker is finished, under the lock that a
@@ -2817,14 +2836,38 @@ fn spawn_run(app: &AppHandle, links: Vec<String>) -> Result<Accepted, String> {
                 break;
             }
             *lock(&state.running_job) = Some(Arc::clone(&job));
-            // Every file event from here to this job's `done` or `error` is
-            // this job's, which is how the window keeps each in its own row.
-            let _ = worker.emit("transfer://job", JobView::of(&job, &state.journal));
-            announce_queue(&worker);
+            let view = JobView::of(&job, &state.journal);
+            // A phone keeps this going with the screen off; dropped with
+            // `progress` when the queue is done, or the thread panics.
+            progress.keep_alive(
+                &cancel,
+                Errand::transfer(view.removes_originals, &view.destination),
+            );
 
-            let (total, failure) = run_job(&job, &state, &mut resolver, &mut progress, &cancel);
+            let (total, failure) = loop {
+                lock_ledger(&state.ledger).begin(job.id);
+                // Every file event from here to this job's `done` or `error`
+                // is this job's, which is how the window keeps each in its own
+                // row. Sent again after a wait, which starts the window's
+                // ledger over for the run that picks up from the journal.
+                let _ = worker.emit("transfer://job", JobView::of(&job, &state.journal));
+                announce_queue(&worker);
+
+                let (total, failure) = run_job(&job, &state, &mut resolver, &mut progress, &cancel);
+                let waits = total.unreachable && may_wait_for(&job) && !cancel.asked();
+                if !waits || !wait_until_back(&worker, &job, &state, &cancel, &mut progress) {
+                    break (total, failure);
+                }
+            };
 
             *lock(&state.running_job) = None;
+            let ended = Ended {
+                job: job.id,
+                rows: lock_ledger(&state.ledger).finish(),
+                summary: failure.is_none().then(|| SummaryView::from(&total)),
+                problem: failure.clone(),
+            };
+            *lock(&state.ended) = Some(ended);
             let _ = match failure {
                 Some(message) => worker.emit(
                     "transfer://error",
@@ -2969,6 +3012,132 @@ struct JobFailed {
     message: String,
 }
 
+/// How a transfer ended, kept for a window that was not listening then.
+#[derive(Debug, Clone, Serialize)]
+struct Ended {
+    job: u64,
+    /// Every file as it ended, for a window that saw none of it end.
+    rows: Vec<ledger::LedgerRow>,
+    summary: Option<SummaryView>,
+    problem: Option<String>,
+}
+
+/// What the window asks for when it is shown again: the running transfer's
+/// files, whether it is waiting for a connection, and how the last one ended.
+#[derive(Debug, Serialize)]
+struct LedgerView {
+    job: Option<u64>,
+    rows: Vec<ledger::LedgerRow>,
+    /// Waiting since then, in milliseconds since the epoch.
+    waiting: Option<i64>,
+    ended: Option<Ended>,
+}
+
+/// The transfer as the engine knows it, for a window that a phone paused in
+/// the background and that may have missed its events.
+#[tauri::command]
+fn transfer_ledger(state: State<'_, App>) -> LedgerView {
+    let (job, rows, waiting) = {
+        let ledger = lock_ledger(&state.ledger);
+        (ledger.job(), ledger.rows().to_vec(), ledger.waiting())
+    };
+    LedgerView {
+        job,
+        rows,
+        waiting,
+        ended: lock(&state.ended).clone(),
+    }
+}
+
+/// Whether a run that lost an end may wait for it rather than end.
+///
+/// For a connection: it either answers again or it does not, and a NAS that
+/// comes back is the NAS. On a phone too, whose own storage cannot unmount.
+/// Never for a desktop folder: an unmounted volume's mount point comes back
+/// as an empty folder on the boot disk, and filling that is what the lost
+/// destination check exists to prevent.
+fn may_wait_for(job: &Job) -> bool {
+    cfg!(mobile)
+        || job
+            .links
+            .iter()
+            .all(|link| link.destination.connection.is_some())
+}
+
+/// How long a run waits for a connection to answer again before it ends as
+/// it would have: long enough for a router restart or a walk back into range.
+const WAIT_AT_MOST: std::time::Duration = std::time::Duration::from_mins(30);
+
+/// Waits for every end of `job` to answer again, asking at 5, 10, 20 and then
+/// every 30 seconds. True when they do; false on Stop or after
+/// [`WAIT_AT_MOST`]. The notification and the window say it is waiting
+/// meanwhile, and Stop on either is heard within a second.
+fn wait_until_back(
+    app: &AppHandle,
+    job: &Job,
+    state: &App,
+    cancel: &Arc<Stop>,
+    progress: &mut EventProgress,
+) -> bool {
+    let since = watching::now_millis();
+    lock_ledger(&state.ledger).wait(Some(since));
+    let _ = app.emit(
+        "transfer://waiting",
+        WaitingEvent {
+            job: job.id,
+            since: Some(since),
+        },
+    );
+    progress.pulse(true);
+
+    let began = std::time::Instant::now();
+    let mut gap = std::time::Duration::from_secs(5);
+    let back = loop {
+        // In small steps, so Stop is not left waiting behind a long sleep.
+        let until = std::time::Instant::now() + gap;
+        while std::time::Instant::now() < until {
+            if cancel.asked() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            progress.pulse(false);
+        }
+        if cancel.asked() || began.elapsed() >= WAIT_AT_MOST {
+            break false;
+        }
+        let answers = |end: &Endpoint| {
+            backend_for(end, &state.journal).is_ok_and(|backend| backend.root_token().is_ok())
+        };
+        if job
+            .links
+            .iter()
+            .all(|link| answers(&link.source) && answers(&link.destination))
+        {
+            tracing::info!(job = job.id, "both ends answer again; carrying on");
+            break true;
+        }
+        gap = (gap * 2).min(std::time::Duration::from_secs(30));
+    };
+
+    lock_ledger(&state.ledger).wait(None);
+    let _ = app.emit(
+        "transfer://waiting",
+        WaitingEvent {
+            job: job.id,
+            since: None,
+        },
+    );
+    back
+}
+
+/// A transfer waiting for a connection to answer, or (`since: None`) done
+/// waiting.
+#[derive(Debug, Clone, Serialize)]
+struct WaitingEvent {
+    job: u64,
+    since: Option<i64>,
+}
+
 /// Transfers waiting to run, and the one running.
 #[tauri::command]
 fn transfer_queue(state: State<'_, App>) -> QueueView {
@@ -3019,6 +3188,7 @@ fn accumulate(total: &mut Summary, leg: Summary) {
     total.pruned += leg.pruned;
     total.cancelled |= leg.cancelled;
     total.destination_lost |= leg.destination_lost;
+    total.unreachable |= leg.unreachable;
     total.failures.extend(leg.failures);
 }
 
@@ -3140,6 +3310,8 @@ fn new_app(journal: Journal, watcher: Arc<watching::Watching>) -> App {
         following: following::Following::default(),
         gate: Mutex::new(()),
         freeup: freeup::FreeUp::default(),
+        ledger: Arc::default(),
+        ended: Mutex::new(None),
     }
 }
 
@@ -3329,6 +3501,7 @@ pub fn run() {
             quarantined,
             interrupted,
             resume_interrupted,
+            transfer_ledger,
             discard_interrupted,
             list_connections,
             add_connection,

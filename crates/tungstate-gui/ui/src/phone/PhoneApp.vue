@@ -4,7 +4,7 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch, type Component } from "vue";
 import { onBackButtonPress, exit } from "@tauri-apps/api/app";
-import { attachTransferStream, useTransfer } from "../state/useTransfer";
+import { attachTransferStream, catchUp, useTransfer } from "../state/useTransfer";
 import { phone } from "../engine/commands";
 import { addStep, stepBack } from "./lib/back";
 import { isAndroid } from "./platform";
@@ -76,9 +76,21 @@ const removeBase = addStep(() => {
   return false;
 });
 let unlistenBack: { unregister: () => Promise<void> } | undefined;
+// Shown again after the phone had it in the background or locked: the
+// engine's events may have gone unseen meanwhile, so take its own account.
+// A copy the phone closed Tungstate on shows up then too, with Resume.
+function shownAgain() {
+  if (document.visibilityState !== "visible") return;
+  void catchUp();
+  if (!t.running.value) void t.refreshStranded();
+}
+
 onMounted(async () => {
   window.addEventListener("resize", measure);
-  void attachTransferStream();
+  document.addEventListener("visibilitychange", shownAgain);
+  await attachTransferStream();
+  void catchUp();
+  void t.refreshStranded();
   void readInsets();
   if (!isAndroid()) return;
   try {
@@ -95,6 +107,7 @@ onMounted(async () => {
 });
 onUnmounted(() => {
   window.removeEventListener("resize", measure);
+  document.removeEventListener("visibilitychange", shownAgain);
   removeBase();
   void unlistenBack?.unregister();
 });

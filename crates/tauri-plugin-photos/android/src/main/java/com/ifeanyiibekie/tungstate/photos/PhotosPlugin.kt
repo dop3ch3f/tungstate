@@ -80,6 +80,16 @@ class AwakeArgs {
 }
 
 @InvokeArg
+class NoticeArgs {
+  var title: String = ""
+  var text: String = ""
+  var permille: Int = 0
+  var waiting: Boolean = false
+
+  fun notice() = Notice(title, text, permille, waiting)
+}
+
+@InvokeArg
 class ShrinkArgs {
   lateinit var path: String
   var size: Int = 256
@@ -148,6 +158,11 @@ private class Row(
 )
 class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
   private val alias = if (Build.VERSION.SDK_INT >= 33) "media" else "storage"
+
+  override fun load(webView: android.webkit.WebView) {
+    super.load(webView)
+    TransferKeeper.clearStale(activity)
+  }
 
   // Commands arrive on the main thread. Reading the library and copying out
   // of it can take a while, so it happens here, one job at a time.
@@ -658,6 +673,50 @@ class PhotosPlugin(private val activity: Activity) : Plugin(activity) {
     drawable.setBounds(0, 0, size, size)
     drawable.draw(Canvas(bitmap))
     return bitmap
+  }
+
+  /** A transfer the person started has begun: keep it going with the screen
+   *  off or the app in the background (TransferKeeper), and show it. */
+  @Command
+  fun runBegan(invoke: Invoke) {
+    val args = invoke.parseArgs(NoticeArgs::class.java)
+    try {
+      TransferKeeper.begin(activity, args.notice())
+      invoke.resolve()
+    } catch (e: Exception) {
+      invoke.reject(e.message ?: "could not keep the transfer going")
+    }
+  }
+
+  /** Shows how far, and answers `stop: true` if Stop was pressed there. */
+  @Command
+  fun runProgress(invoke: Invoke) {
+    val args = invoke.parseArgs(NoticeArgs::class.java)
+    val ret = JSObject()
+    ret.put("stop", TransferKeeper.update(activity, args.notice()))
+    invoke.resolve(ret)
+  }
+
+  @Command
+  fun runEnded(invoke: Invoke) {
+    TransferKeeper.end(activity)
+    invoke.resolve()
+  }
+
+  /** Asks to show notifications (13 and later), once, at the first transfer.
+   *  Answers at once: the transfer does not wait on the person's choice. */
+  @Command
+  fun askNotifications(invoke: Invoke) {
+    if (Build.VERSION.SDK_INT >= 33 && !granted(Manifest.permission.POST_NOTIFICATIONS)) {
+      val prefs = activity.getSharedPreferences("tungstate-photos", android.content.Context.MODE_PRIVATE)
+      if (!prefs.getBoolean("asked-notifications", false)) {
+        prefs.edit().putBoolean("asked-notifications", true).apply()
+        activity.runOnUiThread {
+          androidx.core.app.ActivityCompat.requestPermissions(activity, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 4711)
+        }
+      }
+    }
+    invoke.resolve()
   }
 
   /** Keeps the screen on while a run is open, so the phone does not lock on it. */

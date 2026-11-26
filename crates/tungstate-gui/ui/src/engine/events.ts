@@ -37,6 +37,8 @@ export const transferEvents = {
   identical: on<T.IdenticalAsk>("transfer://identical"),
   done: on<T.JobDone>("transfer://done"),
   error: on<T.JobFailed>("transfer://error"),
+  /** Waiting for a connection to answer again, and done waiting. */
+  waiting: on<T.Waiting>("transfer://waiting"),
 };
 
 /** A sync's run: the same file events a transfer sends, under `sync://`, and

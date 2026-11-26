@@ -4,16 +4,19 @@
 //! blocks. Everything here exists to let those two live together.
 
 use std::path::Path;
-use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, Sender, channel};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use serde::Serialize;
 use tauri::{AppHandle, Emitter};
 use tungstate_journal::ConflictAction;
+
+use crate::keepalive::{Errand, Keepalive};
+use crate::ledger::Ledger;
 use tungstate_transfer::{
     Conflict, ConflictResolver, FileOutcome, Identical, IdenticalAction, Original, Progress,
-    RunShape, SkipReason,
+    RunShape, SkipReason, Stop,
 };
 
 /// What the run turned out to be, before any of it happens.
@@ -80,6 +83,11 @@ pub struct EventProgress {
     /// `transfer` or `sync`: the two runs are shown in different sections
     /// and may be going at once, so each has its own stream of events.
     stream: &'static str,
+    /// The same events, kept for a window shown again and for a phone's
+    /// notification. Transfers only.
+    ledger: Option<Arc<Mutex<Ledger>>>,
+    /// Keeps a phone's transfer going in the background, while one runs.
+    keepalive: Option<Keepalive>,
 }
 
 impl EventProgress {
@@ -87,6 +95,8 @@ impl EventProgress {
         Self {
             app,
             stream: "transfer",
+            ledger: None,
+            keepalive: None,
         }
     }
 
@@ -95,7 +105,44 @@ impl EventProgress {
         Self {
             app,
             stream: "sync",
+            ledger: None,
+            keepalive: None,
         }
+    }
+
+    /// Keep every event in `ledger` as well.
+    #[must_use]
+    pub fn with_ledger(mut self, ledger: Arc<Mutex<Ledger>>) -> Self {
+        self.ledger = Some(ledger);
+        self
+    }
+
+    /// Keep the phone's transfer going for `errand`, or retitle the one
+    /// already kept going when the queue moves to the next transfer.
+    pub fn keep_alive(&mut self, stop: &Arc<Stop>, errand: Errand) {
+        match &mut self.keepalive {
+            Some(keep) => keep.retitle(errand),
+            None => self.keepalive = Some(Keepalive::begin(&self.app, Arc::clone(stop), errand)),
+        }
+    }
+
+    /// Tells the notification how far, at most once a second unless `now`.
+    pub fn pulse(&mut self, now: bool) {
+        let (Some(keep), Some(ledger)) = (&mut self.keepalive, &self.ledger) else {
+            return;
+        };
+        let (counts, waiting) = {
+            let ledger = lock_ledger(ledger);
+            (ledger.counts(), ledger.waiting().is_some())
+        };
+        keep.pulse(&counts, waiting, now);
+    }
+
+    fn keep(&mut self, change: impl FnOnce(&mut Ledger)) {
+        if let Some(ledger) = &self.ledger {
+            change(&mut lock_ledger(ledger));
+        }
+        self.pulse(false);
     }
 
     fn emit<P: Serialize + Clone>(&self, event: &str, payload: P) {
@@ -119,6 +166,7 @@ impl Progress for EventProgress {
     }
 
     fn planned(&mut self, files: &[tungstate_transfer::Planned]) {
+        self.keep(|l| l.planned(files.iter().map(|f| (f.path.display().to_string(), f.size))));
         self.emit(
             "planned",
             files
@@ -136,6 +184,7 @@ impl Progress for EventProgress {
     }
 
     fn checking(&mut self, path: &Path, done: u64, total: u64) {
+        self.keep(|l| l.checking(&path.display().to_string(), done, total));
         self.emit(
             "checking",
             AdvancedEvent {
@@ -147,6 +196,7 @@ impl Progress for EventProgress {
     }
 
     fn advanced(&mut self, path: &Path, done: u64, total: u64) {
+        self.keep(|l| l.advanced(&path.display().to_string(), done, total));
         self.emit(
             "advanced",
             AdvancedEvent {
@@ -158,6 +208,7 @@ impl Progress for EventProgress {
     }
 
     fn starting(&mut self, path: &Path, size: u64) {
+        self.keep(|l| l.starting(&path.display().to_string(), size));
         self.emit(
             "started",
             StartedEvent {
@@ -178,6 +229,10 @@ impl Progress for EventProgress {
                 "already-present",
                 Some("both copies read and compared; the original here was kept"),
             ),
+            FileOutcome::Carried => (
+                "already-present",
+                Some("sent and checked earlier in this copy, before it was interrupted"),
+            ),
             FileOutcome::Quarantined => ("quarantined", None),
             FileOutcome::Failed => ("failed", None),
             FileOutcome::Skipped(SkipReason::RecentlyModified) => (
@@ -188,6 +243,7 @@ impl Progress for EventProgress {
                 ("skipped", Some("another file holds that name"))
             }
         };
+        self.keep(|l| l.finished(&path.display().to_string(), outcome, detail));
         self.emit(
             "finished",
             FinishedEvent {
@@ -197,6 +253,14 @@ impl Progress for EventProgress {
             },
         );
     }
+}
+
+/// A poisoned ledger only means a panic mid-update; what it holds is still the
+/// best account there is of the run.
+pub fn lock_ledger(ledger: &Mutex<Ledger>) -> std::sync::MutexGuard<'_, Ledger> {
+    ledger
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
 /// What the window sent back when asked about a conflict.

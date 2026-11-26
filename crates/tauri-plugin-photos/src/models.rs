@@ -162,3 +162,26 @@ pub struct StoredFile {
     pub size: u64,
     pub modified_ms: i64,
 }
+
+/// What the phone shows for a transfer kept going in the background: its
+/// notification on Android, its progress card on iPhone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Notice {
+    /// "Copying to Area51".
+    pub title: String,
+    /// How many of how many and the file in hand, or what it waits for.
+    pub text: String,
+    /// How far, in thousandths, so it fits a Java `int` whatever the size.
+    pub permille: u32,
+    /// Waiting for a connection to answer again; the bar shows no progress.
+    pub waiting: bool,
+}
+
+/// The phone's answer to a progress update.
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+pub struct NoticeAnswer {
+    /// Stop was pressed on the notification (or iOS ended the time it gave).
+    #[serde(default)]
+    pub stop: bool,
+}

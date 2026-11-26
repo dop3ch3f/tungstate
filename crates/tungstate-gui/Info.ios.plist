@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Merged into the generated Info.plist by the Tauri CLI. A transfer the
+	     person started keeps going after they leave the app as an iOS 26
+	     continued processing task, one identifier per run under this prefix
+	     (tauri-plugin-photos/ios/Sources/PhotosPlugin.swift). -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.ifeanyiibekie.tungstate.transfer.*</string>
+	</array>
+</dict>
+</plist>

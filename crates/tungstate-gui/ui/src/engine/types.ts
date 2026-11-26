@@ -428,6 +428,9 @@ export interface Summary {
   pruned: number;
   cancelled: boolean;
   destination_lost: boolean;
+  /** The far side stopped answering rather than turned out to be other
+   *  storage. Always with `destination_lost`. Absent from older engines. */
+  unreachable?: boolean;
   failures: Failure[];
 }
 
@@ -449,7 +452,25 @@ export interface InterruptedRun {
   files: number;
   bytes: number;
   names: string[];
+  /** A Move rather than a Copy. */
+  removes_originals: boolean;
 }
+
+/** A file in the engine's own copy of the running transfer's ledger. */
+export interface LedgerRow { path: string; size: number; state: string; detail: string | null; done: number; checked: number }
+
+/** What a window shown again asks for (`transfer_ledger`): the running
+ *  transfer's files, whether it is waiting, and how the last one ended. */
+export interface LedgerView {
+  job: number | null;
+  rows: LedgerRow[];
+  /** Waiting for a connection to answer since then (ms since the epoch). */
+  waiting: number | null;
+  ended: { job: number; rows: LedgerRow[]; summary: Summary | null; problem: string | null } | null;
+}
+
+/** A transfer waiting for a connection to answer, or (`since: null`) done waiting. */
+export interface Waiting { job: number; since: number | null }
 
 // --- connections ---------------------------------------------------------
 

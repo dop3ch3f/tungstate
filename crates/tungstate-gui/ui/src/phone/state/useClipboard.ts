@@ -46,6 +46,8 @@ export interface Started {
   to: string;
   destination: string;
   paths: string[];
+  /** Picked up again from Files home after it stopped part-way. */
+  resumed?: boolean;
 }
 
 function hold(next: Clip) {
@@ -83,6 +85,12 @@ async function again(paths: string[]) {
   started.value = { ...was, job: accepted.job, paths };
 }
 
+/** Follow a transfer that did not start from the clipboard: a stopped one
+ *  picked up again from Files home. */
+function follow(run: Started) {
+  started.value = run;
+}
+
 export function useClipboard() {
-  return { clip, started, held: computed(() => clip.value !== null), hold, drop, paste, again, done: () => (started.value = null) };
+  return { clip, started, held: computed(() => clip.value !== null), hold, drop, paste, again, follow, done: () => (started.value = null) };
 }

@@ -21,4 +21,27 @@
     <uses-permission android:name="android.permission.CHANGE_WIFI_MULTICAST_STATE" />
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <!-- Keeping a transfer the person started going with the screen off or
+         the app in the background, and showing it in the shade: a
+         user-initiated data transfer job on Android 14 and later, a
+         data-sync foreground service before that. -->
+    <uses-permission android:name="android.permission.RUN_USER_INITIATED_JOBS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <application>
+        <service
+            android:name="com.ifeanyiibekie.tungstate.photos.TransferJobService"
+            android:permission="android.permission.BIND_JOB_SERVICE"
+            android:exported="false" />
+        <service
+            android:name="com.ifeanyiibekie.tungstate.photos.TransferService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
+        <receiver
+            android:name="com.ifeanyiibekie.tungstate.photos.StopReceiver"
+            android:exported="false" />
+    </application>
 </manifest>

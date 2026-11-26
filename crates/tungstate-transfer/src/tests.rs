@@ -849,6 +849,10 @@ fn a_destination_that_changes_underneath_us_stops_the_drain() {
 
     assert!(summary.destination_lost, "the change must be noticed");
     assert!(
+        !summary.unreachable,
+        "other storage is not silence, and must never be waited for"
+    );
+    assert!(
         summary.transferred <= 1,
         "at most the file already in flight, got {}",
         summary.transferred
@@ -2721,5 +2725,518 @@ fn a_file_can_be_landed_under_another_name() {
         landed.iter().any(|op| op.destination.as_ref().unwrap().path
             == Path::new(".tungstate-quarantine/clip (nas).mp4")),
         "the journal says where it went"
+    );
+}
+
+/// A destination that stops answering after the first file: a phone's Wi-Fi
+/// dropping, or a NAS going to sleep. It is not somewhere else, just silent.
+struct SilentBackend {
+    inner: Box<dyn Backend>,
+    calls: std::sync::atomic::AtomicU64,
+    /// Root checks answered before the silence.
+    after: u64,
+}
+
+impl Backend for SilentBackend {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.inner.capabilities()
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        if self
+            .calls
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            < self.after
+        {
+            self.inner.root_token()
+        } else {
+            // What the SMB, SFTP and OpenDAL backends answer when the
+            // network has gone.
+            Err(tungstate_backend::BackendError::RootUnreachable(
+                PathBuf::from("nas"),
+            ))
+        }
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.inner.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.inner.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.inner.open_read(path)
+    }
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
+        self.inner.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_destination_that_stops_answering_is_lost_and_marked_unreachable() {
+    // The phone's case: nothing says the NAS changed, it just went quiet, so
+    // the caller may wait for it. The originals stay all the same.
+    let rig = Rig::with(SourcePolicy::Delete, VerifyLevel::Hash, Order::Discovered);
+    for name in ["a.mp4", "b.mp4", "c.mp4", "d.mp4"] {
+        rig.write_source(name, b"irreplaceable footage");
+    }
+    let silent = SilentBackend {
+        inner: Box::new(LocalBackend::new(rig.dest_dir.path().to_path_buf())),
+        calls: std::sync::atomic::AtomicU64::new(0),
+        // The anchor and the first file's check.
+        after: 2,
+    };
+    let summary = rig.run_over(&silent).unwrap();
+
+    assert!(
+        summary.unreachable,
+        "silence must be reported as unreachable"
+    );
+    assert!(
+        summary.destination_lost,
+        "it still stops, for callers that know nothing of waiting"
+    );
+    let left = std::fs::read_dir(rig.source_dir.path()).unwrap().count();
+    assert!(
+        left >= 3,
+        "originals must survive a destination that went quiet, {left} left"
+    );
+}
+
+/// Remembers each file's outcome, to tell a carried file from a compared one.
+#[derive(Default)]
+struct Outcomes(Vec<(PathBuf, FileOutcome)>);
+
+impl Progress for Outcomes {
+    fn starting(&mut self, _path: &Path, _size: u64) {}
+    fn finished(&mut self, path: &Path, outcome: FileOutcome) {
+        self.0.push((path.to_path_buf(), outcome));
+    }
+}
+
+/// Runs `link` over the rig's two folders, returning each file's outcome.
+fn run_link(rig: &Rig, link: &Link) -> (Summary, Vec<(PathBuf, FileOutcome)>) {
+    let mut progress = Outcomes::default();
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let summary = Transfer::new(
+        link,
+        &rig.source,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .run()
+    .unwrap();
+    (summary, progress.0)
+}
+
+/// A one-off copy, as the phone's Copy here makes one.
+fn one_off_copy(rig: &Rig, name: &str, saved: bool) -> Link {
+    rig.journal
+        .create_link(&NewLink {
+            name: name.to_string(),
+            source_policy: SourcePolicy::Keep,
+            saved,
+            ..rig_link(rig)
+        })
+        .unwrap();
+    rig.journal.link_by_name(name).unwrap()
+}
+
+fn outcome_of(outcomes: &[(PathBuf, FileOutcome)], name: &str) -> FileOutcome {
+    outcomes
+        .iter()
+        .find(|(p, _)| p == Path::new(name))
+        .map(|(_, o)| *o)
+        .unwrap()
+}
+
+#[test]
+fn a_resumed_one_off_copy_does_not_read_again_what_it_carried() {
+    let rig = Rig::new(SourcePolicy::Keep);
+    rig.write_source("a.jpg", b"first photo");
+    rig.write_source("b.jpg", b"second photo");
+    let link = one_off_copy(&rig, "browser-1-0", false);
+    run_link(&rig, &link);
+
+    // Interrupted before the third: run the same copy again.
+    rig.write_source("c.jpg", b"third photo");
+    let (summary, outcomes) = run_link(&rig, &link);
+
+    assert_eq!(outcome_of(&outcomes, "a.jpg"), FileOutcome::Carried);
+    assert_eq!(outcome_of(&outcomes, "b.jpg"), FileOutcome::Carried);
+    assert_eq!(outcome_of(&outcomes, "c.jpg"), FileOutcome::Transferred);
+    assert_eq!(summary.already_present, 2);
+    assert_eq!(summary.transferred, 1);
+}
+
+#[test]
+fn a_carried_file_whose_copy_changed_size_is_sent_again() {
+    let rig = Rig::new(SourcePolicy::Keep);
+    rig.write_source("a.jpg", b"first photo");
+    let link = one_off_copy(&rig, "browser-2-0", false);
+    run_link(&rig, &link);
+    // Someone cut the copy short on the server meanwhile.
+    std::fs::write(rig.dest("a.jpg"), b"first").unwrap();
+
+    let (_, outcomes) = run_link(&rig, &link);
+
+    assert_ne!(
+        outcome_of(&outcomes, "a.jpg"),
+        FileOutcome::Carried,
+        "a copy that changed must not be trusted"
+    );
+}
+
+#[test]
+fn a_saved_link_still_compares_what_an_earlier_run_carried() {
+    // A saved link runs again days later; the same size is no proof then.
+    let rig = Rig::new(SourcePolicy::Keep);
+    rig.write_source("a.jpg", b"first photo");
+    let link = one_off_copy(&rig, "nightly", true);
+    run_link(&rig, &link);
+
+    let (_, outcomes) = run_link(&rig, &link);
+
+    assert_eq!(
+        outcome_of(&outcomes, "a.jpg"),
+        FileOutcome::AlreadyPresent(Original::Kept)
+    );
+}
+
+/// A source that fails every read after the first file and then stops
+/// answering: a copy down from a NAS when the phone's Wi-Fi drops.
+struct DroppingSource {
+    inner: LocalBackend,
+    reads: std::sync::atomic::AtomicU64,
+}
+
+impl Backend for DroppingSource {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.inner.capabilities()
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        if self.reads.load(std::sync::atomic::Ordering::Relaxed) > 1 {
+            Err(tungstate_backend::BackendError::RootUnreachable(
+                PathBuf::from("nas"),
+            ))
+        } else {
+            self.inner.root_token()
+        }
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.inner.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.inner.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        // Every read is counted, the check's read-back included.
+        if self
+            .reads
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            > 1
+        {
+            return Err(tungstate_backend::BackendError::RootUnreachable(
+                PathBuf::from("nas"),
+            ));
+        }
+        self.inner.open_read(path)
+    }
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
+        self.inner.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_source_that_stops_answering_waits_rather_than_failing_every_file() {
+    let rig = Rig::with(SourcePolicy::Keep, VerifyLevel::Hash, Order::Discovered);
+    for name in ["a.mp4", "b.mp4", "c.mp4", "d.mp4"] {
+        rig.write_source(name, b"footage on the nas");
+    }
+    let dropping = DroppingSource {
+        inner: LocalBackend::new(rig.source_dir.path().to_path_buf()),
+        reads: std::sync::atomic::AtomicU64::new(0),
+    };
+    let mut progress = SilentProgress;
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let summary = Transfer::new(
+        &rig.link,
+        &dropping,
+        &rig.destination,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .parallel(1)
+    .run()
+    .unwrap();
+
+    assert!(
+        summary.unreachable,
+        "a silent source must be noticed as silence"
+    );
+    assert_eq!(
+        summary.failed, 0,
+        "files are not at fault for the Wi-Fi, got {:?}",
+        summary.failures
+    );
+}
+
+/// A destination that refuses the first file as "too many connections",
+/// which halves the run's width and parks the upper workers, then stops
+/// answering altogether.
+struct CrowdedThenSilent {
+    inner: LocalBackend,
+    checks: std::sync::atomic::AtomicU64,
+    refused: std::sync::atomic::AtomicBool,
+}
+
+impl Backend for CrowdedThenSilent {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.inner.capabilities()
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        // Long enough for the refusal to narrow the run and park a worker.
+        if self
+            .checks
+            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+            < 12
+        {
+            self.inner.root_token()
+        } else {
+            Err(tungstate_backend::BackendError::RootUnreachable(
+                PathBuf::from("nas"),
+            ))
+        }
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.inner.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.inner.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.inner.open_read(path)
+    }
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
+        if !self.refused.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            return Err(tungstate_backend::BackendError::Remote {
+                endpoint: "nas".to_string(),
+                operation: "write",
+                source: "too many connections".into(),
+            });
+        }
+        // Slow enough that the other workers are mid-file when it narrows.
+        std::thread::sleep(Duration::from_millis(20));
+        self.inner.create_write(path)
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_narrowed_run_whose_destination_goes_quiet_still_ends() {
+    // Found on the emulator: the run had narrowed, a worker was parked for
+    // room, the others left on finding the NAS gone, and nothing woke the
+    // parked one. The transfer showed 60% for ever. A hang cannot fail a
+    // test on its own, so a watchdog does.
+    let done = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let watching = std::sync::Arc::clone(&done);
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_secs(30));
+        if !watching.load(std::sync::atomic::Ordering::SeqCst) {
+            eprintln!("a narrowed run with a silent destination never ended");
+            std::process::exit(1);
+        }
+    });
+
+    let rig = Rig::with(SourcePolicy::Keep, VerifyLevel::Hash, Order::Discovered);
+    for i in 0..40 {
+        rig.write_source(&format!("f{i:02}.jpg"), b"contents");
+    }
+    let crowded = CrowdedThenSilent {
+        inner: LocalBackend::new(rig.dest_dir.path().to_path_buf()),
+        checks: std::sync::atomic::AtomicU64::new(0),
+        refused: std::sync::atomic::AtomicBool::new(false),
+    };
+    let mut resolver = FixedResolver(ConflictAction::Quarantine);
+    let mut progress = SilentProgress;
+    let summary = Transfer::new(
+        &rig.link,
+        &rig.source,
+        &crowded,
+        &rig.journal,
+        &mut resolver,
+        &mut progress,
+    )
+    .parallel(4)
+    .run()
+    .unwrap();
+    done.store(true, std::sync::atomic::Ordering::SeqCst);
+
+    assert!(summary.unreachable);
+}
+
+/// A writer whose connection drops part-way through the file.
+struct DroppingWriter {
+    inner: Box<dyn WriteFinish>,
+    left: usize,
+    gone: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl std::io::Write for DroppingWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.left == 0 {
+            self.gone.store(true, std::sync::atomic::Ordering::SeqCst);
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::ConnectionReset,
+                "the network went",
+            ));
+        }
+        let n = buf.len().min(self.left);
+        self.left -= n;
+        self.inner.write(&buf[..n])
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
+}
+
+impl WriteFinish for DroppingWriter {
+    fn finish(self: Box<Self>) -> tungstate_backend::Result<()> {
+        self.inner.finish()
+    }
+}
+
+/// A destination whose network goes mid-write and stays gone.
+struct DroppingDestination {
+    inner: LocalBackend,
+    gone: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Backend for DroppingDestination {
+    fn capabilities(&self) -> tungstate_backend::Capabilities {
+        self.inner.capabilities()
+    }
+    fn root_token(&self) -> tungstate_backend::Result<tungstate_backend::RootToken> {
+        if self.gone.load(std::sync::atomic::Ordering::SeqCst) {
+            Err(tungstate_backend::BackendError::RootUnreachable(
+                PathBuf::from("nas"),
+            ))
+        } else {
+            self.inner.root_token()
+        }
+    }
+    fn stat(&self, path: &Path) -> tungstate_backend::Result<tungstate_backend::Meta> {
+        self.inner.stat(path)
+    }
+    fn read_dir(&self, path: &Path) -> tungstate_backend::Result<Vec<tungstate_backend::Entry>> {
+        self.inner.read_dir(path)
+    }
+    fn open_read(&self, path: &Path) -> tungstate_backend::Result<Box<dyn std::io::Read + Send>> {
+        self.inner.open_read(path)
+    }
+    fn create_write(&self, path: &Path) -> tungstate_backend::Result<Box<dyn WriteFinish>> {
+        Ok(Box::new(DroppingWriter {
+            inner: self.inner.create_write(path)?,
+            left: 4,
+            gone: std::sync::Arc::clone(&self.gone),
+        }))
+    }
+    fn rename(&self, from: &Path, to: &Path) -> tungstate_backend::Result<()> {
+        self.inner.rename(from, to)
+    }
+    fn remove_file(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_file(path)
+    }
+    fn remove_dir(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.remove_dir(path)
+    }
+    fn create_dir_all(&self, path: &Path) -> tungstate_backend::Result<()> {
+        self.inner.create_dir_all(path)
+    }
+}
+
+#[test]
+fn a_file_cut_off_by_the_network_is_left_to_resume_and_its_partial_cleared() {
+    let rig = Rig::with(SourcePolicy::Keep, VerifyLevel::Hash, Order::Discovered);
+    rig.write_source("a.jpg", b"a photo cut off part-way");
+    let dropping = DroppingDestination {
+        inner: LocalBackend::new(rig.dest_dir.path().to_path_buf()),
+        gone: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+    };
+    let first = rig.run_over(&dropping).unwrap();
+
+    assert!(first.unreachable);
+    assert_eq!(first.failed, 0, "the network is not the file's fault");
+    let partials = || {
+        std::fs::read_dir(rig.dest_dir.path())
+            .unwrap()
+            .filter(|e| {
+                e.as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .contains("tungstate")
+            })
+            .count()
+    };
+    assert_eq!(
+        partials(),
+        1,
+        "the half-written copy is there until the next run"
+    );
+    assert_eq!(
+        rig.journal.interrupted().unwrap().len(),
+        1,
+        "and Resume is offered for it"
+    );
+
+    // The network is back: the same link again.
+    let second = rig.run().unwrap();
+
+    assert_eq!(second.transferred, 1);
+    assert_eq!(
+        partials(),
+        0,
+        "the partial must be cleared, not left at the far side"
+    );
+    assert_eq!(
+        std::fs::read(rig.dest("a.jpg")).unwrap(),
+        b"a photo cut off part-way"
     );
 }

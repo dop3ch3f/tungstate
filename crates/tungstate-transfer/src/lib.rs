@@ -151,6 +151,10 @@ pub enum FileOutcome {
     Quarantined,
     /// Could not be transferred. The original was left untouched.
     Failed,
+    /// Sent and verified earlier in this same one-off copy, before it was
+    /// interrupted, and still the same size there. Not read again: resuming
+    /// 200 photos after a Wi-Fi drop should not mean reading them all back.
+    Carried,
 }
 
 /// What happened to the copy on this machine when the destination already
@@ -186,7 +190,9 @@ pub enum SkipReason {
 pub struct Summary {
     /// Files copied and verified.
     pub transferred: u64,
-    /// Files already at the destination with identical content.
+    /// Files already at the destination with identical content, including
+    /// those a resumed one-off copy had already carried
+    /// ([`FileOutcome::Carried`]).
     pub already_present: u64,
     /// Files deliberately left alone.
     pub skipped: u64,
@@ -206,6 +212,14 @@ pub struct Summary {
     pub cancelled: bool,
     /// The run stopped because the destination stopped being the destination.
     pub destination_lost: bool,
+    /// Why `destination_lost` is set, when an end stopped answering rather
+    /// than turned out to be other storage: a phone's Wi-Fi dropping, a NAS
+    /// asleep. The source too, for a copy down from a connection. Always alongside `destination_lost`, so a caller that
+    /// knows nothing of it still stops. One that does may wait for a
+    /// *connection* to come back as the same server and run the link again.
+    /// A local root that vanished is the unmounted-volume case and must not
+    /// be waited for: its mount point comes back as an empty boot-disk folder.
+    pub unreachable: bool,
 }
 
 /// One file the run intends to deal with, in the order it will be taken.
@@ -598,6 +612,11 @@ impl<'a> Transfer<'a> {
         anchor: &tungstate_backend::RootToken,
     ) {
         loop {
+            // Another worker found an end gone; every file after this would
+            // fail the same way, and each would be reported as its own fault.
+            if lock(shared).destination_lost {
+                return;
+            }
             if self.cancelled() {
                 tracing::info!("stopping at the user's request");
                 lock(shared).cancelled = true;
@@ -614,7 +633,11 @@ impl<'a> Transfer<'a> {
             // Park rather than return when the run has narrowed. A returned
             // thread cannot be recalled, which would make the limit one-way
             // and a measurement that guessed wrong permanent.
-            let empty = || lock(queue).is_empty() || self.cancelled();
+            // A lost end is over too: the workers that found it have gone,
+            // and a parked one waiting for room they will never free would
+            // hold the whole run open for ever.
+            let empty =
+                || lock(queue).is_empty() || self.cancelled() || lock(shared).destination_lost;
             if !governor.wait_for_room(index, &empty) {
                 tracing::debug!(index, "standing down; nothing left to take");
                 return;
@@ -625,9 +648,18 @@ impl<'a> Transfer<'a> {
             // whatever now sits at that path, then have its original deleted.
             match self.destination.root_token() {
                 Ok(token) if token == *anchor => {}
-                _ => {
+                Ok(_) => {
                     tracing::error!("destination is no longer the storage we started with");
                     lock(shared).destination_lost = true;
+                    return;
+                }
+                // Lost all the same, but marked as silence: a caller may wait
+                // for a connection to answer again as the same server.
+                Err(error) => {
+                    tracing::warn!(%error, "destination stopped answering");
+                    let mut summary = lock(shared);
+                    summary.destination_lost = true;
+                    summary.unreachable = true;
                     return;
                 }
             }
@@ -648,12 +680,33 @@ impl<'a> Transfer<'a> {
                     lock(shared).cancelled = true;
                     return;
                 }
+                // An end went quiet mid-file; the file stays open to be sent
+                // again (`copy_to`).
+                Err(TransferError::DestinationLost) => {
+                    tracing::warn!(path = %file.path.display(), "an end stopped answering mid-file");
+                    let mut summary = lock(shared);
+                    summary.destination_lost = true;
+                    summary.unreachable = true;
+                    return;
+                }
                 Err(error) => {
                     // The far side saying "not so many at once" is not this
                     // file's fault, and the answer is fewer workers rather
                     // than fewer files.
                     if governor::is_overload(&error) {
                         governor.rebuff();
+                    }
+                    // Wi-Fi dropping mid-file fails the file, but it is no
+                    // more this file's fault than the next one's. Asked only
+                    // after a failure, so a healthy run pays nothing for it.
+                    // Not counted as failed: its original is untouched and a
+                    // run of the same link sends it again.
+                    if self.an_end_is_silent() {
+                        tracing::warn!(path = %file.path.display(), %error, "an end stopped answering mid-file");
+                        let mut summary = lock(shared);
+                        summary.destination_lost = true;
+                        summary.unreachable = true;
+                        return;
                     }
                     tracing::warn!(path = %file.path.display(), %error, "transfer failed");
                     let mut summary = lock(shared);
@@ -673,13 +726,21 @@ impl<'a> Transfer<'a> {
                     summary.transferred += 1;
                     summary.bytes += file.size;
                 }
-                FileOutcome::AlreadyPresent(_) => summary.already_present += 1,
+                FileOutcome::AlreadyPresent(_) | FileOutcome::Carried => {
+                    summary.already_present += 1;
+                }
                 FileOutcome::Skipped(_) => summary.skipped += 1,
                 FileOutcome::Quarantined => summary.quarantined += 1,
                 // Already counted above; the source was left untouched.
                 FileOutcome::Failed => {}
             }
         }
+    }
+
+    /// Whether either end has stopped answering. Asked only after a failure,
+    /// so a healthy run pays nothing for it.
+    fn an_end_is_silent(&self) -> bool {
+        self.source.root_token().is_err() || self.destination.root_token().is_err()
     }
 
     /// Whether the run should stop before picking up another file.
@@ -782,6 +843,7 @@ impl<'a> Transfer<'a> {
         let recovered = self.recover()?;
 
         walk::sort(&mut files, self.link.order);
+        let carried = self.carried_already(&files)?;
 
         // Claim every destination the plan will occupy, so a rename cannot
         // choose a name that a file still waiting is going to need.
@@ -824,8 +886,21 @@ impl<'a> Transfer<'a> {
                 .collect::<Vec<_>>(),
         );
 
+        // Reported in the plan's order, then left out of the work: the window
+        // shows them done rather than waiting for a turn that never comes.
+        if !carried.is_empty() {
+            let mut progress = lock(&self.progress);
+            for file in files.iter().filter(|f| carried.contains(&f.path)) {
+                progress.starting(&file.path, file.size);
+                progress.finished(&file.path, FileOutcome::Carried);
+            }
+        }
+        let already_present = carried.len() as u64;
+        files.retain(|f| !carried.contains(&f.path));
+
         let queue = Mutex::new(std::collections::VecDeque::from(files));
         let shared = Mutex::new(Summary {
+            already_present,
             recovered,
             ..Summary::default()
         });
@@ -855,6 +930,67 @@ impl<'a> Transfer<'a> {
         }
 
         Ok(summary)
+    }
+
+    /// The files this one-off copy already sent and verified before it was
+    /// interrupted, which a resumed run need not read again.
+    ///
+    /// Only a one-off copy: a saved link runs again days later, when the same
+    /// size is no proof of the same content, and a Move's committed files are
+    /// gone from the source already. A file counts only if the journal holds
+    /// a committed transfer of it for this link at this size and the copy
+    /// there is still that size.
+    fn carried_already(&self, files: &[walk::File]) -> Result<std::collections::HashSet<PathBuf>> {
+        use std::collections::{HashMap, HashSet};
+
+        if self.link.saved || self.link.source_policy != SourcePolicy::Keep {
+            return Ok(HashSet::new());
+        }
+        let landed: HashMap<PathBuf, u64> = self
+            .journal
+            .landed(self.link.id, 0)?
+            .into_iter()
+            .filter_map(|op| Some((op.source?.path, op.size?)))
+            .collect();
+        let candidates: Vec<&walk::File> = files
+            .iter()
+            .filter(|f| landed.get(&f.path) == Some(&f.size))
+            .collect();
+        if candidates.is_empty() {
+            return Ok(HashSet::new());
+        }
+
+        // One listing per folder rather than one question per file: on a
+        // phone's Wi-Fi a round trip each made resuming 40 photos take a
+        // minute before the first byte moved.
+        let mut there: HashMap<PathBuf, u64> = HashMap::new();
+        let folders: HashSet<PathBuf> = candidates
+            .iter()
+            .map(|f| {
+                self.landing_of(&f.path)
+                    .parent()
+                    .map(Path::to_path_buf)
+                    .unwrap_or_default()
+            })
+            .collect();
+        for folder in folders {
+            // A folder that cannot be listed carries nothing: its files are
+            // compared the slow, sure way.
+            let Ok(entries) = self.destination.read_dir(&folder) else {
+                continue;
+            };
+            there.extend(
+                entries
+                    .into_iter()
+                    .filter(|e| !e.meta.is_dir)
+                    .map(|e| (e.path, e.meta.len)),
+            );
+        }
+        Ok(candidates
+            .into_iter()
+            .filter(|f| there.get(&self.landing_of(&f.path)) == Some(&f.size))
+            .map(|f| f.path.clone())
+            .collect())
     }
 
     /// Clean up after an interrupted run, returning how many operations were found.
@@ -1046,6 +1182,12 @@ impl<'a> Transfer<'a> {
             // abandoned file in front of the user with Resume and Clean up
             // beside it. Marking it Failed would hide it.
             Err(TransferError::Stopped { .. }) => {}
+            // Left `Intended` too when an end went quiet mid-file (the
+            // phone's Wi-Fi dropping): not this file's fault, and as an open
+            // operation its half-written copy is cleared by the next run of
+            // this link, after waiting or on Resume. Marked Failed it would
+            // sit at the far side for good.
+            Err(_) if self.an_end_is_silent() => return Err(TransferError::DestinationLost),
             Err(error) => {
                 self.journal.finish(
                     op,

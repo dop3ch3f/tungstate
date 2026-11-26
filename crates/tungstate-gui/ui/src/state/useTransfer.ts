@@ -14,7 +14,7 @@ import { transferEvents, type UnlistenFn } from "../engine/events";
 import { ordinal } from "../lib/format";
 import { useBusy } from "./useBusy";
 import type {
-  Accepted, Began, ConflictAsk, IdenticalAsk, InterruptedRun, JobView, QueueView, Summary,
+  Accepted, Began, ConflictAsk, IdenticalAsk, InterruptedRun, JobView, LedgerView, QueueView, Summary,
 } from "../engine/types";
 
 /** One file in the ledger. `state` is an engine string; never bind it to a
@@ -57,6 +57,9 @@ const identical = shallowRef<IdenticalAsk | null>(null);
 const stranded = shallowRef<InterruptedRun[]>([]);
 const stopping = ref(false);
 const halting = ref(false);
+/** Since when the running transfer has waited for a connection to answer
+ *  (ms since the epoch); null while it is moving. */
+const waitingSince = ref<number | null>(null);
 /** A command that failed. A transfer that fails says so in its own row. */
 const problem = ref<string | null>(null);
 /** Which tab Transfer opens on next, for a caller elsewhere that started
@@ -99,6 +102,7 @@ const find = (path: string, ...states: string[]) => {
 
 function beginLedger(job: JobView | null) {
   current.value = job;
+  waitingSince.value = null;
   byPath.clear();
   rows.value = [];
   live.value = null;
@@ -204,12 +208,57 @@ export async function attachTransferStream() {
       await transferEvents.identical((e) => (identical.value = e)),
       await transferEvents.done(({ job, ...summary }) => settle(job, summary, null)),
       await transferEvents.error(({ job, message }) => settle(job, null, message)),
+      await transferEvents.waiting(({ job, since }) => {
+        if (current.value?.id === job) waitingSince.value = since;
+      }),
     );
     queue.value = await transfers.queue();
   } catch (e) {
     deaf.value =
       "This window cannot receive progress from the engine, so transfers will " +
       `run without showing here: ${String(e)}`;
+  }
+}
+
+/** Lays the engine's rows over the window's ledger, as if every event since
+ *  had been heard. */
+function adopt(fresh: Row[]) {
+  byPath.clear();
+  const copies = fresh.map((r) => ({ ...r }));
+  copies.forEach(add);
+  rows.value = copies;
+}
+
+/**
+ * Catches up after a phone paused this window in the background, where the
+ * engine's events can go unseen: takes the engine's own account of the
+ * running transfer, or of how the one the window was showing ended.
+ */
+export async function catchUp() {
+  let view: LedgerView;
+  try {
+    const [q, l] = await Promise.all([transfers.queue(), transfers.ledger()]);
+    queue.value = q;
+    view = l;
+  } catch {
+    // An older engine, or none: the events alone will have to do.
+    return;
+  }
+  if (view.job !== null) {
+    if (current.value?.id !== view.job && queue.value.running?.id === view.job) beginLedger(queue.value.running);
+    if (current.value?.id !== view.job) return;
+    adopt(view.rows);
+    waitingSince.value = view.waiting;
+    return;
+  }
+  const ended = view.ended;
+  if (!ended || finished.value.some((r) => r.job.id === ended.job)) return;
+  // The window was on that transfer, or on none at all (shown again after it
+  // ended): either way, it ends here as the engine saw it end.
+  if (current.value === null || current.value.id === ended.job) {
+    if (current.value === null) current.value = queue.value.running?.id === ended.job ? queue.value.running : null;
+    adopt(ended.rows);
+    settle(ended.job, ended.summary, ended.problem);
   }
 }
 
@@ -237,14 +286,19 @@ function accepted(a: Accepted) {
 // says otherwise, and a second click in that time would act twice.
 const doing = useBusy();
 
+/** Picks a stopped run up. Answers what the engine accepted, so a caller can
+ *  follow it; nothing when it could not start. */
 const resume = (link: string) =>
   doing.run(link, async () => {
+    let got: Accepted | undefined;
     try {
-      accepted(await transfers.resume(link));
+      got = await transfers.resume(link);
+      accepted(got);
     } catch (e) {
       problem.value = String(e);
     }
     await refreshStranded();
+    return got;
   });
 
 const discard = (link: string) =>
@@ -277,8 +331,9 @@ const running = computed(() => current.value !== null || queue.value.running !==
 
 export function useTransfer() {
   return {
+    catchUp,
     queue, current, rows, live, shape, atOnce, finished, placed, conflict, identical,
-    stranded, stopping, halting, problem, deaf, cleaned, openOn,
+    stranded, stopping, halting, problem, deaf, cleaned, openOn, waitingSince,
     /** A stopped run being picked up or cleaned up. */
     settling: (link: string) => doing.busy(link),
     /** A queued transfer being taken out. */

@@ -7,8 +7,8 @@ use tauri::{
 };
 
 use crate::{
-    Access, Asset, Categories, Category, CategoryArgs, Filter, Insets, Order, PathsArgs, Removed,
-    Result, StoredFile, Summary,
+    Access, Asset, Categories, Category, CategoryArgs, Filter, Insets, Notice, NoticeAnswer, Order,
+    PathsArgs, Removed, Result, StoredFile, Summary,
 };
 
 #[cfg(target_os = "ios")]
@@ -226,6 +226,48 @@ impl<R: Runtime> Photos<R> {
     /// The phone's code failed.
     pub fn keep_awake(&self, on: bool) -> Result<()> {
         self.0.run_mobile_plugin::<()>("keepAwake", Awake { on })?;
+        Ok(())
+    }
+
+    /// A transfer the person started has begun: keep the app running with
+    /// the screen off or in the background (Android's user-initiated data
+    /// transfer job, iOS's continued processing task), and show `notice`.
+    ///
+    /// # Errors
+    /// The phone's code failed. The transfer runs regardless.
+    pub fn run_began(&self, notice: &Notice) -> Result<()> {
+        self.0.run_mobile_plugin::<()>("runBegan", notice)?;
+        Ok(())
+    }
+
+    /// Updates what the notification shows, and answers whether Stop was
+    /// pressed there since the last update.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn run_progress(&self, notice: &Notice) -> Result<bool> {
+        Ok(self
+            .0
+            .run_mobile_plugin::<NoticeAnswer>("runProgress", notice)?
+            .stop)
+    }
+
+    /// The transfer is over: let the app be treated as any other again.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn run_ended(&self) -> Result<()> {
+        self.0.run_mobile_plugin::<()>("runEnded", ())?;
+        Ok(())
+    }
+
+    /// Asks to show notifications (Android 13 and later), so a transfer kept
+    /// going in the background can be seen and stopped from the shade.
+    ///
+    /// # Errors
+    /// The phone's code failed.
+    pub fn ask_notifications(&self) -> Result<()> {
+        self.0.run_mobile_plugin::<()>("askNotifications", ())?;
         Ok(())
     }
 }

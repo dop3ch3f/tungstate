@@ -29,6 +29,8 @@ use tungstate_journal::{
 };
 use tungstate_transfer::{FileOutcome, FixedResolver, Original, Progress, Stop, Transfer};
 
+use crate::keepalive::{Errand, Keepalive};
+use crate::ledger::Counts;
 use crate::{App, backend_for, cache_dir, describe, lock};
 
 /// Most bytes copied out of the library before they are sent. The cache a
@@ -530,11 +532,11 @@ pub(crate) fn free_up_start(start: Start, app: AppHandle) -> Result<(), String> 
     state.freeup.stop.clear();
     lock(&state.freeup.checked).clear();
 
+    crate::keepalive::ask_to_notify(&app);
     let worker = app.clone();
     std::thread::spawn(move || {
         let state = worker.state::<App>();
         let guard = Guard(worker.clone());
-        let _ = worker.photos().keep_awake(true);
         let ran = go(
             &worker,
             &state,
@@ -593,7 +595,28 @@ fn go(
         .checked_sub(TELL_EVERY)
         .unwrap_or_else(Instant::now);
     let emitter = app.clone();
+    // Keeps sending with the screen off or the app in the background, with
+    // the notification counting along; ends with this function.
+    let mut keep = Keepalive::begin(
+        app,
+        Arc::clone(&state.freeup.stop),
+        Errand {
+            title: format!("Freeing up space to {}", start.connection),
+            far_side: start.connection.clone(),
+        },
+    );
     let mut tell = move |tick: &Tick| {
+        keep.pulse(
+            &Counts {
+                files: tick.count,
+                settled: tick.done,
+                bytes: tick.bytes,
+                total: tick.total,
+                current: Some(tick.current.clone()),
+            },
+            false,
+            false,
+        );
         if last.elapsed() >= TELL_EVERY || tick.done == tick.count {
             last = Instant::now();
             let _ = emitter.emit("freeup://progress", tick);
@@ -615,7 +638,6 @@ struct Guard(AppHandle);
 
 impl Drop for Guard {
     fn drop(&mut self) {
-        let _ = self.0.photos().keep_awake(false);
         let state = self.0.state::<App>();
         let _gate = lock(&state.gate);
         state.freeup.running.store(false, Ordering::SeqCst);
