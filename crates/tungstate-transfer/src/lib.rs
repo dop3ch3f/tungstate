@@ -969,8 +969,7 @@ impl<'a> Transfer<'a> {
             .map(|f| {
                 self.landing_of(&f.path)
                     .parent()
-                    .map(Path::to_path_buf)
-                    .unwrap_or_default()
+                    .map_or_else(PathBuf::new, Path::to_path_buf)
             })
             .collect();
         for folder in folders {
