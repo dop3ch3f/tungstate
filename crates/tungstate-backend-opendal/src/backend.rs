@@ -464,9 +464,25 @@ impl Backend for OpendalBackend {
         // time — which is why the factory refuses a missing one up front.
         self.root_token()?;
         let key = self.directory(path)?;
-        let operator = self.operator.clone();
-        dispatch(async move { operator.create_dir(&key).await })
-            .map_err(|error| self.failure("create_dir", path, error))
+        // Two files going into new folders at once make the same parents at
+        // once, and a WebDAV server that locks a folder while it makes it
+        // (rclone answers 423) refuses the second. OpenDAL calls that
+        // temporary; it is, so it is asked again, briefly, before it counts.
+        let mut pause = std::time::Duration::from_millis(100);
+        let mut tries = 0;
+        loop {
+            let operator = self.operator.clone();
+            let key = key.clone();
+            match dispatch(async move { operator.create_dir(&key).await }) {
+                Ok(()) => return Ok(()),
+                Err(error) if error.is_temporary() && tries < 4 => {
+                    tries += 1;
+                    std::thread::sleep(pause);
+                    pause *= 2;
+                }
+                Err(error) => return Err(self.failure("create_dir", path, error)),
+            }
+        }
     }
 }
 
